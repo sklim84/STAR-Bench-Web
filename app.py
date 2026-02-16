@@ -9,6 +9,131 @@ st.set_page_config(
     layout="wide",
 )
 
+# ------------------------------------------------------------------
+# 다크 테마 커스텀 CSS
+# ------------------------------------------------------------------
+st.markdown("""
+<style>
+/* ── 전역 배경 ── */
+.stApp {
+    background-color: #0E1117;
+}
+
+/* ── 카드 컨테이너 ── */
+.dark-card {
+    background-color: #1A1F2E;
+    border: 1px solid #2A2F3E;
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 16px;
+}
+
+/* ── 메트릭 카드 ── */
+.metric-card {
+    background-color: #1A1F2E;
+    border: 1px solid #2A2F3E;
+    border-radius: 12px;
+    padding: 18px 22px;
+    text-align: left;
+}
+.metric-card .label {
+    color: #8B8FA3;
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 6px;
+}
+.metric-card .value {
+    color: #4ECDC4;
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+}
+.metric-card .value.white {
+    color: #E0E0E0;
+}
+.metric-card .sub {
+    color: #6B7080;
+    font-size: 12px;
+    margin-top: 4px;
+}
+
+/* ── 섹션 헤더 ── */
+.section-header {
+    color: #FFFFFF;
+    font-size: 18px;
+    font-weight: 700;
+    margin: 28px 0 16px 0;
+    padding-bottom: 0;
+}
+
+/* ── Streamlit 기본 metric 다크 스타일 ── */
+[data-testid="stMetric"] {
+    background-color: #1A1F2E;
+    border: 1px solid #2A2F3E;
+    border-radius: 12px;
+    padding: 18px 22px;
+}
+[data-testid="stMetricLabel"] {
+    color: #8B8FA3 !important;
+}
+[data-testid="stMetricValue"] {
+    color: #4ECDC4 !important;
+    font-weight: 700 !important;
+}
+
+/* ── 탭 스타일 ── */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 0px;
+    background-color: #1A1F2E;
+    border-radius: 10px;
+    padding: 4px;
+}
+.stTabs [data-baseweb="tab"] {
+    border-radius: 8px;
+    color: #8B8FA3;
+    font-weight: 500;
+    padding: 10px 20px;
+}
+.stTabs [aria-selected="true"] {
+    background-color: #2A2F3E !important;
+    color: #FFFFFF !important;
+}
+
+/* ── divider ── */
+.stDivider {
+    border-color: #2A2F3E !important;
+}
+hr {
+    border-color: #2A2F3E !important;
+}
+
+/* ── 테이블 ── */
+.dark-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 8px;
+}
+.dark-table th {
+    background-color: #1E2333;
+    color: #8B8FA3;
+    font-weight: 600;
+    font-size: 13px;
+    padding: 10px 16px;
+    text-align: left;
+    border-bottom: 1px solid #2A2F3E;
+}
+.dark-table td {
+    color: #E0E0E0;
+    font-size: 14px;
+    padding: 10px 16px;
+    border-bottom: 1px solid #1E2333;
+}
+.dark-table tr:hover td {
+    background-color: #1E2333;
+}
+</style>
+""", unsafe_allow_html=True)
+
 
 @st.cache_resource
 def init_database():
@@ -26,28 +151,36 @@ init_database()
 selected = option_menu(
     menu_title=None,
     options=["Home", "Dashboard", "Network", "Detection", "Agent"],
-    icons=["house", "bar-chart", "diagram-3", "robot", "chat-dots"],
+    icons=["house-fill", "bar-chart-fill", "diagram-3-fill", "robot", "chat-dots-fill"],
     default_index=0,
     orientation="horizontal",
     styles={
         "container": {
-            "padding": "0!important",
-            "background-color": "#F0F2F6",
+            "padding": "4px",
+            "background-color": "#1A1F2E",
+            "border-radius": "12px",
+            "border": "1px solid #2A2F3E",
+            "margin-bottom": "20px",
         },
         "icon": {
-            "color": "#4E79A7",
-            "font-size": "18px",
+            "color": "#8B8FA3",
+            "font-size": "16px",
         },
         "nav-link": {
-            "font-size": "16px",
+            "font-size": "15px",
+            "font-weight": "500",
             "text-align": "center",
-            "margin": "0px",
-            "padding": "10px 20px",
-            "--hover-color": "#E8EBF0",
+            "margin": "2px",
+            "padding": "10px 24px",
+            "color": "#8B8FA3",
+            "border-radius": "10px",
+            "--hover-color": "#252A3A",
         },
         "nav-link-selected": {
-            "background-color": "#4E79A7",
-            "color": "white",
+            "background-color": "#4ECDC4",
+            "color": "#0E1117",
+            "font-weight": "700",
+            "border-radius": "10px",
         },
     },
 )
@@ -56,13 +189,15 @@ selected = option_menu(
 # 선택된 메뉴에 따라 페이지 렌더링
 # ------------------------------------------------------------------
 if selected == "Home":
-    st.title("AML Assistant Platform")
-    st.markdown("에이전트를 활용하여 자금세탁의심거래를 분석하는 웹 서비스")
+    st.markdown('<p style="color:#FFFFFF; font-size:28px; font-weight:800; margin-bottom:4px;">'
+                'AML Assistant Platform</p>', unsafe_allow_html=True)
+    st.markdown('<p style="color:#6B7080; font-size:15px; margin-top:0;">'
+                '에이전트를 활용하여 자금세탁의심거래를 분석하는 웹 서비스</p>',
+                unsafe_allow_html=True)
 
-    st.divider()
+    st.markdown("---")
 
-    col1, col2, col3, col4 = st.columns(4)
-
+    # 요약 메트릭 카드
     summary = db.query("""
         SELECT
             count(*) as total,
@@ -71,26 +206,51 @@ if selected == "Home":
             count(DISTINCT 출금금융회사일련번호) + count(DISTINCT 입금금융회사일련번호) as banks
         FROM hofinet
     """)
+    row = summary.iloc[0]
 
-    col1.metric("총 거래 건수", f"{summary['total'].iloc[0]:,}")
-    col2.metric("이상거래 건수", f"{summary['fraud'].iloc[0]:,}")
-    col3.metric("출금 계좌 수", f"{summary['accounts'].iloc[0]:,}")
-    col4.metric("금융회사 수", f"{summary['banks'].iloc[0]:,}")
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.markdown(f"""<div class="metric-card">
+            <div class="label">총 거래 건수</div>
+            <div class="value">{int(row['total']):,}</div>
+        </div>""", unsafe_allow_html=True)
+    with c2:
+        st.markdown(f"""<div class="metric-card">
+            <div class="label">이상거래 건수</div>
+            <div class="value">{int(row['fraud']):,}</div>
+        </div>""", unsafe_allow_html=True)
+    with c3:
+        st.markdown(f"""<div class="metric-card">
+            <div class="label">출금 계좌 수</div>
+            <div class="value">{int(row['accounts']):,}</div>
+        </div>""", unsafe_allow_html=True)
+    with c4:
+        st.markdown(f"""<div class="metric-card">
+            <div class="label">금융회사 수</div>
+            <div class="value">{int(row['banks']):,}</div>
+        </div>""", unsafe_allow_html=True)
 
-    st.divider()
+    st.markdown("---")
 
+    # 기능 안내
+    st.markdown('<p class="section-header">기능 안내</p>', unsafe_allow_html=True)
     st.markdown("""
-    ### 기능 안내
+    <table class="dark-table">
+        <thead>
+            <tr><th>페이지</th><th>설명</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><strong>Dashboard</strong></td><td>대시보드 형태로 자금세탁의심거래들의 기본 분석 정보 출력</td></tr>
+            <tr><td><strong>Network</strong></td><td>대시보드 형태로 자금세탁의심거래들의 네트워크(그래프) 분석 정보 출력</td></tr>
+            <tr><td><strong>Detection</strong></td><td>AI 모델(부스팅 모델) 기반 자금세탁의심거래 학습 및 탐지(확률)</td></tr>
+            <tr><td><strong>Agent</strong></td><td>에이전트와 대화를 통해 자금세탁의심거래를 분석하고 STR 작성</td></tr>
+        </tbody>
+    </table>
+    """, unsafe_allow_html=True)
 
-    | 페이지 | 설명 |
-    |--------|------|
-    | **Dashboard** | 대시보드 형태로 자금세탁의심거래들의 기본 분석 정보 출력 |
-    | **Network** | 대시보드 형태로 자금세탁의심거래들의 네트워크(그래프) 분석 정보 출력 |
-    | **Detection** | AI 모델(부스팅 모델) 기반 자금세탁의심거래 학습 및 탐지(확률) |
-    | **Agent** | 에이전트와 대화를 통해 자금세탁의심거래를 분석하고 STR 작성 |
-
-    상단 메뉴에서 페이지를 선택하세요.
-    """)
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown('<p style="color:#6B7080; font-size:13px;">상단 메뉴에서 페이지를 선택하세요.</p>',
+                unsafe_allow_html=True)
 
 elif selected == "Dashboard":
     from _pages.dashboard_page import render
