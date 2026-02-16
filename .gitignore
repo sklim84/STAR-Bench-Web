@@ -22,5 +22,14 @@ venv/
 .DS_Store
 Thumbs.db
 
+# Generated data (Parquet, DuckDB - regenerated from CSV)
+_datasets/*.parquet
+_datasets/*.duckdb
+_datasets/*.duckdb.wal
+
+# Trained models
+_models/*.pkl
+_models/*.joblib
+
 # Claude Code
 .claude/
