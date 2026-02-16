@@ -119,48 +119,75 @@ def _execute_tool(name, arguments):
     return json.dumps({"error": f"알 수 없는 도구: {name}"}, ensure_ascii=False)
 
 
+def _message_to_dict(msg):
+    """ChatCompletionMessage를 OpenAI API 호환 dict로 변환한다."""
+    d = {"role": msg.role, "content": msg.content or ""}
+    if msg.tool_calls:
+        d["tool_calls"] = [
+            {
+                "id": tc.id,
+                "type": "function",
+                "function": {
+                    "name": tc.function.name,
+                    "arguments": tc.function.arguments,
+                },
+            }
+            for tc in msg.tool_calls
+        ]
+    return d
+
+
+MAX_TOOL_ROUNDS = 5
+
+
 def chat(messages):
     """OpenAI API로 대화를 수행하고 응답을 반환한다.
 
     Args:
-        messages: 대화 히스토리 (list of dicts)
+        messages: 대화 히스토리 (list of dicts, user/assistant/tool 포함)
 
     Returns:
-        (assistant_message, updated_messages)
+        (assistant_content, updated_messages)
     """
     client = OpenAI(api_key=config.OPENAI_API_KEY)
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "system", "content": SYSTEM_PROMPT}] + messages,
-        tools=TOOLS,
-        tool_choice="auto",
-    )
+    full_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
 
-    msg = response.choices[0].message
+    for _ in range(MAX_TOOL_ROUNDS):
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=full_messages,
+            tools=TOOLS,
+            tool_choice="auto",
+        )
 
-    # tool call이 있으면 실행 후 재호출
-    if msg.tool_calls:
-        messages.append(msg.to_dict())
+        msg = response.choices[0].message
+
+        if not msg.tool_calls:
+            break
+
+        # tool call이 있으면 실행 후 재호출
+        assistant_dict = _message_to_dict(msg)
+        messages.append(assistant_dict)
+        full_messages.append(assistant_dict)
+
         for tool_call in msg.tool_calls:
             result = _execute_tool(
                 tool_call.function.name,
                 json.loads(tool_call.function.arguments),
             )
-            messages.append({
+            tool_msg = {
                 "role": "tool",
                 "tool_call_id": tool_call.id,
                 "content": result,
-            })
-        # 도구 결과를 포함하여 재호출
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "system", "content": SYSTEM_PROMPT}] + messages,
-            tools=TOOLS,
-            tool_choice="auto",
-        )
-        msg = response.choices[0].message
+            }
+            messages.append(tool_msg)
+            full_messages.append(tool_msg)
+    else:
+        # MAX_TOOL_ROUNDS 초과 시 마지막 메시지 반환
+        pass
 
-    assistant_msg = {"role": "assistant", "content": msg.content}
+    content = msg.content or ""
+    assistant_msg = {"role": "assistant", "content": content}
     messages.append(assistant_msg)
-    return msg.content, messages
+    return content, messages
