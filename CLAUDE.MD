@@ -9,8 +9,8 @@ AML Assistant Platform - 에이전트를 활용하여 자금세탁의심거래�
 | 기능 | 페이지 | 비즈니스 로직 | 상태 |
 |------|--------|--------------|------|
 | 기능1: 기본 분석 대시보드 | `_pages/dashboard_page.py` | `src/features/dashboard.py` | 완성 |
-| 기능2: 네트워크(그래프) 분석 | `_pages/network_page.py` | `src/features/network.py` | 개발 중 |
-| 기능3: AI 모델 기반 이상거래 탐지 | `_pages/detection_page.py` | `src/features/detector.py` | 개발 중 |
+| 기능2: 네트워크(그래프) 분석 | `_pages/network_page.py` | `src/features/network.py` | 완성 |
+| 기능3: AI 모델 기반 이상거래 탐지 | `_pages/detection_page.py` | `src/features/detector.py` | 완성 |
 | 기능4: AI 에이전트 대화형 분석 + STR 작성 | `_pages/agent_page.py` | `src/features/agent.py` | 완성 |
 
 ## Commands
@@ -35,9 +35,13 @@ app.py (라우팅 + 글로벌 CSS) → _pages/ (UI, render()) → src/features/ 
 
 **Data pipeline**: CSV → Parquet (PyArrow, snappy 압축, 타입 최적화) → DuckDB 인메모리 테이블(`hofinet`). 앱 시작 시 Parquet이 없으면 `src/data/loader`가 자동 변환하고, `src/data/db`가 테이블을 생성한다.
 
-**Detector (기능3)**: `src/features/detector.py`에서 XGBoost로 이상거래 탐지. 학습 피처: `["거래시간대", "출금금융회사일련번호", "입금금융회사일련번호", "자금구분", "매체구분", "거래금액"]`. 학습된 모델은 `_models/xgb_detector.joblib`에 저장. 클래스 불균형 처리에 `scale_pos_weight` 동적 계산, early stopping 20라운드 (`eval_metric="aucpr"`).
+**Dashboard (기능1)**: `src/features/dashboard.py`에 17개 함수. 글로벌 필터(`_build_filter_conditions`, `_apply_filters`) 지원으로 모든 쿼리 함수에 `filters=None` 파라미터 적용. 자금구분 분석, 이상거래 금액 분석, 교차 히트맵(시간대x유형), 유형별 추이 포함.
 
-**Agent (기능4)**: `src/features/agent.py`에서 OpenAI `gpt-4o-mini` + function calling으로 구현. 도구 3개 등록: `query_transactions` (SQL 실행, 최대 100행 반환), `predict_fraud` (XGBoost 예측, 확률 0~1 반환), `generate_str` (STR 작성). 최대 5라운드 tool calling 반복.
+**Network (기능2)**: `src/features/network.py`에 11개 함수. 금융회사/계좌 간 거래 네트워크 구축, 4대 중심성 지표(`compute_centrality_metrics`), Louvain 커뮤니티 탐지(`detect_communities`), 이상거래 흐름 매트릭스(`get_fraud_flow_matrix`), 확장 네트워크 통계(`get_extended_network_stats`). UI 4개 탭: 금융회사 네트워크, 이상거래 계좌 네트워크, 계좌 탐색, 이상거래 흐름.
+
+**Detector (기능3)**: `src/features/detector.py`에 11개 함수. XGBoost 이상거래 탐지. 학습 피처: `["거래시간대", "출금금융회사일련번호", "입금금융회사일련번호", "자금구분", "매체구분", "거래금액"]`. 모델 저장: `_models/xgb_detector.joblib`. `train_model(params=None)`로 하이퍼파라미터 튜닝 지원. F1 기반 임계값 최적화(`find_optimal_threshold`), ROC 커브(`get_roc_curve_data`), 이상거래 유형별 탐지 성능(`evaluate_by_fraud_type`), 확률 구간 분포(`get_probability_distribution`).
+
+**Agent (기능4)**: `src/features/agent.py`에서 OpenAI `gpt-4o-mini` + function calling. 도구 5개: `query_transactions` (SQL 실행, 최대 100행, 위험 키워드 차단), `predict_fraud` (XGBoost 예측 + 파라미터 검증), `generate_str` (구조화된 STR 보고서 생성), `analyze_network` (계좌 네트워크 분석), `get_statistics` (대시보드 요약 통계 조회). 최대 5라운드 tool calling. UI에서 도구 호출 시각화(expander) + 대화 내보내기(JSON) 지원.
 
 **새 기능 추가 패턴**: `src/features/`에 비즈니스 로직 모듈 생성 → `_pages/`에 `render()` 함수가 있는 페이지 모듈 생성 → `app.py`의 `option_menu` options/icons와 라우팅 if-elif에 추가
 
@@ -66,16 +70,19 @@ DuckDB 테이블명 `hofinet`. **컬럼명이 한글**이므로 SQL에서 그대
 **UI 패턴**:
 - 메트릭 카드: `st.metric()` 대신 HTML `.metric-card` 클래스 사용 (라벨 회색, 값 민트색)
 - 섹션 헤더: `st.subheader()` 대신 `<p class="section-header">` HTML 사용
-- Plotly 차트: `_apply_dark()` 헬퍼로 투명 배경 + `#1E2333` 그리드 적용
+- Plotly 차트: `_apply_dark()` 헬퍼로 투명 배경 + `#1E2333` 그리드 적용 (각 페이지에 로컬 정의)
 - 테이블: `.dark-table` HTML 클래스 사용
+- 히트맵 colorscale: `[[0,'#1A1F2E'],[0.5,'#2A6B65'],[1,'#4ECDC4']]`
 
 ## Coding Standards
 
 - DB 쿼리는 반드시 `src/data/db.query()` 또는 `db.query_arrow()`를 통해 실행
+- **`_pages/`에서 `src/data/db`를 직접 import하지 않는다** — 반드시 `src/features/` 레이어를 경유
 - 경로는 `config.py`의 상수를 사용 (하드코딩 금지)
 - 시각화는 Plotly 사용, 위 색상 팔레트 준수
 - Plotly 차트에 다크 테마 적용 필수 (투명 배경, `#1E2333` 그리드)
 - 페이지 모듈은 `_pages/`에 위치하며, 반드시 `render()` 함수를 export
 - `.env` 파일 커밋 금지, API 키를 코드에 노출하지 않기
+- SQL 안전성: 외부 입력에 `int()` 변환 또는 파라미터 바인딩 사용
 - 테스트 네이밍: `Test<FunctionName>::test_<description>` 패턴 사용
-- 현재 테스트 커버리지: dashboard, db, loader, config, modules (detector/network/agent 테스트 미작성)
+- 테스트 커버리지: dashboard(115), network(79), detector(76), agent(96), db(19), config(16), loader(13), modules(10) — 총 435개
