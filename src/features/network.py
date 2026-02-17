@@ -1,6 +1,7 @@
 """기능2: 네트워크(그래프) 분석 쿼리 및 그래프 생성 모듈."""
 
 import networkx as nx
+import pandas as pd
 from src.data.db import query
 
 
@@ -131,3 +132,156 @@ def build_account_graph(df):
             amount=float(row["총금액"]),
         )
     return G
+
+
+# ------------------------------------------------------------------
+# 강화 기능: 중심성 지표 분석
+# ------------------------------------------------------------------
+
+def compute_centrality_metrics(G):
+    """네트워크의 주요 중심성 지표를 계산하여 DataFrame으로 반환한다.
+
+    Parameters
+    ----------
+    G : nx.DiGraph
+        분석 대상 방향 그래프
+
+    Returns
+    -------
+    pd.DataFrame
+        컬럼: 노드, degree, betweenness, closeness, eigenvector
+    """
+    if len(G.nodes()) == 0:
+        return pd.DataFrame(columns=["노드", "degree", "betweenness", "closeness", "eigenvector"])
+
+    degree = dict(G.degree())
+    betweenness = nx.betweenness_centrality(G, weight="weight")
+    closeness = nx.closeness_centrality(G)
+
+    # eigenvector centrality는 수렴하지 않을 수 있으므로 예외 처리
+    try:
+        eigenvector = nx.eigenvector_centrality(G, max_iter=300, weight="weight")
+    except nx.PowerIterationFailedConvergence:
+        eigenvector = {n: 0.0 for n in G.nodes()}
+
+    nodes = list(G.nodes())
+    df = pd.DataFrame({
+        "노드": nodes,
+        "degree": [degree[n] for n in nodes],
+        "betweenness": [round(betweenness[n], 6) for n in nodes],
+        "closeness": [round(closeness[n], 6) for n in nodes],
+        "eigenvector": [round(eigenvector[n], 6) for n in nodes],
+    })
+    return df.sort_values("degree", ascending=False).reset_index(drop=True)
+
+
+# ------------------------------------------------------------------
+# 강화 기능: 커뮤니티 탐지
+# ------------------------------------------------------------------
+
+def detect_communities(G):
+    """Greedy modularity 기반 커뮤니티 탐지를 수행한다.
+
+    DiGraph를 undirected로 변환한 뒤 greedy_modularity_communities를 적용하고,
+    각 노드에 커뮤니티 레이블을 부여한 DataFrame을 반환한다.
+
+    Parameters
+    ----------
+    G : nx.DiGraph
+        분석 대상 방향 그래프
+
+    Returns
+    -------
+    pd.DataFrame
+        컬럼: 노드, 커뮤니티
+    """
+    if len(G.nodes()) == 0:
+        return pd.DataFrame(columns=["노드", "커뮤니티"])
+
+    G_undirected = G.to_undirected()
+    communities = nx.community.greedy_modularity_communities(G_undirected, weight="weight")
+
+    node_community = {}
+    for idx, community in enumerate(communities):
+        for node in community:
+            node_community[node] = idx
+
+    df = pd.DataFrame({
+        "노드": list(node_community.keys()),
+        "커뮤니티": list(node_community.values()),
+    })
+    return df.sort_values("커뮤니티").reset_index(drop=True)
+
+
+# ------------------------------------------------------------------
+# 강화 기능: 금융회사 간 이상거래 흐름 매트릭스
+# ------------------------------------------------------------------
+
+def get_fraud_flow_matrix():
+    """금융회사 간 이상거래 흐름 매트릭스 데이터를 반환한다.
+
+    Returns
+    -------
+    pd.DataFrame
+        컬럼: source, target, 이상거래건수, 이상거래금액
+    """
+    return query("""
+        SELECT
+            출금금융회사일련번호 as source,
+            입금금융회사일련번호 as target,
+            sum(이상거래여부) as 이상거래건수,
+            sum(거래금액) as 이상거래금액
+        FROM hofinet
+        WHERE 이상거래여부 = 1
+        GROUP BY source, target
+        HAVING 이상거래건수 > 0
+        ORDER BY 이상거래건수 DESC
+    """)
+
+
+# ------------------------------------------------------------------
+# 강화 기능: 네트워크 통계 확장
+# ------------------------------------------------------------------
+
+def get_extended_network_stats(G):
+    """네트워크의 확장 통계를 계산하여 딕셔너리로 반환한다.
+
+    Parameters
+    ----------
+    G : nx.DiGraph
+        분석 대상 방향 그래프
+
+    Returns
+    -------
+    dict
+        밀도, 평균 클러스터링 계수, 허브 노드 등의 통계
+    """
+    if len(G.nodes()) == 0:
+        return {
+            "노드수": 0,
+            "엣지수": 0,
+            "밀도": 0.0,
+            "평균클러스터링계수": 0.0,
+            "허브노드": "-",
+            "허브연결수": 0,
+        }
+
+    density = nx.density(G)
+
+    # 클러스터링 계수는 undirected 변환 후 계산
+    G_undirected = G.to_undirected()
+    avg_clustering = nx.average_clustering(G_undirected, weight="weight")
+
+    # 가장 연결이 많은 노드 (허브)
+    degree_dict = dict(G.degree())
+    hub_node = max(degree_dict, key=degree_dict.get)
+    hub_degree = degree_dict[hub_node]
+
+    return {
+        "노드수": len(G.nodes()),
+        "엣지수": len(G.edges()),
+        "밀도": round(density, 4),
+        "평균클러스터링계수": round(avg_clustering, 4),
+        "허브노드": hub_node,
+        "허브연결수": hub_degree,
+    }

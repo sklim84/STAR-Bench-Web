@@ -6,11 +6,13 @@
 - 데이터 값의 범위와 정합성이 올바른지
 - NetworkX 그래프 빌더가 올바른 그래프를 생성하는지
 - 파라미터(limit, account_id, hops)가 올바르게 적용되는지
+- 중심성 지표, 커뮤니티 탐지, 이상거래 흐름 매트릭스, 확장 통계 함수
 """
 
 import pandas as pd
 import networkx as nx
 import pytest
+from unittest.mock import patch
 
 from src.features.network import (
     get_bank_network,
@@ -20,6 +22,10 @@ from src.features.network import (
     get_bank_network_stats,
     build_bank_graph,
     build_account_graph,
+    compute_centrality_metrics,
+    detect_communities,
+    get_fraud_flow_matrix,
+    get_extended_network_stats,
 )
 
 
@@ -288,7 +294,6 @@ class TestBuildBankGraph:
 
     def test_empty_df_returns_empty_graph(self):
         """빈 DataFrame 입력 시 노드와 엣지가 없는 그래프를 반환해야 한다."""
-        import pandas as pd
         empty_df = pd.DataFrame(columns=["source", "target", "총거래", "이상거래", "총금액"])
         G = build_bank_graph(empty_df)
         assert isinstance(G, nx.DiGraph)
@@ -337,9 +342,208 @@ class TestBuildAccountGraph:
 
     def test_empty_df_returns_empty_graph(self):
         """빈 DataFrame 입력 시 노드와 엣지가 없는 그래프를 반환해야 한다."""
-        import pandas as pd
         empty_df = pd.DataFrame(columns=["source", "target", "거래횟수", "총금액"])
         G = build_account_graph(empty_df)
         assert isinstance(G, nx.DiGraph)
         assert len(G.nodes()) == 0
         assert len(G.edges()) == 0
+
+
+# ──────────────────────────────────────────────
+# compute_centrality_metrics
+# ──────────────────────────────────────────────
+class TestComputeCentralityMetrics:
+    """compute_centrality_metrics() 단위 테스트."""
+
+    @pytest.fixture(scope="class")
+    def centrality_result(self):
+        df = get_bank_network()
+        G = build_bank_graph(df)
+        return compute_centrality_metrics(G), G
+
+    def test_returns_dataframe(self, centrality_result):
+        metrics_df, _ = centrality_result
+        assert isinstance(metrics_df, pd.DataFrame)
+
+    def test_expected_columns(self, centrality_result):
+        metrics_df, _ = centrality_result
+        expected = {"노드", "degree", "betweenness", "closeness", "eigenvector"}
+        assert expected.issubset(set(metrics_df.columns))
+
+    def test_row_count_matches_nodes(self, centrality_result):
+        """행 수가 그래프 노드 수와 일치해야 한다."""
+        metrics_df, G = centrality_result
+        assert len(metrics_df) == len(G.nodes())
+
+    def test_degree_non_negative(self, centrality_result):
+        """degree가 0 이상이어야 한다."""
+        metrics_df, _ = centrality_result
+        assert (metrics_df["degree"] >= 0).all()
+
+    def test_betweenness_range(self, centrality_result):
+        """betweenness 값이 0~1 범위이어야 한다."""
+        metrics_df, _ = centrality_result
+        assert (metrics_df["betweenness"] >= 0).all()
+        assert (metrics_df["betweenness"] <= 1).all()
+
+    def test_closeness_range(self, centrality_result):
+        """closeness 값이 0~1 범위이어야 한다."""
+        metrics_df, _ = centrality_result
+        assert (metrics_df["closeness"] >= 0).all()
+        assert (metrics_df["closeness"] <= 1).all()
+
+    def test_eigenvector_non_negative(self, centrality_result):
+        """eigenvector 값이 0 이상이어야 한다."""
+        metrics_df, _ = centrality_result
+        assert (metrics_df["eigenvector"] >= 0).all()
+
+    def test_sorted_by_degree_desc(self, centrality_result):
+        """degree 기준 내림차순 정렬이어야 한다."""
+        metrics_df, _ = centrality_result
+        degrees = metrics_df["degree"].tolist()
+        assert degrees == sorted(degrees, reverse=True)
+
+    def test_empty_graph(self):
+        """빈 그래프 입력 시 빈 DataFrame을 반환해야 한다."""
+        G = nx.DiGraph()
+        result = compute_centrality_metrics(G)
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 0
+        expected_cols = {"노드", "degree", "betweenness", "closeness", "eigenvector"}
+        assert expected_cols.issubset(set(result.columns))
+
+
+# ──────────────────────────────────────────────
+# detect_communities
+# ──────────────────────────────────────────────
+class TestDetectCommunities:
+    """detect_communities() 단위 테스트."""
+
+    @pytest.fixture(scope="class")
+    def community_result(self):
+        df = get_fraud_account_network(limit=100)
+        G = build_account_graph(df)
+        return detect_communities(G), G
+
+    def test_returns_dataframe(self, community_result):
+        comm_df, _ = community_result
+        assert isinstance(comm_df, pd.DataFrame)
+
+    def test_expected_columns(self, community_result):
+        comm_df, _ = community_result
+        expected = {"노드", "커뮤니티"}
+        assert expected.issubset(set(comm_df.columns))
+
+    def test_row_count_matches_nodes(self, community_result):
+        """행 수가 그래프 노드 수와 일치해야 한다."""
+        comm_df, G = community_result
+        assert len(comm_df) == len(G.nodes())
+
+    def test_community_labels_non_negative(self, community_result):
+        """커뮤니티 레이블이 0 이상의 정수이어야 한다."""
+        comm_df, _ = community_result
+        assert (comm_df["커뮤니티"] >= 0).all()
+
+    def test_at_least_one_community(self, community_result):
+        """최소 1개의 커뮤니티가 존재해야 한다."""
+        comm_df, _ = community_result
+        assert comm_df["커뮤니티"].nunique() >= 1
+
+    def test_all_nodes_assigned(self, community_result):
+        """모든 노드에 커뮤니티가 할당되어야 한다."""
+        comm_df, G = community_result
+        assert set(comm_df["노드"]) == set(G.nodes())
+
+    def test_empty_graph(self):
+        """빈 그래프 입력 시 빈 DataFrame을 반환해야 한다."""
+        G = nx.DiGraph()
+        result = detect_communities(G)
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 0
+
+
+# ──────────────────────────────────────────────
+# get_fraud_flow_matrix
+# ──────────────────────────────────────────────
+class TestGetFraudFlowMatrix:
+    """get_fraud_flow_matrix() 단위 테스트."""
+
+    @pytest.fixture(scope="class")
+    def flow_df(self):
+        return get_fraud_flow_matrix()
+
+    def test_returns_dataframe(self, flow_df):
+        assert isinstance(flow_df, pd.DataFrame)
+
+    def test_expected_columns(self, flow_df):
+        expected = {"source", "target", "이상거래건수", "이상거래금액"}
+        assert expected.issubset(set(flow_df.columns))
+
+    def test_not_empty(self, flow_df):
+        """이상거래 흐름이 1건 이상 존재해야 한다."""
+        assert len(flow_df) > 0
+
+    def test_fraud_count_positive(self, flow_df):
+        """이상거래건수가 1 이상이어야 한다 (HAVING 조건)."""
+        assert (flow_df["이상거래건수"] >= 1).all()
+
+    def test_fraud_amount_positive(self, flow_df):
+        """이상거래금액이 양수이어야 한다."""
+        assert (flow_df["이상거래금액"] > 0).all()
+
+    def test_sorted_by_count_desc(self, flow_df):
+        """이상거래건수 기준 내림차순 정렬이어야 한다."""
+        counts = flow_df["이상거래건수"].tolist()
+        assert counts == sorted(counts, reverse=True)
+
+    def test_source_target_are_integers(self, flow_df):
+        """source, target이 정수형이어야 한다."""
+        assert flow_df["source"].dtype.kind in ("i", "u")
+        assert flow_df["target"].dtype.kind in ("i", "u")
+
+
+# ──────────────────────────────────────────────
+# get_extended_network_stats
+# ──────────────────────────────────────────────
+class TestGetExtendedNetworkStats:
+    """get_extended_network_stats() 단위 테스트."""
+
+    @pytest.fixture(scope="class")
+    def ext_stats(self):
+        df = get_bank_network()
+        G = build_bank_graph(df)
+        return get_extended_network_stats(G)
+
+    def test_returns_dict(self, ext_stats):
+        assert isinstance(ext_stats, dict)
+
+    def test_expected_keys(self, ext_stats):
+        expected_keys = {"노드수", "엣지수", "밀도", "평균클러스터링계수", "허브노드", "허브연결수"}
+        assert expected_keys.issubset(set(ext_stats.keys()))
+
+    def test_node_count_positive(self, ext_stats):
+        assert ext_stats["노드수"] > 0
+
+    def test_edge_count_positive(self, ext_stats):
+        assert ext_stats["엣지수"] > 0
+
+    def test_density_range(self, ext_stats):
+        """밀도가 0~1 범위이어야 한다."""
+        assert 0 <= ext_stats["밀도"] <= 1
+
+    def test_clustering_range(self, ext_stats):
+        """평균 클러스터링 계수가 0~1 범위이어야 한다."""
+        assert 0 <= ext_stats["평균클러스터링계수"] <= 1
+
+    def test_hub_degree_positive(self, ext_stats):
+        """허브 노드의 연결 수가 1 이상이어야 한다."""
+        assert ext_stats["허브연결수"] >= 1
+
+    def test_empty_graph(self):
+        """빈 그래프 입력 시 기본 값을 반환해야 한다."""
+        G = nx.DiGraph()
+        result = get_extended_network_stats(G)
+        assert result["노드수"] == 0
+        assert result["엣지수"] == 0
+        assert result["밀도"] == 0.0
+        assert result["허브노드"] == "-"

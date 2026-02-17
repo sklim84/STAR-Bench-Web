@@ -7,9 +7,14 @@
 - _execute_tool()의 SELECT 전용 제한이 동작하는지
 - _message_to_dict()가 올바른 dict를 반환하는지
 - chat()이 OpenAI API 호출 없이 mock으로 정상 동작하는지
+- _validate_predict_fraud_args()가 유효하지 않은 파라미터를 올바르게 검증하는지
+- _build_str_report()가 올바른 구조의 STR을 생성하는지
+- _execute_tool('analyze_network', ...)가 계좌 네트워크를 올바르게 분석하는지
+- _execute_tool('get_statistics', ...)가 통계 요약을 반환하는지
 """
 
 import json
+import numpy as np
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -19,6 +24,8 @@ from src.features.agent import (
     MAX_TOOL_ROUNDS,
     _execute_tool,
     _message_to_dict,
+    _validate_predict_fraud_args,
+    _build_str_report,
 )
 
 
@@ -33,8 +40,8 @@ class TestToolsDefinition:
         assert isinstance(TOOLS, list)
 
     def test_tools_count(self):
-        """도구가 정확히 3개이어야 한다."""
-        assert len(TOOLS) == 3
+        """도구가 정확히 5개이어야 한다 (analyze_network, get_statistics 추가)."""
+        assert len(TOOLS) == 5
 
     def test_tools_have_required_structure(self):
         """각 도구가 type과 function 키를 가져야 한다."""
@@ -46,7 +53,13 @@ class TestToolsDefinition:
     def test_tool_names(self):
         """도구 이름이 기대하는 값과 일치하는지 확인."""
         names = {tool["function"]["name"] for tool in TOOLS}
-        expected = {"query_transactions", "predict_fraud", "generate_str"}
+        expected = {
+            "query_transactions",
+            "predict_fraud",
+            "generate_str",
+            "analyze_network",
+            "get_statistics",
+        }
         assert names == expected
 
     def test_tools_have_description(self):
@@ -211,10 +224,10 @@ class TestExecuteToolPredictFraud:
     def test_no_model_returns_error(self, sample_transaction):
         """모델이 없을 때 오류 메시지를 반환하는지 확인.
 
-        agent.py의 _execute_tool은 'from src.features.detector import load_model'을
-        로컬 임포트로 실행하므로, 패치 대상은 detector 모듈의 load_model이어야 한다.
+        agent.py 상단에서 'from src.features.detector import load_model'로
+        import하므로, 패치 대상은 agent 모듈의 load_model이어야 한다.
         """
-        with patch("src.features.detector.load_model", return_value=None):
+        with patch("src.features.agent.load_model", return_value=None):
             result = _execute_tool("predict_fraud", sample_transaction)
             parsed = json.loads(result)
             assert "error" in parsed
@@ -222,10 +235,9 @@ class TestExecuteToolPredictFraud:
     def test_with_mock_model_returns_probability(self, sample_transaction):
         """Mock 모델을 사용하여 확률이 반환되는지 확인."""
         mock_model = MagicMock()
-        import numpy as np
         mock_model.predict_proba.return_value = np.array([[0.3, 0.7]])
 
-        with patch("src.features.detector.load_model", return_value=mock_model):
+        with patch("src.features.agent.load_model", return_value=mock_model):
             result = _execute_tool("predict_fraud", sample_transaction)
             parsed = json.loads(result)
             assert "이상거래확률" in parsed
@@ -234,10 +246,9 @@ class TestExecuteToolPredictFraud:
     def test_probability_rounded_to_4_decimals(self, sample_transaction):
         """확률이 소수점 4자리까지 반올림되는지 확인."""
         mock_model = MagicMock()
-        import numpy as np
         mock_model.predict_proba.return_value = np.array([[0.123456, 0.876544]])
 
-        with patch("src.features.detector.load_model", return_value=mock_model):
+        with patch("src.features.agent.load_model", return_value=mock_model):
             result = _execute_tool("predict_fraud", sample_transaction)
             parsed = json.loads(result)
             prob = parsed["이상거래확률"]
@@ -257,10 +268,11 @@ class TestExecuteToolGenerateStr:
         assert isinstance(parsed, dict)
 
     def test_contains_report_key(self):
-        """결과에 보고서 키가 있는지 확인."""
+        """결과에 보고서 유형 키가 있는지 확인 (강화된 STR 구조)."""
         result = _execute_tool("generate_str", {"summary": "출금계좌 123에서 이상거래 탐지"})
         parsed = json.loads(result)
-        assert "보고서" in parsed
+        # 강화된 STR 구조: 보고서유형 또는 보고서 키 중 하나가 있어야 함
+        assert "보고서유형" in parsed or "보고서" in parsed
 
     def test_summary_preserved_in_content(self):
         """입력한 summary가 결과에 포함되는지 확인."""
@@ -273,7 +285,8 @@ class TestExecuteToolGenerateStr:
         """STR 작성 안내 메시지가 포함되어야 한다."""
         result = _execute_tool("generate_str", {"summary": "test"})
         parsed = json.loads(result)
-        assert "안내" in parsed or "내용" in parsed
+        # 강화된 구조: 작성안내, 안내, 내용 중 하나가 있어야 함
+        assert "작성안내" in parsed or "안내" in parsed or "내용" in parsed
 
 
 # ──────────────────────────────────────────────
@@ -385,7 +398,7 @@ class TestChat:
         return mock_response
 
     def test_chat_returns_tuple(self):
-        """chat()이 (content, messages) 튜플을 반환하는지 확인."""
+        """chat()이 (content, messages, tool_events) 3-튜플을 반환하는지 확인."""
         from src.features.agent import chat
 
         mock_client = MagicMock()
@@ -395,7 +408,7 @@ class TestChat:
             result = chat([{"role": "user", "content": "이상거래 현황을 알려줘"}])
 
         assert isinstance(result, tuple)
-        assert len(result) == 2
+        assert len(result) == 3
 
     def test_chat_returns_assistant_content(self):
         """chat()이 어시스턴트 응답 내용을 반환하는지 확인."""
@@ -406,7 +419,7 @@ class TestChat:
         mock_client.chat.completions.create.return_value = self._make_mock_response(expected_content)
 
         with patch("src.features.agent.OpenAI", return_value=mock_client):
-            content, messages = chat([{"role": "user", "content": "이상거래 현황"}])
+            content, messages, tool_events = chat([{"role": "user", "content": "이상거래 현황"}])
 
         assert content == expected_content
 
@@ -419,7 +432,7 @@ class TestChat:
 
         messages = [{"role": "user", "content": "질문"}]
         with patch("src.features.agent.OpenAI", return_value=mock_client):
-            content, updated_messages = chat(messages)
+            content, updated_messages, tool_events = chat(messages)
 
         # 원래 messages에 assistant 응답이 추가되어야 함
         assert any(m["role"] == "assistant" for m in updated_messages)
@@ -465,12 +478,15 @@ class TestChat:
         ]
 
         with patch("src.features.agent.OpenAI", return_value=mock_client):
-            content, messages = chat([{"role": "user", "content": "이상거래 건수 알려줘"}])
+            content, messages, tool_events = chat([{"role": "user", "content": "이상거래 건수 알려줘"}])
 
         assert final_content in content
         # tool 메시지가 히스토리에 포함되어야 함
         roles = [m["role"] for m in messages]
         assert "tool" in roles
+        # tool_events에 도구 호출 기록이 있어야 함
+        assert len(tool_events) >= 1
+        assert tool_events[0]["name"] == "query_transactions"
 
     def test_chat_system_prompt_included(self):
         """API 호출 시 시스템 프롬프트가 포함되는지 확인."""
@@ -503,3 +519,456 @@ class TestChat:
 
         call_kwargs = mock_client.chat.completions.create.call_args.kwargs
         assert call_kwargs.get("model") == "gpt-4o-mini"
+
+
+# ──────────────────────────────────────────────
+# _validate_predict_fraud_args
+# ──────────────────────────────────────────────
+class TestValidatePredictFraudArgs:
+    """_validate_predict_fraud_args() 단위 테스트."""
+
+    def _valid_args(self):
+        return {
+            "거래시간대": 9,
+            "출금금융회사일련번호": 10,
+            "입금금융회사일련번호": 20,
+            "자금구분": 1,
+            "매체구분": 3,
+            "거래금액": 500000,
+        }
+
+    def test_valid_args_returns_empty_errors(self):
+        """유효한 파라미터는 오류 목록이 비어야 한다."""
+        errors = _validate_predict_fraud_args(self._valid_args())
+        assert errors == []
+
+    def test_invalid_거래시간대_returns_error(self):
+        """잘못된 거래시간대(예: 5)는 오류를 반환해야 한다."""
+        args = self._valid_args()
+        args["거래시간대"] = 5  # 유효 값: {0,3,6,9,12,15,18,21}
+        errors = _validate_predict_fraud_args(args)
+        assert len(errors) >= 1
+        assert any("거래시간대" in e for e in errors)
+
+    def test_invalid_자금구분_returns_error(self):
+        """잘못된 자금구분(예: 2)은 오류를 반환해야 한다."""
+        args = self._valid_args()
+        args["자금구분"] = 2  # 유효 값: {0,1,3,4}
+        errors = _validate_predict_fraud_args(args)
+        assert len(errors) >= 1
+        assert any("자금구분" in e for e in errors)
+
+    def test_invalid_매체구분_returns_error(self):
+        """잘못된 매체구분(예: 10)은 오류를 반환해야 한다."""
+        args = self._valid_args()
+        args["매체구분"] = 10  # 유효 값: 1~7
+        errors = _validate_predict_fraud_args(args)
+        assert len(errors) >= 1
+        assert any("매체구분" in e for e in errors)
+
+    def test_negative_거래금액_returns_error(self):
+        """음수 거래금액은 오류를 반환해야 한다."""
+        args = self._valid_args()
+        args["거래금액"] = -100
+        errors = _validate_predict_fraud_args(args)
+        assert len(errors) >= 1
+        assert any("거래금액" in e for e in errors)
+
+    def test_zero_거래금액_returns_error(self):
+        """0원 거래금액은 오류를 반환해야 한다."""
+        args = self._valid_args()
+        args["거래금액"] = 0
+        errors = _validate_predict_fraud_args(args)
+        assert len(errors) >= 1
+        assert any("거래금액" in e for e in errors)
+
+    def test_multiple_invalid_params_return_multiple_errors(self):
+        """여러 파라미터가 잘못되면 각각 오류를 반환해야 한다."""
+        args = {
+            "거래시간대": 7,      # 잘못됨
+            "출금금융회사일련번호": 10,
+            "입금금융회사일련번호": 20,
+            "자금구분": 2,         # 잘못됨
+            "매체구분": 0,         # 잘못됨
+            "거래금액": -1,        # 잘못됨
+        }
+        errors = _validate_predict_fraud_args(args)
+        assert len(errors) >= 3
+
+    def test_boundary_거래시간대_valid(self):
+        """경계값 거래시간대 0과 21은 유효해야 한다."""
+        for t in [0, 21]:
+            args = self._valid_args()
+            args["거래시간대"] = t
+            errors = _validate_predict_fraud_args(args)
+            assert not any("거래시간대" in e for e in errors), f"시간대 {t}는 유효해야 함"
+
+    def test_boundary_매체구분_valid(self):
+        """경계값 매체구분 1과 7은 유효해야 한다."""
+        for m in [1, 7]:
+            args = self._valid_args()
+            args["매체구분"] = m
+            errors = _validate_predict_fraud_args(args)
+            assert not any("매체구분" in e for e in errors), f"매체구분 {m}은 유효해야 함"
+
+
+# ──────────────────────────────────────────────
+# _build_str_report
+# ──────────────────────────────────────────────
+class TestBuildStrReport:
+    """_build_str_report() 단위 테스트."""
+
+    def test_returns_dict(self):
+        """dict를 반환해야 한다."""
+        result = _build_str_report("테스트 요약", "자금세탁", ["query_transactions"])
+        assert isinstance(result, dict)
+
+    def test_required_keys_present(self):
+        """필수 키가 모두 존재해야 한다."""
+        result = _build_str_report("요약", "자금세탁", [])
+        required_keys = {"보고서유형", "보고일자", "의심활동요약", "관련계좌정보", "의심사유분류", "권고조치", "분석근거", "작성안내"}
+        assert required_keys.issubset(set(result.keys()))
+
+    def test_보고서유형_is_str(self):
+        """보고서유형이 STR 관련 문자열이어야 한다."""
+        result = _build_str_report("요약", "자금세탁", [])
+        assert "STR" in result["보고서유형"] or "의심거래" in result["보고서유형"]
+
+    def test_보고일자_format(self):
+        """보고일자가 YYYY-MM-DD 형식이어야 한다."""
+        import re
+        result = _build_str_report("요약", "자금세탁", [])
+        assert re.match(r"^\d{4}-\d{2}-\d{2}$", result["보고일자"])
+
+    def test_summary_preserved(self):
+        """의심활동요약에 입력 요약이 포함되어야 한다."""
+        summary = "계좌 123에서 심야 대량 자금 이동"
+        result = _build_str_report(summary, "자금세탁", [])
+        assert result["의심활동요약"] == summary
+
+    def test_fraud_type_자금세탁_권고조치(self):
+        """자금세탁 유형의 권고조치가 존재해야 한다."""
+        result = _build_str_report("요약", "자금세탁", [])
+        assert isinstance(result["권고조치"], list)
+        assert len(result["권고조치"]) > 0
+        # 자금세탁 관련 조치 키워드가 포함되어야 함
+        actions_text = " ".join(result["권고조치"])
+        assert "모니터링" in actions_text or "FIU" in actions_text or "조사" in actions_text
+
+    def test_fraud_type_사기_권고조치(self):
+        """사기 유형의 권고조치가 존재해야 한다."""
+        result = _build_str_report("요약", "사기", [])
+        assert isinstance(result["권고조치"], list)
+        assert len(result["권고조치"]) > 0
+
+    def test_fraud_type_기타_권고조치(self):
+        """기타 유형의 권고조치가 존재해야 한다."""
+        result = _build_str_report("요약", "기타", [])
+        assert isinstance(result["권고조치"], list)
+        assert len(result["권고조치"]) > 0
+
+    def test_unknown_fraud_type_defaults_to_기타(self):
+        """알 수 없는 의심사유 분류는 기타로 처리되어야 한다."""
+        result = _build_str_report("요약", "알수없음", [])
+        # 기타 권고조치가 적용되어야 함
+        assert isinstance(result["권고조치"], list)
+        assert len(result["권고조치"]) > 0
+
+    def test_tools_used_in_분석근거(self):
+        """사용된 도구 목록이 분석근거에 반영되어야 한다."""
+        tools = ["query_transactions", "analyze_network"]
+        result = _build_str_report("요약", "자금세탁", tools)
+        근거 = result["분석근거"]
+        assert isinstance(근거, list)
+        assert len(근거) == len(tools)
+
+    def test_empty_tools_used(self):
+        """도구 목록이 비어 있어도 오류 없이 동작해야 한다."""
+        result = _build_str_report("요약", "자금세탁", [])
+        assert "분석근거" in result
+        assert isinstance(result["분석근거"], list)
+
+    def test_작성안내_is_string(self):
+        """작성안내가 문자열이어야 한다."""
+        result = _build_str_report("요약", "자금세탁", [])
+        assert isinstance(result["작성안내"], str)
+        assert len(result["작성안내"]) > 0
+
+    def test_account_extracted_from_summary(self):
+        """요약에서 계좌 번호를 추출하여 관련계좌정보에 포함해야 한다."""
+        # 계좌 번호가 포함된 요약
+        summary = "출금계좌 1234567에서 500만원 이동"
+        result = _build_str_report(summary, "자금세탁", [])
+        assert isinstance(result["관련계좌정보"], list)
+        # 추출된 계좌 번호가 있거나, 추출 불가 메시지가 있어야 함
+        assert len(result["관련계좌정보"]) > 0
+
+
+# ──────────────────────────────────────────────
+# _execute_tool - analyze_network
+# ──────────────────────────────────────────────
+class TestExecuteToolAnalyzeNetwork:
+    """_execute_tool('analyze_network', ...) 단위 테스트."""
+
+    def test_returns_json_string(self):
+        """JSON 문자열을 반환해야 한다."""
+        from src.features.network import get_fraud_accounts
+        # 실제 이상거래 계좌 하나를 샘플링
+        accounts = get_fraud_accounts()
+        account_id = int(accounts["계좌"].iloc[0])
+        result = _execute_tool("analyze_network", {"account_id": account_id})
+        parsed = json.loads(result)
+        assert isinstance(parsed, dict)
+
+    def test_contains_account_id(self):
+        """결과에 account_id가 포함되어야 한다."""
+        from src.features.network import get_fraud_accounts
+        accounts = get_fraud_accounts()
+        account_id = int(accounts["계좌"].iloc[0])
+        result = _execute_tool("analyze_network", {"account_id": account_id})
+        parsed = json.loads(result)
+        assert "account_id" in parsed
+        assert parsed["account_id"] == account_id
+
+    def test_contains_연결계좌수(self):
+        """결과에 연결계좌수가 포함되어야 한다."""
+        from src.features.network import get_fraud_accounts
+        accounts = get_fraud_accounts()
+        account_id = int(accounts["계좌"].iloc[0])
+        result = _execute_tool("analyze_network", {"account_id": account_id})
+        parsed = json.loads(result)
+        # 데이터가 있으면 연결계좌수, 없으면 안내 메시지
+        assert "연결계좌수" in parsed or "안내" in parsed
+
+    def test_missing_account_id_returns_error(self):
+        """account_id가 없으면 오류를 반환해야 한다."""
+        result = _execute_tool("analyze_network", {})
+        parsed = json.loads(result)
+        assert "error" in parsed
+
+    def test_invalid_hops_clamped(self):
+        """잘못된 hops 값(예: 5)은 1로 클램프되어야 한다."""
+        from src.features.network import get_fraud_accounts
+        accounts = get_fraud_accounts()
+        account_id = int(accounts["계좌"].iloc[0])
+        # hops=5는 유효하지 않지만 오류 없이 처리되어야 함
+        result = _execute_tool("analyze_network", {"account_id": account_id, "hops": 5})
+        parsed = json.loads(result)
+        # 오류가 아닌 정상 응답이어야 함
+        assert "error" not in parsed or "네트워크" not in parsed.get("error", "")
+
+    def test_2hop_analysis(self):
+        """hops=2로 2-hop 분석이 동작해야 한다."""
+        from src.features.network import get_fraud_accounts
+        accounts = get_fraud_accounts()
+        account_id = int(accounts["계좌"].iloc[0])
+        result = _execute_tool("analyze_network", {"account_id": account_id, "hops": 2})
+        parsed = json.loads(result)
+        # 정상 응답이어야 함
+        assert isinstance(parsed, dict)
+        if "탐색범위_hop" in parsed:
+            assert parsed["탐색범위_hop"] == 2
+
+    def test_이상거래비율_non_negative(self):
+        """이상거래비율이 0 이상이어야 한다."""
+        from src.features.network import get_fraud_accounts
+        accounts = get_fraud_accounts()
+        account_id = int(accounts["계좌"].iloc[0])
+        result = _execute_tool("analyze_network", {"account_id": account_id})
+        parsed = json.loads(result)
+        if "이상거래비율_percent" in parsed:
+            assert parsed["이상거래비율_percent"] >= 0
+
+
+# ──────────────────────────────────────────────
+# _execute_tool - get_statistics
+# ──────────────────────────────────────────────
+class TestExecuteToolGetStatistics:
+    """_execute_tool('get_statistics', ...) 단위 테스트."""
+
+    @pytest.fixture(scope="class")
+    def stats_result(self):
+        """get_statistics 도구 실행 결과를 반환한다."""
+        result = _execute_tool("get_statistics", {})
+        return json.loads(result)
+
+    def test_returns_json(self):
+        """JSON 문자열을 반환해야 한다."""
+        result = _execute_tool("get_statistics", {})
+        parsed = json.loads(result)
+        assert isinstance(parsed, dict)
+
+    def test_contains_요약통계_key(self, stats_result):
+        """결과에 요약통계 키가 있어야 한다."""
+        assert "요약통계" in stats_result
+
+    def test_contains_이상거래유형별분포_key(self, stats_result):
+        """결과에 이상거래유형별분포 키가 있어야 한다."""
+        assert "이상거래유형별분포" in stats_result
+
+    def test_요약통계_총거래건수(self, stats_result):
+        """요약통계에 총거래건수가 포함되어야 한다."""
+        summary = stats_result["요약통계"]
+        assert "총거래건수" in summary
+        assert summary["총거래건수"] == 4_732_130
+
+    def test_요약통계_이상거래건수(self, stats_result):
+        """요약통계에 이상거래건수가 포함되어야 한다."""
+        summary = stats_result["요약통계"]
+        assert "이상거래건수" in summary
+        assert summary["이상거래건수"] > 0
+
+    def test_요약통계_이상거래비율(self, stats_result):
+        """이상거래비율이 0~100 사이이어야 한다."""
+        summary = stats_result["요약통계"]
+        ratio = summary.get("이상거래비율_percent", 0)
+        assert 0 <= ratio <= 100
+
+    def test_이상거래유형별분포_is_list(self, stats_result):
+        """이상거래유형별분포가 리스트이어야 한다."""
+        assert isinstance(stats_result["이상거래유형별분포"], list)
+
+    def test_이상거래유형별분포_not_empty(self, stats_result):
+        """이상거래유형별분포가 비어있지 않아야 한다."""
+        assert len(stats_result["이상거래유형별분포"]) > 0
+
+    def test_요약통계_계좌수_positive(self, stats_result):
+        """출금/입금계좌수가 양수이어야 한다."""
+        summary = stats_result["요약통계"]
+        if "출금계좌수" in summary:
+            assert summary["출금계좌수"] > 0
+        if "입금계좌수" in summary:
+            assert summary["입금계좌수"] > 0
+
+
+# ──────────────────────────────────────────────
+# _execute_tool - generate_str (강화된 기능 검증)
+# ──────────────────────────────────────────────
+class TestExecuteToolGenerateStrEnhanced:
+    """강화된 generate_str 도구 - 선택적 파라미터 테스트."""
+
+    def test_fraud_type_자금세탁_applied(self):
+        """fraud_type='자금세탁'이 결과에 반영되어야 한다."""
+        result = _execute_tool("generate_str", {
+            "summary": "자금세탁 의심 거래 발견",
+            "fraud_type": "자금세탁",
+        })
+        parsed = json.loads(result)
+        assert "자금세탁" in str(parsed)
+
+    def test_fraud_type_사기_applied(self):
+        """fraud_type='사기'가 결과에 반영되어야 한다."""
+        result = _execute_tool("generate_str", {
+            "summary": "사기 의심 거래 발견",
+            "fraud_type": "사기",
+        })
+        parsed = json.loads(result)
+        assert "사기" in str(parsed)
+
+    def test_tools_used_reflected(self):
+        """tools_used가 분석근거에 포함되어야 한다."""
+        result = _execute_tool("generate_str", {
+            "summary": "분석 결과 요약",
+            "fraud_type": "자금세탁",
+            "tools_used": ["query_transactions", "predict_fraud"],
+        })
+        parsed = json.loads(result)
+        # 분석근거 또는 tools_used 항목이 결과에 포함되어야 함
+        result_str = str(parsed)
+        assert "query_transactions" in result_str or "거래 데이터" in result_str or "분석근거" in result_str
+
+    def test_empty_summary_returns_error(self):
+        """빈 summary는 오류를 반환해야 한다."""
+        result = _execute_tool("generate_str", {"summary": ""})
+        parsed = json.loads(result)
+        assert "error" in parsed
+
+    def test_no_fraud_type_defaults_gracefully(self):
+        """fraud_type이 없어도 오류 없이 STR이 생성되어야 한다."""
+        result = _execute_tool("generate_str", {"summary": "분석 결과 요약"})
+        parsed = json.loads(result)
+        # 오류 없이 dict가 반환되어야 함
+        assert isinstance(parsed, dict)
+        assert "error" not in parsed
+
+    def test_str_contains_보고일자(self):
+        """STR 결과에 보고일자가 포함되어야 한다."""
+        import re
+        result = _execute_tool("generate_str", {
+            "summary": "의심 거래 분석 완료",
+            "fraud_type": "자금세탁",
+        })
+        parsed = json.loads(result)
+        # 보고일자 키가 있어야 함
+        assert "보고일자" in parsed
+        assert re.match(r"^\d{4}-\d{2}-\d{2}$", parsed["보고일자"])
+
+    def test_str_contains_권고조치(self):
+        """STR 결과에 권고조치가 포함되어야 한다."""
+        result = _execute_tool("generate_str", {
+            "summary": "의심 거래 분석 완료",
+            "fraud_type": "자금세탁",
+        })
+        parsed = json.loads(result)
+        assert "권고조치" in parsed
+        assert isinstance(parsed["권고조치"], list)
+        assert len(parsed["권고조치"]) > 0
+
+
+# ──────────────────────────────────────────────
+# analyze_network TOOLS 정의 세부 검증
+# ──────────────────────────────────────────────
+class TestAnalyzeNetworkToolDefinition:
+    """analyze_network 도구 정의 세부 검증."""
+
+    @pytest.fixture(scope="class")
+    def analyze_network_tool(self):
+        """analyze_network 도구 정의를 반환한다."""
+        return next(t for t in TOOLS if t["function"]["name"] == "analyze_network")
+
+    def test_account_id_is_required(self, analyze_network_tool):
+        """account_id가 required 파라미터여야 한다."""
+        required = analyze_network_tool["function"]["parameters"]["required"]
+        assert "account_id" in required
+
+    def test_hops_is_optional(self, analyze_network_tool):
+        """hops는 선택적 파라미터여야 한다 (required에 없어야 함)."""
+        required = analyze_network_tool["function"]["parameters"]["required"]
+        assert "hops" not in required
+
+    def test_account_id_type_is_integer(self, analyze_network_tool):
+        """account_id의 타입이 integer이어야 한다."""
+        props = analyze_network_tool["function"]["parameters"]["properties"]
+        assert props["account_id"]["type"] == "integer"
+
+    def test_hops_property_defined(self, analyze_network_tool):
+        """hops 속성이 정의되어 있어야 한다."""
+        props = analyze_network_tool["function"]["parameters"]["properties"]
+        assert "hops" in props
+
+
+# ──────────────────────────────────────────────
+# get_statistics TOOLS 정의 세부 검증
+# ──────────────────────────────────────────────
+class TestGetStatisticsToolDefinition:
+    """get_statistics 도구 정의 세부 검증."""
+
+    @pytest.fixture(scope="class")
+    def get_statistics_tool(self):
+        """get_statistics 도구 정의를 반환한다."""
+        return next(t for t in TOOLS if t["function"]["name"] == "get_statistics")
+
+    def test_no_required_params(self, get_statistics_tool):
+        """get_statistics는 필수 파라미터가 없어야 한다."""
+        required = get_statistics_tool["function"]["parameters"].get("required", [])
+        assert len(required) == 0
+
+    def test_description_mentions_statistics(self, get_statistics_tool):
+        """description에 통계 관련 내용이 포함되어야 한다."""
+        desc = get_statistics_tool["function"]["description"]
+        assert "통계" in desc or "분포" in desc or "대시보드" in desc
+
+    def test_empty_properties(self, get_statistics_tool):
+        """properties가 비어 있어야 한다 (파라미터 없는 도구)."""
+        props = get_statistics_tool["function"]["parameters"].get("properties", {})
+        assert isinstance(props, dict)

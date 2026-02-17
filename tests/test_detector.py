@@ -7,6 +7,11 @@
 - evaluate_model()이 필수 지표를 포함하는지
 - FEATURE_COLS, TARGET_COL, MODEL_PATH 상수가 올바른지
 - 클래스 불균형 처리(scale_pos_weight)가 올바르게 계산되는지
+- find_optimal_threshold()가 최적 임계값을 올바르게 찾는지
+- get_roc_curve_data()가 올바른 ROC 데이터를 반환하는지
+- evaluate_by_fraud_type()가 유형별 recall을 반환하는지
+- get_probability_distribution()가 구간별 분포를 반환하는지
+- train_model()이 커스텀 파라미터를 수용하는지
 """
 
 import numpy as np
@@ -18,11 +23,62 @@ from src.features.detector import (
     FEATURE_COLS,
     TARGET_COL,
     MODEL_PATH,
+    FRAUD_TYPE_LABELS,
     load_model,
     get_feature_importance,
     predict_from_db,
     evaluate_model,
+    find_optimal_threshold,
+    get_roc_curve_data,
+    evaluate_by_fraud_type,
+    get_probability_distribution,
+    train_model,
 )
+
+
+# ──────────────────────────────────────────────
+# 테스트 공통 fixture
+# ──────────────────────────────────────────────
+@pytest.fixture(scope="module")
+def mock_model():
+    """테스트용 간단한 XGBoost 모델을 학습하여 반환한다."""
+    from xgboost import XGBClassifier  # noqa: PLC0415 — fixture-local import 허용
+    np.random.seed(42)
+    n = 200
+    X = pd.DataFrame({
+        "거래시간대": np.random.choice([0, 3, 6, 9, 12, 15, 18, 21], n),
+        "출금금융회사일련번호": np.random.randint(1, 100, n),
+        "입금금융회사일련번호": np.random.randint(1, 100, n),
+        "자금구분": np.random.choice([0, 1, 3, 4], n),
+        "매체구분": np.random.randint(1, 8, n),
+        "거래금액": np.random.randint(10000, 10000000, n),
+    })
+    y = pd.Series([0] * 190 + [1] * 10)
+    model = XGBClassifier(n_estimators=10, random_state=42, n_jobs=1, verbosity=0)
+    model.fit(X, y)
+    return model
+
+
+@pytest.fixture(scope="module")
+def eval_data():
+    """테스트용 모델, 테스트 데이터, 예측 결과를 함께 반환한다."""
+    from xgboost import XGBClassifier  # noqa: PLC0415 — fixture-local import 허용
+    np.random.seed(42)
+    n = 200
+    X = pd.DataFrame({
+        "거래시간대": np.random.choice([0, 3, 6, 9, 12, 15, 18, 21], n),
+        "출금금융회사일련번호": np.random.randint(1, 100, n),
+        "입금금융회사일련번호": np.random.randint(1, 100, n),
+        "자금구분": np.random.choice([0, 1, 3, 4], n),
+        "매체구분": np.random.randint(1, 8, n),
+        "거래금액": np.random.randint(10000, 10000000, n),
+    })
+    y = pd.Series([0] * 190 + [1] * 10)
+    model = XGBClassifier(n_estimators=10, random_state=42, n_jobs=1, verbosity=0)
+    model.fit(X, y)
+
+    y_prob = model.predict_proba(X)[:, 1]
+    return model, X, y, y_prob
 
 
 # ──────────────────────────────────────────────
@@ -62,6 +118,17 @@ class TestConstants:
         """MODEL_PATH가 .joblib 확장자인지 확인."""
         assert MODEL_PATH.suffix == ".joblib"
 
+    def test_fraud_type_labels_defined(self):
+        """FRAUD_TYPE_LABELS가 정의되어 있는지 확인."""
+        assert isinstance(FRAUD_TYPE_LABELS, dict)
+        assert len(FRAUD_TYPE_LABELS) > 0
+
+    def test_fraud_type_labels_contains_known_types(self):
+        """FRAUD_TYPE_LABELS에 주요 이상거래 유형이 포함되어 있는지 확인."""
+        assert 1 in FRAUD_TYPE_LABELS
+        assert 3 in FRAUD_TYPE_LABELS
+        assert 7 in FRAUD_TYPE_LABELS
+
 
 # ──────────────────────────────────────────────
 # load_model
@@ -96,23 +163,6 @@ class TestLoadModel:
 # ──────────────────────────────────────────────
 class TestGetFeatureImportance:
     """get_feature_importance() 단위 테스트."""
-
-    @pytest.fixture(scope="class")
-    def mock_model(self):
-        """테스트용 간단한 XGBoost 모델을 학습하여 반환한다."""
-        from xgboost import XGBClassifier
-        X = pd.DataFrame({
-            "거래시간대": [0, 3, 6, 9, 12, 15, 18, 21] * 10,
-            "출금금융회사일련번호": range(80),
-            "입금금융회사일련번호": range(1, 81),
-            "자금구분": [0, 1] * 40,
-            "매체구분": [1, 2, 3, 4, 5, 6, 7, 1] * 10,
-            "거래금액": [100000, 500000, 1000000, 5000000] * 20,
-        })
-        y = pd.Series([0] * 75 + [1] * 5)
-        model = XGBClassifier(n_estimators=10, random_state=42, n_jobs=1, verbosity=0)
-        model.fit(X, y)
-        return model
 
     def test_returns_dataframe(self, mock_model):
         assert isinstance(get_feature_importance(mock_model), pd.DataFrame)
@@ -156,23 +206,6 @@ class TestGetFeatureImportance:
 # ──────────────────────────────────────────────
 class TestPredictFromDb:
     """predict_from_db() 단위 테스트."""
-
-    @pytest.fixture(scope="class")
-    def mock_model(self):
-        """테스트용 XGBoost 모델을 학습하여 반환한다."""
-        from xgboost import XGBClassifier
-        X = pd.DataFrame({
-            "거래시간대": [0, 3, 6, 9, 12, 15, 18, 21] * 10,
-            "출금금융회사일련번호": range(80),
-            "입금금융회사일련번호": range(1, 81),
-            "자금구분": [0, 1] * 40,
-            "매체구분": [1, 2, 3, 4, 5, 6, 7, 1] * 10,
-            "거래금액": [100000, 500000, 1000000, 5000000] * 20,
-        })
-        y = pd.Series([0] * 75 + [1] * 5)
-        model = XGBClassifier(n_estimators=10, random_state=42, n_jobs=1, verbosity=0)
-        model.fit(X, y)
-        return model
 
     @pytest.fixture(scope="class")
     def prediction_df(self, mock_model):
@@ -224,28 +257,8 @@ class TestEvaluateModel:
     """evaluate_model() 단위 테스트."""
 
     @pytest.fixture(scope="class")
-    def model_and_data(self):
-        """간단한 XGBoost 모델과 테스트 데이터를 준비한다."""
-        from xgboost import XGBClassifier
-        np.random.seed(42)
-        n = 200
-        X = pd.DataFrame({
-            "거래시간대": np.random.choice([0, 3, 6, 9, 12, 15, 18, 21], n),
-            "출금금융회사일련번호": np.random.randint(1, 100, n),
-            "입금금융회사일련번호": np.random.randint(1, 100, n),
-            "자금구분": np.random.choice([0, 1, 3, 4], n),
-            "매체구분": np.random.randint(1, 8, n),
-            "거래금액": np.random.randint(10000, 10000000, n),
-        })
-        y = pd.Series([0] * 190 + [1] * 10)
-
-        model = XGBClassifier(n_estimators=10, random_state=42, n_jobs=1, verbosity=0)
-        model.fit(X, y)
-        return model, X, y
-
-    @pytest.fixture(scope="class")
-    def eval_result(self, model_and_data):
-        model, X, y = model_and_data
+    def eval_result(self, eval_data):
+        model, X, y, _ = eval_data
         return evaluate_model(model, X, y)
 
     def test_returns_dict(self, eval_result):
@@ -274,9 +287,9 @@ class TestEvaluateModel:
         cm = eval_result["confusion_matrix"]
         assert (cm >= 0).all()
 
-    def test_confusion_matrix_sum_matches_total(self, eval_result, model_and_data):
+    def test_confusion_matrix_sum_matches_total(self, eval_result, eval_data):
         """혼동 행렬 합계가 총 샘플 수와 일치해야 한다."""
-        _, X, y = model_and_data
+        _, X, y, _ = eval_data
         cm = eval_result["confusion_matrix"]
         assert cm.sum() == len(y)
 
@@ -297,6 +310,287 @@ class TestEvaluateModel:
         # 0(정상) 또는 '0' 키가 있어야 함
         has_zero = ("0" in report) or (0 in report)
         assert has_zero or "accuracy" in report
+
+
+# ──────────────────────────────────────────────
+# find_optimal_threshold
+# ──────────────────────────────────────────────
+class TestFindOptimalThreshold:
+    """find_optimal_threshold() 단위 테스트."""
+
+    @pytest.fixture(scope="class")
+    def threshold_result(self, eval_data):
+        _, _, y, y_prob = eval_data
+        return find_optimal_threshold(y, y_prob)
+
+    def test_returns_dict(self, threshold_result):
+        """dict를 반환하는지 확인."""
+        assert isinstance(threshold_result, dict)
+
+    def test_required_keys(self, threshold_result):
+        """필수 키가 모두 존재하는지 확인."""
+        required = {"optimal_threshold", "precision", "recall", "f1", "thresholds_df", "pr_curve"}
+        assert required.issubset(set(threshold_result.keys()))
+
+    def test_optimal_threshold_range(self, threshold_result):
+        """최적 임계값이 0~1 사이인지 확인."""
+        t = threshold_result["optimal_threshold"]
+        assert 0 < t < 1
+
+    def test_precision_range(self, threshold_result):
+        """precision이 0~1 사이인지 확인."""
+        assert 0 <= threshold_result["precision"] <= 1
+
+    def test_recall_range(self, threshold_result):
+        """recall이 0~1 사이인지 확인."""
+        assert 0 <= threshold_result["recall"] <= 1
+
+    def test_f1_range(self, threshold_result):
+        """f1이 0~1 사이인지 확인."""
+        assert 0 <= threshold_result["f1"] <= 1
+
+    def test_thresholds_df_is_dataframe(self, threshold_result):
+        """thresholds_df가 DataFrame인지 확인."""
+        assert isinstance(threshold_result["thresholds_df"], pd.DataFrame)
+
+    def test_thresholds_df_columns(self, threshold_result):
+        """thresholds_df에 필수 컬럼이 있는지 확인."""
+        df = threshold_result["thresholds_df"]
+        expected_cols = {"임계값", "Precision", "Recall", "F1-Score", "TP", "FP", "FN"}
+        assert expected_cols.issubset(set(df.columns))
+
+    def test_thresholds_df_rows(self, threshold_result):
+        """thresholds_df에 여러 임계값 행이 있는지 확인."""
+        df = threshold_result["thresholds_df"]
+        assert len(df) >= 10  # 0.05~0.95 범위에 0.05 간격이면 19행
+
+    def test_thresholds_sorted(self, threshold_result):
+        """thresholds_df의 임계값이 오름차순인지 확인."""
+        df = threshold_result["thresholds_df"]
+        vals = df["임계값"].tolist()
+        assert vals == sorted(vals)
+
+    def test_pr_curve_is_tuple(self, threshold_result):
+        """pr_curve가 (precision, recall, thresholds) 튜플인지 확인."""
+        pr = threshold_result["pr_curve"]
+        assert isinstance(pr, tuple)
+        assert len(pr) == 3
+
+    def test_f1_consistency(self, threshold_result):
+        """F1이 precision과 recall로부터 올바르게 계산되는지 확인."""
+        df = threshold_result["thresholds_df"]
+        for _, row in df.iterrows():
+            p, r, f = row["Precision"], row["Recall"], row["F1-Score"]
+            if p + r > 0:
+                expected_f1 = 2 * p * r / (p + r)
+                assert abs(f - expected_f1) < 0.01, f"F1 불일치: {f} vs {expected_f1}"
+
+
+# ──────────────────────────────────────────────
+# get_roc_curve_data
+# ──────────────────────────────────────────────
+class TestGetRocCurveData:
+    """get_roc_curve_data() 단위 테스트."""
+
+    @pytest.fixture(scope="class")
+    def roc_data(self, eval_data):
+        _, _, y, y_prob = eval_data
+        return get_roc_curve_data(y, y_prob)
+
+    def test_returns_dict(self, roc_data):
+        """dict를 반환하는지 확인."""
+        assert isinstance(roc_data, dict)
+
+    def test_required_keys(self, roc_data):
+        """필수 키가 모두 존재하는지 확인."""
+        required = {"fpr", "tpr", "thresholds", "auc"}
+        assert required.issubset(set(roc_data.keys()))
+
+    def test_auc_range(self, roc_data):
+        """AUC가 0~1 사이인지 확인."""
+        assert 0 <= roc_data["auc"] <= 1
+
+    def test_fpr_range(self, roc_data):
+        """FPR이 0~1 사이인지 확인."""
+        fpr = roc_data["fpr"]
+        assert np.all(fpr >= 0)
+        assert np.all(fpr <= 1)
+
+    def test_tpr_range(self, roc_data):
+        """TPR이 0~1 사이인지 확인."""
+        tpr = roc_data["tpr"]
+        assert np.all(tpr >= 0)
+        assert np.all(tpr <= 1)
+
+    def test_fpr_tpr_same_length(self, roc_data):
+        """FPR과 TPR의 길이가 동일한지 확인."""
+        assert len(roc_data["fpr"]) == len(roc_data["tpr"])
+
+    def test_fpr_sorted(self, roc_data):
+        """FPR이 오름차순인지 확인."""
+        fpr = roc_data["fpr"]
+        assert np.all(fpr[1:] >= fpr[:-1])
+
+    def test_starts_at_origin(self, roc_data):
+        """ROC 커브가 (0, 0)에서 시작하는지 확인."""
+        assert roc_data["fpr"][0] == 0
+        assert roc_data["tpr"][0] == 0
+
+
+# ──────────────────────────────────────────────
+# evaluate_by_fraud_type
+# ──────────────────────────────────────────────
+class TestEvaluateByFraudType:
+    """evaluate_by_fraud_type() 단위 테스트."""
+
+    @pytest.fixture(scope="class")
+    def fraud_type_result(self, mock_model):
+        return evaluate_by_fraud_type(mock_model, limit=1000)
+
+    def test_returns_dataframe(self, fraud_type_result):
+        """DataFrame을 반환하는지 확인."""
+        assert isinstance(fraud_type_result, pd.DataFrame)
+
+    def test_expected_columns(self, fraud_type_result):
+        """필수 컬럼이 있는지 확인."""
+        expected = {"이상거래유형", "유형설명", "전체건수", "탐지건수", "Recall"}
+        assert expected.issubset(set(fraud_type_result.columns))
+
+    def test_recall_range(self, fraud_type_result):
+        """Recall이 0~1 사이인지 확인."""
+        if not fraud_type_result.empty:
+            assert (fraud_type_result["Recall"] >= 0).all()
+            assert (fraud_type_result["Recall"] <= 1).all()
+
+    def test_detected_lte_total(self, fraud_type_result):
+        """탐지건수가 전체건수 이하인지 확인."""
+        if not fraud_type_result.empty:
+            for _, row in fraud_type_result.iterrows():
+                assert row["탐지건수"] <= row["전체건수"]
+
+    def test_total_positive(self, fraud_type_result):
+        """전체건수가 양수인지 확인."""
+        if not fraud_type_result.empty:
+            assert (fraud_type_result["전체건수"] > 0).all()
+
+    def test_fraud_types_valid(self, fraud_type_result):
+        """이상거래유형이 유효한 범위(1~7)인지 확인."""
+        if not fraud_type_result.empty:
+            types = set(fraud_type_result["이상거래유형"])
+            assert types.issubset(set(range(1, 8)))
+
+    def test_descriptions_not_empty(self, fraud_type_result):
+        """유형설명이 비어있지 않은지 확인."""
+        if not fraud_type_result.empty:
+            for desc in fraud_type_result["유형설명"]:
+                assert desc is not None and len(str(desc)) > 0
+
+
+# ──────────────────────────────────────────────
+# get_probability_distribution
+# ──────────────────────────────────────────────
+class TestGetProbabilityDistribution:
+    """get_probability_distribution() 단위 테스트."""
+
+    @pytest.fixture(scope="class")
+    def prob_dist(self, eval_data):
+        _, _, y, y_prob = eval_data
+        return get_probability_distribution(y, y_prob)
+
+    def test_returns_dataframe(self, prob_dist):
+        """DataFrame을 반환하는지 확인."""
+        assert isinstance(prob_dist, pd.DataFrame)
+
+    def test_expected_columns(self, prob_dist):
+        """필수 컬럼이 있는지 확인."""
+        expected = {"구간", "정상", "이상"}
+        assert expected.issubset(set(prob_dist.columns))
+
+    def test_ten_bins(self, prob_dist):
+        """기본 10구간인지 확인."""
+        assert len(prob_dist) == 10
+
+    def test_counts_non_negative(self, prob_dist):
+        """모든 건수가 0 이상인지 확인."""
+        assert (prob_dist["정상"] >= 0).all()
+        assert (prob_dist["이상"] >= 0).all()
+
+    def test_total_matches_data_size(self, prob_dist, eval_data):
+        """정상 + 이상 합계가 데이터 크기와 일치하는지 확인."""
+        _, _, y, _ = eval_data
+        total = prob_dist["정상"].sum() + prob_dist["이상"].sum()
+        assert total == len(y)
+
+    def test_custom_bins(self, eval_data):
+        """커스텀 구간 수가 적용되는지 확인."""
+        _, _, y, y_prob = eval_data
+        dist5 = get_probability_distribution(y, y_prob, bins=5)
+        assert len(dist5) == 5
+
+    def test_bin_labels_format(self, prob_dist):
+        """구간 레이블이 올바른 형식인지 확인."""
+        for label in prob_dist["구간"]:
+            assert "~" in label
+
+
+# ──────────────────────────────────────────────
+# train_model (커스텀 파라미터)
+# ──────────────────────────────────────────────
+class TestTrainModelParams:
+    """train_model()의 커스텀 파라미터 수용 테스트."""
+
+    def test_accepts_custom_params(self, tmp_path, monkeypatch):
+        """커스텀 하이퍼파라미터로 학습이 성공하는지 확인."""
+        from xgboost import XGBClassifier
+        import src.features.detector as det
+
+        # 임시 모델 경로 사용
+        fake_model_path = tmp_path / "test_model.joblib"
+        monkeypatch.setattr(det, "MODEL_PATH", fake_model_path)
+        monkeypatch.setattr(config, "MODELS_DIR", tmp_path)
+
+        np.random.seed(42)
+        n = 100
+        X = pd.DataFrame({
+            "거래시간대": np.random.choice([0, 3, 6, 9], n),
+            "출금금융회사일련번호": np.random.randint(1, 50, n),
+            "입금금융회사일련번호": np.random.randint(1, 50, n),
+            "자금구분": np.random.choice([0, 1], n),
+            "매체구분": np.random.randint(1, 4, n),
+            "거래금액": np.random.randint(10000, 1000000, n),
+        })
+        y_train = pd.Series([0] * 95 + [1] * 5)
+        y_val = pd.Series([0] * 95 + [1] * 5)
+
+        params = {"n_estimators": 50, "max_depth": 3, "learning_rate": 0.05}
+        model = det.train_model(X, y_train, X, y_val, params=params)
+
+        assert model is not None
+        assert hasattr(model, "predict_proba")
+        assert fake_model_path.exists()
+
+    def test_default_params_when_none(self, tmp_path, monkeypatch):
+        """params=None일 때 기본값으로 학습하는지 확인."""
+        import src.features.detector as det
+
+        fake_model_path = tmp_path / "test_model2.joblib"
+        monkeypatch.setattr(det, "MODEL_PATH", fake_model_path)
+        monkeypatch.setattr(config, "MODELS_DIR", tmp_path)
+
+        np.random.seed(42)
+        n = 100
+        X = pd.DataFrame({
+            "거래시간대": np.random.choice([0, 3], n),
+            "출금금융회사일련번호": np.random.randint(1, 20, n),
+            "입금금융회사일련번호": np.random.randint(1, 20, n),
+            "자금구분": np.random.choice([0, 1], n),
+            "매체구분": np.random.randint(1, 3, n),
+            "거래금액": np.random.randint(10000, 500000, n),
+        })
+        y = pd.Series([0] * 95 + [1] * 5)
+
+        model = det.train_model(X, y, X, y, params=None)
+        assert model is not None
 
 
 # ──────────────────────────────────────────────
