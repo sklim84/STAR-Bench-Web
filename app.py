@@ -139,6 +139,7 @@ hr {
 def init_database():
     """앱 시작 시 DuckDB를 초기화하고 데이터를 적재한다."""
     conn = db.get_connection()
+    # db.py 내부에서 직접 연결을 사용하는 것은 허용된 패턴
     count = conn.execute("SELECT count(*) FROM hofinet").fetchone()[0]
     return count
 
@@ -197,37 +198,37 @@ if selected == "Home":
 
     st.markdown("---")
 
-    # 요약 메트릭 카드
-    summary = db.query("""
-        SELECT
-            count(*) as total,
-            sum(이상거래여부) as fraud,
-            count(DISTINCT 출금계좌일련번호) as accounts,
-            count(DISTINCT 출금금융회사일련번호) + count(DISTINCT 입금금융회사일련번호) as banks
-        FROM hofinet
-    """)
+    # 요약 메트릭 카드 (dashboard.get_summary() 활용)
+    from src.features.dashboard import get_summary
+    summary = get_summary()
+    if summary.empty:
+        st.error("데이터를 불러올 수 없습니다. 데이터 로딩 상태를 확인하세요.")
+        st.stop()
     row = summary.iloc[0]
+
+    # Home 페이지에서는 출금+입금 금융회사 수 합산으로 표시 (기존 동작 유지)
+    banks_count = int(row['출금금융회사수']) + int(row['입금금융회사수'])
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         st.markdown(f"""<div class="metric-card">
             <div class="label">총 거래 건수</div>
-            <div class="value">{int(row['total']):,}</div>
+            <div class="value">{int(row['총거래']):,}</div>
         </div>""", unsafe_allow_html=True)
     with c2:
         st.markdown(f"""<div class="metric-card">
             <div class="label">이상거래 건수</div>
-            <div class="value">{int(row['fraud']):,}</div>
+            <div class="value">{int(row['이상거래']):,}</div>
         </div>""", unsafe_allow_html=True)
     with c3:
         st.markdown(f"""<div class="metric-card">
             <div class="label">출금 계좌 수</div>
-            <div class="value">{int(row['accounts']):,}</div>
+            <div class="value">{int(row['출금계좌수']):,}</div>
         </div>""", unsafe_allow_html=True)
     with c4:
         st.markdown(f"""<div class="metric-card">
             <div class="label">금융회사 수</div>
-            <div class="value">{int(row['banks']):,}</div>
+            <div class="value">{banks_count:,}</div>
         </div>""", unsafe_allow_html=True)
 
     st.markdown("---")
