@@ -21,6 +21,8 @@ def get_bank_network():
 
 def get_fraud_account_network(limit=500):
     """이상거래 관련 계좌 간 네트워크 데이터를 반환한다."""
+    # limit은 외부 입력이므로 int 형변환으로 안전하게 처리 (DuckDB는 LIMIT 파라미터 바인딩 미지원)
+    limit = int(limit)
     return query(f"""
         SELECT
             출금계좌일련번호 as source,
@@ -39,8 +41,11 @@ def get_fraud_account_network(limit=500):
 
 def get_account_ego_network(account_id, hops=1):
     """특정 계좌의 ego 네트워크(n-hop 이웃)를 반환한다."""
+    # account_id는 int64 계좌 번호이므로 int 형변환으로 SQL 인젝션 방지
+    account_id = int(account_id)
     if hops == 1:
-        return query(f"""
+        return query(
+            """
             SELECT
                 출금계좌일련번호 as source,
                 입금계좌일련번호 as target,
@@ -48,11 +53,14 @@ def get_account_ego_network(account_id, hops=1):
                 sum(거래금액) as 총금액,
                 max(이상거래여부) as 이상거래여부
             FROM hofinet
-            WHERE 출금계좌일련번호 = {account_id}
-               OR 입금계좌일련번호 = {account_id}
+            WHERE 출금계좌일련번호 = ?
+               OR 입금계좌일련번호 = ?
             GROUP BY source, target
-        """)
+            """,
+            [account_id, account_id],
+        )
     # 2-hop: 1-hop 이웃의 거래까지 포함
+    # DuckDB CTE에서는 파라미터가 여러 번 참조되므로 int 변수를 f-string으로 안전하게 삽입
     return query(f"""
         WITH hop1 AS (
             SELECT DISTINCT

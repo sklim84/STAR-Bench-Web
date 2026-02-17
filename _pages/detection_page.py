@@ -68,7 +68,13 @@ def render():
                     fi, x="중요도", y="피처", orientation="h",
                     color="중요도", color_continuous_scale="Blues",
                 )
-                fig_fi.update_layout(height=300, margin=dict(t=20, b=20), yaxis=dict(autorange="reversed"))
+                fig_fi.update_layout(
+                    height=300, margin=dict(t=20, b=20), yaxis=dict(autorange="reversed"),
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#C0C4D0"),
+                )
+                fig_fi.update_xaxes(gridcolor="#1E2333", zerolinecolor="#1E2333", tickfont=dict(color="#8B8FA3"))
+                fig_fi.update_yaxes(gridcolor="#1E2333", zerolinecolor="#1E2333", tickfont=dict(color="#8B8FA3"))
                 st.plotly_chart(fig_fi, use_container_width=True)
 
             with col_right:
@@ -80,7 +86,11 @@ def render():
                     x=["정상", "이상"], y=["정상", "이상"],
                     color_continuous_scale="Blues",
                 )
-                fig_cm.update_layout(height=300, margin=dict(t=20, b=20))
+                fig_cm.update_layout(
+                    height=300, margin=dict(t=20, b=20),
+                    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                    font=dict(color="#C0C4D0"),
+                )
                 st.plotly_chart(fig_cm, use_container_width=True)
 
             # 분류 리포트
@@ -103,9 +113,13 @@ def render():
             fig_dist.update_layout(
                 barmode="overlay", height=350,
                 xaxis_title="예측 확률", yaxis_title="빈도",
-                legend=dict(orientation="h", y=1.1),
+                legend=dict(orientation="h", y=1.1, font=dict(color="#8B8FA3"), bgcolor="rgba(0,0,0,0)"),
                 margin=dict(t=30, b=30),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#C0C4D0"),
             )
+            fig_dist.update_xaxes(gridcolor="#1E2333", zerolinecolor="#1E2333", tickfont=dict(color="#8B8FA3"))
+            fig_dist.update_yaxes(gridcolor="#1E2333", zerolinecolor="#1E2333", tickfont=dict(color="#8B8FA3"))
             st.plotly_chart(fig_dist, use_container_width=True)
 
     # --- 탭2: 탐지 실행 ---

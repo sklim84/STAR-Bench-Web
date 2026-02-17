@@ -73,10 +73,14 @@ def _plot_network(G, title, node_color_attr=None, edge_color_attr=None, center_n
 
     fig = go.Figure(data=[edge_trace, node_trace])
     fig.update_layout(
-        title=title, showlegend=False, height=600,
+        title=dict(text=title, font=dict(color="#C0C4D0")),
+        showlegend=False, height=600,
         xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
         yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
         margin=dict(t=40, b=20, l=20, r=20),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#C0C4D0"),
     )
     st.plotly_chart(fig, use_container_width=True)
 

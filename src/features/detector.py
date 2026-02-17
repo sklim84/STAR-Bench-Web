@@ -117,6 +117,8 @@ def get_feature_importance(model):
 
 def predict_from_db(model, limit=1000):
     """hofinet 테이블에서 샘플을 추출하여 예측 결과를 반환한다."""
+    # limit은 int 형변환으로 안전하게 처리 (DuckDB는 LIMIT 파라미터 바인딩 미지원)
+    limit = int(limit)
     df = query(f"""
         SELECT 거래일자, 거래시간대, 출금금융회사일련번호, 출금계좌일련번호,
                입금금융회사일련번호, 입금계좌일련번호, 자금구분, 매체구분,

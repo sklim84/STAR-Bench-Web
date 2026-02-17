@@ -35,7 +35,9 @@ app.py (라우팅 + 글로벌 CSS) → _pages/ (UI, render()) → src/features/ 
 
 **Data pipeline**: CSV → Parquet (PyArrow, snappy 압축, 타입 최적화) → DuckDB 인메모리 테이블(`hofinet`). 앱 시작 시 Parquet이 없으면 `src/data/loader`가 자동 변환하고, `src/data/db`가 테이블을 생성한다.
 
-**Agent (기능4)**: `src/features/agent.py`에서 OpenAI `gpt-4o-mini` + function calling으로 구현. 도구 3개 등록: `query_transactions` (SQL 실행), `predict_fraud` (XGBoost 예측), `generate_str` (STR 작성). 최대 5라운드 tool calling 반복.
+**Detector (기능3)**: `src/features/detector.py`에서 XGBoost로 이상거래 탐지. 학습 피처: `["거래시간대", "출금금융회사일련번호", "입금금융회사일련번호", "자금구분", "매체구분", "거래금액"]`. 학습된 모델은 `_models/xgb_detector.joblib`에 저장. 클래스 불균형 처리에 `scale_pos_weight` 동적 계산, early stopping 20라운드 (`eval_metric="aucpr"`).
+
+**Agent (기능4)**: `src/features/agent.py`에서 OpenAI `gpt-4o-mini` + function calling으로 구현. 도구 3개 등록: `query_transactions` (SQL 실행, 최대 100행 반환), `predict_fraud` (XGBoost 예측, 확률 0~1 반환), `generate_str` (STR 작성). 최대 5라운드 tool calling 반복.
 
 **새 기능 추가 패턴**: `src/features/`에 비즈니스 로직 모듈 생성 → `_pages/`에 `render()` 함수가 있는 페이지 모듈 생성 → `app.py`의 `option_menu` options/icons와 라우팅 if-elif에 추가
 
@@ -44,6 +46,10 @@ app.py (라우팅 + 글로벌 CSS) → _pages/ (UI, render()) → src/features/ 
 HOFINET 데이터셋 - 전자금융공동망 이상거래탐지 데이터 (4,732,130건, 2021 Q4 ~ 2024 Q4, 13분기).
 DuckDB 테이블명 `hofinet`. **컬럼명이 한글**이므로 SQL에서 그대로 사용: `SELECT 거래금액 FROM hofinet`.
 클래스 불균형 325.6:1 (정상 99.69% / 이상 0.31%). 상세 스키마는 `_datasets/HOFINET.MD` 참조.
+
+**학습 데이터**: `_datasets/original/{Training,Test,Validation}/` 디렉토리에 분할 저장.
+
+**이상거래유형 코드**: 1=자금세탁, 2=신규 거래처(63.87%로 최다), 3=대포통장, 4=보이스피싱, 5=불법도박, 6=유사수신, 7=기타
 
 **컬럼**: 거래일자(int32), 거래시간대(int8), 출금금융회사일련번호(int16), 출금계좌일련번호(int64), 입금금융회사일련번호(int16), 입금계좌일련번호(int64), 자금구분(int8), 매체구분(int8), 거래금액(int64), 이상거래여부(int8, 0/1), 이상거래유형(int8), 이상거래설명(utf8)
 
@@ -71,3 +77,5 @@ DuckDB 테이블명 `hofinet`. **컬럼명이 한글**이므로 SQL에서 그대
 - Plotly 차트에 다크 테마 적용 필수 (투명 배경, `#1E2333` 그리드)
 - 페이지 모듈은 `_pages/`에 위치하며, 반드시 `render()` 함수를 export
 - `.env` 파일 커밋 금지, API 키를 코드에 노출하지 않기
+- 테스트 네이밍: `Test<FunctionName>::test_<description>` 패턴 사용
+- 현재 테스트 커버리지: dashboard, db, loader, config, modules (detector/network/agent 테스트 미작성)
