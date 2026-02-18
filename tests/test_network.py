@@ -547,3 +547,650 @@ class TestGetExtendedNetworkStats:
         assert result["엣지수"] == 0
         assert result["밀도"] == 0.0
         assert result["허브노드"] == "-"
+
+
+# ==================================================================
+# Memgraph Cypher 기반 AML 패턴 탐지 함수 테스트
+# ==================================================================
+# Memgraph가 실행되지 않는 테스트 환경에서는 graph_db를 mock하여 테스트
+# ------------------------------------------------------------------
+
+from src.features.network import (
+    detect_ring_transactions,
+    detect_layering_patterns,
+    detect_funnel_accounts,
+    get_account_ego_network_deep,
+    find_shortest_path,
+    get_temporal_network,
+    compute_risk_score,
+)
+
+
+# ──────────────────────────────────────────────
+# detect_ring_transactions
+# ──────────────────────────────────────────────
+class TestDetectRingTransactions:
+    """detect_ring_transactions() 단위 테스트."""
+
+    def test_fallback_when_memgraph_unavailable(self):
+        """Memgraph 미실행 시 빈 DataFrame을 반환해야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=False):
+            result = detect_ring_transactions()
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 0
+        expected_cols = {"ring_accounts", "ring_size", "total_amount", "dates"}
+        assert expected_cols.issubset(set(result.columns))
+
+    def test_returns_dataframe_with_results(self):
+        """Memgraph 실행 시 DataFrame을 반환해야 한다."""
+        mock_records = [
+            {
+                "ring_accounts": [100, 200, 300, 100],
+                "ring_size": 3,
+                "total_amount": 5000000,
+                "dates": [20210101, 20210102, 20210103],
+            }
+        ]
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=mock_records):
+            result = detect_ring_transactions()
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 1
+        assert result.iloc[0]["ring_size"] == 3
+        assert result.iloc[0]["total_amount"] == 5000000
+
+    def test_empty_results_from_memgraph(self):
+        """Memgraph에서 결과가 없으면 빈 DataFrame을 반환해야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=[]):
+            result = detect_ring_transactions()
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 0
+
+    def test_default_parameters(self):
+        """기본 파라미터가 올바르게 적용되어야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=[]) as mock_exec:
+            detect_ring_transactions()
+        cypher = mock_exec.call_args[0][0]
+        assert "*3..6" in cypher
+        assert "LIMIT 100" in cypher
+
+    def test_custom_parameters(self):
+        """커스텀 파라미터가 Cypher 쿼리에 반영되어야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=[]) as mock_exec:
+            detect_ring_transactions(min_len=4, max_len=8, limit=50)
+        cypher = mock_exec.call_args[0][0]
+        assert "*4..8" in cypher
+        assert "LIMIT 50" in cypher
+
+    def test_min_amount_filter(self):
+        """min_amount 필터가 Cypher 쿼리에 포함되어야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=[]) as mock_exec:
+            detect_ring_transactions(min_amount=1000000)
+        cypher = mock_exec.call_args[0][0]
+        assert "1000000" in cypher
+
+    def test_multiple_results(self):
+        """여러 사이클이 반환되면 모두 DataFrame에 포함해야 한다."""
+        mock_records = [
+            {"ring_accounts": [1, 2, 3, 1], "ring_size": 3, "total_amount": 3000, "dates": [20210101, 20210102, 20210103]},
+            {"ring_accounts": [4, 5, 6, 7, 4], "ring_size": 4, "total_amount": 2000, "dates": [20210201, 20210202, 20210203, 20210204]},
+        ]
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=mock_records):
+            result = detect_ring_transactions()
+        assert len(result) == 2
+
+    def test_parameter_type_safety(self):
+        """문자열 파라미터가 int로 변환되어야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=[]) as mock_exec:
+            detect_ring_transactions(min_len="4", max_len="7", min_amount="100", limit="20")
+        cypher = mock_exec.call_args[0][0]
+        assert "*4..7" in cypher
+        assert "LIMIT 20" in cypher
+
+
+# ──────────────────────────────────────────────
+# detect_layering_patterns
+# ──────────────────────────────────────────────
+class TestDetectLayeringPatterns:
+    """detect_layering_patterns() 단위 테스트."""
+
+    def test_fallback_when_memgraph_unavailable(self):
+        """Memgraph 미실행 시 빈 DataFrame을 반환해야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=False):
+            result = detect_layering_patterns()
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 0
+        expected_cols = {"source_account", "destination_account", "path_accounts", "layers", "total_amount"}
+        assert expected_cols.issubset(set(result.columns))
+
+    def test_returns_dataframe_with_results(self):
+        """Memgraph 실행 시 DataFrame을 반환해야 한다."""
+        mock_records = [
+            {
+                "source_account": 100,
+                "destination_account": 400,
+                "path_accounts": [100, 200, 300, 400],
+                "layers": 3,
+                "total_amount": 9000000,
+            }
+        ]
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=mock_records):
+            result = detect_layering_patterns()
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 1
+        assert result.iloc[0]["layers"] == 3
+        assert result.iloc[0]["source_account"] == 100
+        assert result.iloc[0]["destination_account"] == 400
+
+    def test_empty_results_from_memgraph(self):
+        """Memgraph에서 결과가 없으면 빈 DataFrame을 반환해야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=[]):
+            result = detect_layering_patterns()
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 0
+
+    def test_default_parameters(self):
+        """기본 파라미터가 올바르게 적용되어야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=[]) as mock_exec:
+            detect_layering_patterns()
+        cypher = mock_exec.call_args[0][0]
+        assert "*3.." in cypher
+        assert "LIMIT 100" in cypher
+
+    def test_custom_min_layers(self):
+        """커스텀 min_layers가 Cypher 쿼리에 반영되어야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=[]) as mock_exec:
+            detect_layering_patterns(min_layers=5, limit=30)
+        cypher = mock_exec.call_args[0][0]
+        assert "*5.." in cypher
+        assert "LIMIT 30" in cypher
+
+    def test_fraud_filter_applied(self):
+        """이상거래여부 필터가 Cypher 쿼리에 포함되어야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=[]) as mock_exec:
+            detect_layering_patterns()
+        cypher = mock_exec.call_args[0][0]
+        assert "이상거래여부" in cypher
+
+    def test_multiple_results(self):
+        """여러 레이어링 패턴이 반환되면 모두 포함해야 한다."""
+        mock_records = [
+            {"source_account": 1, "destination_account": 4, "path_accounts": [1, 2, 3, 4], "layers": 3, "total_amount": 5000},
+            {"source_account": 10, "destination_account": 50, "path_accounts": [10, 20, 30, 40, 50], "layers": 4, "total_amount": 3000},
+        ]
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=mock_records):
+            result = detect_layering_patterns()
+        assert len(result) == 2
+
+
+# ──────────────────────────────────────────────
+# detect_funnel_accounts
+# ──────────────────────────────────────────────
+class TestDetectFunnelAccounts:
+    """detect_funnel_accounts() 단위 테스트."""
+
+    def test_fallback_when_memgraph_unavailable(self):
+        """Memgraph 미실행 시 빈 DataFrame을 반환해야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=False):
+            result = detect_funnel_accounts()
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 0
+        expected_cols = {"account_id", "inflow_count", "inflow_amount", "outflow_count", "outflow_amount", "funnel_ratio"}
+        assert expected_cols.issubset(set(result.columns))
+
+    def test_returns_dataframe_with_results(self):
+        """Memgraph 실행 시 DataFrame을 반환해야 한다."""
+        mock_records = [
+            {
+                "account_id": 12345,
+                "inflow_count": 15,
+                "inflow_amount": 10000000,
+                "outflow_count": 2,
+                "outflow_amount": 9500000,
+                "funnel_ratio": 7.5,
+            }
+        ]
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=mock_records):
+            result = detect_funnel_accounts()
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 1
+        assert result.iloc[0]["account_id"] == 12345
+        assert result.iloc[0]["funnel_ratio"] == 7.5
+
+    def test_empty_results_from_memgraph(self):
+        """Memgraph에서 결과가 없으면 빈 DataFrame을 반환해야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=[]):
+            result = detect_funnel_accounts()
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 0
+
+    def test_default_parameters(self):
+        """기본 파라미터가 올바르게 적용되어야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=[]) as mock_exec:
+            detect_funnel_accounts()
+        cypher = mock_exec.call_args[0][0]
+        assert "10" in cypher  # min_inflow
+        assert "LIMIT 100" in cypher
+
+    def test_custom_parameters(self):
+        """커스텀 파라미터가 Cypher 쿼리에 반영되어야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=[]) as mock_exec:
+            detect_funnel_accounts(min_inflow=20, max_outflow=5, limit=50)
+        cypher = mock_exec.call_args[0][0]
+        assert "20" in cypher  # min_inflow
+        assert "LIMIT 50" in cypher
+
+    def test_funnel_ratio_rounded(self):
+        """funnel_ratio가 소수점 2자리로 반올림되어야 한다."""
+        mock_records = [
+            {
+                "account_id": 999,
+                "inflow_count": 10,
+                "inflow_amount": 5000000,
+                "outflow_count": 3,
+                "outflow_amount": 4000000,
+                "funnel_ratio": 3.333333,
+            }
+        ]
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=mock_records):
+            result = detect_funnel_accounts()
+        assert result.iloc[0]["funnel_ratio"] == 3.33
+
+    def test_parameter_type_safety(self):
+        """문자열 파라미터가 int로 변환되어야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=[]):
+            # 예외 없이 실행 가능해야 함
+            result = detect_funnel_accounts(min_inflow="15", max_outflow="2", limit="50")
+        assert isinstance(result, pd.DataFrame)
+
+
+# ──────────────────────────────────────────────
+# get_account_ego_network_deep
+# ──────────────────────────────────────────────
+class TestGetAccountEgoNetworkDeep:
+    """get_account_ego_network_deep() 단위 테스트."""
+
+    def test_fallback_to_duckdb_when_memgraph_unavailable(self):
+        """Memgraph 미실행 시 DuckDB 기반 get_account_ego_network 폴백을 사용해야 한다."""
+        mock_df = pd.DataFrame({
+            "source": [100], "target": [200],
+            "거래횟수": [5], "총금액": [1000000], "이상거래여부": [0],
+        })
+        with patch("src.features.network.graph_db.is_available", return_value=False), \
+             patch("src.features.network.get_account_ego_network", return_value=mock_df) as mock_ego:
+            result = get_account_ego_network_deep(100, hops=3)
+        assert isinstance(result, pd.DataFrame)
+        # 폴백 시 hops는 min(3, 2)=2로 호출
+        mock_ego.assert_called_once_with(100, hops=2)
+
+    def test_fallback_hops_capped_at_2(self):
+        """폴백 시 hops가 2로 제한되어야 한다."""
+        mock_df = pd.DataFrame(columns=["source", "target", "거래횟수", "총금액", "이상거래여부"])
+        with patch("src.features.network.graph_db.is_available", return_value=False), \
+             patch("src.features.network.get_account_ego_network", return_value=mock_df) as mock_ego:
+            get_account_ego_network_deep(100, hops=5)
+        mock_ego.assert_called_once_with(100, hops=2)
+
+    def test_fallback_hops_preserves_small_value(self):
+        """폴백 시 hops가 2 이하이면 원래 값을 유지해야 한다."""
+        mock_df = pd.DataFrame(columns=["source", "target", "거래횟수", "총금액", "이상거래여부"])
+        with patch("src.features.network.graph_db.is_available", return_value=False), \
+             patch("src.features.network.get_account_ego_network", return_value=mock_df) as mock_ego:
+            get_account_ego_network_deep(100, hops=1)
+        mock_ego.assert_called_once_with(100, hops=1)
+
+    def test_returns_memgraph_data(self):
+        """Memgraph에서 데이터를 반환하면 그대로 사용해야 한다."""
+        mock_df = pd.DataFrame({
+            "source": [100, 200],
+            "target": [200, 300],
+            "거래횟수": [3, 2],
+            "총금액": [5000000, 3000000],
+            "이상거래여부": [1, 0],
+        })
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute_df", return_value=mock_df):
+            result = get_account_ego_network_deep(100, hops=3)
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 2
+
+    def test_empty_memgraph_result_falls_back(self):
+        """Memgraph 결과가 비어있으면 DuckDB 폴백을 사용해야 한다."""
+        mock_df = pd.DataFrame(columns=["source", "target", "거래횟수", "총금액", "이상거래여부"])
+        fallback_df = pd.DataFrame({
+            "source": [100], "target": [200],
+            "거래횟수": [1], "총금액": [500000], "이상거래여부": [0],
+        })
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute_df", return_value=mock_df), \
+             patch("src.features.network.get_account_ego_network", return_value=fallback_df) as mock_ego:
+            result = get_account_ego_network_deep(100, hops=4)
+        mock_ego.assert_called_once_with(100, hops=2)
+
+    def test_hops_capped_at_5(self):
+        """hops가 5를 초과하면 5로 제한되어야 한다."""
+        mock_df = pd.DataFrame({
+            "source": [100], "target": [200],
+            "거래횟수": [1], "총금액": [100], "이상거래여부": [0],
+        })
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute_df", return_value=mock_df) as mock_exec:
+            get_account_ego_network_deep(100, hops=10)
+        cypher = mock_exec.call_args[0][0]
+        assert "*1..5" in cypher
+
+    def test_account_id_type_safety(self):
+        """account_id가 int로 변환되어야 한다."""
+        mock_df = pd.DataFrame(columns=["source", "target", "거래횟수", "총금액", "이상거래여부"])
+        with patch("src.features.network.graph_db.is_available", return_value=False), \
+             patch("src.features.network.get_account_ego_network", return_value=mock_df):
+            # 문자열 입력도 정상 처리
+            result = get_account_ego_network_deep("12345", hops=2)
+        assert isinstance(result, pd.DataFrame)
+
+
+# ──────────────────────────────────────────────
+# find_shortest_path
+# ──────────────────────────────────────────────
+class TestFindShortestPath:
+    """find_shortest_path() 단위 테스트."""
+
+    def test_fallback_when_memgraph_unavailable(self):
+        """Memgraph 미실행 시 에러 딕셔너리를 반환해야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=False):
+            result = find_shortest_path(100, 200)
+        assert isinstance(result, dict)
+        assert "error" in result
+
+    def test_returns_path_data(self):
+        """Memgraph 실행 시 경로 정보를 반환해야 한다."""
+        mock_records = [
+            {
+                "path": [100, 200, 300],
+                "hops": 2,
+                "amounts": [5000000, 3000000],
+                "dates": [20210101, 20210102],
+            }
+        ]
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=mock_records):
+            result = find_shortest_path(100, 300)
+        assert isinstance(result, dict)
+        assert result["path"] == [100, 200, 300]
+        assert result["hops"] == 2
+        assert len(result["amounts"]) == 2
+        assert len(result["dates"]) == 2
+
+    def test_no_path_found(self):
+        """경로가 없으면 빈 결과를 반환해야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=[]):
+            result = find_shortest_path(100, 999999)
+        assert isinstance(result, dict)
+        assert result["path"] == []
+        assert result["hops"] == 0
+        assert "error" not in result
+
+    def test_direct_connection(self):
+        """직접 연결된 계좌는 hops=1이어야 한다."""
+        mock_records = [
+            {
+                "path": [100, 200],
+                "hops": 1,
+                "amounts": [5000000],
+                "dates": [20210101],
+            }
+        ]
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=mock_records):
+            result = find_shortest_path(100, 200)
+        assert result["hops"] == 1
+
+    def test_uses_parameter_binding(self):
+        """account_a, account_b가 파라미터로 전달되어야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=[]) as mock_exec:
+            find_shortest_path(111, 222)
+        _, kwargs = mock_exec.call_args
+        params = kwargs.get("params") or mock_exec.call_args[0][1] if len(mock_exec.call_args[0]) > 1 else {}
+        # params는 두 번째 위치 인자 또는 keyword로 전달
+        call_args = mock_exec.call_args
+        if len(call_args.args) > 1:
+            params = call_args.args[1]
+        elif call_args.kwargs:
+            params = call_args.kwargs
+        assert params.get("account_a") == 111
+        assert params.get("account_b") == 222
+
+    def test_account_id_type_safety(self):
+        """문자열 account_id가 int로 변환되어야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=[]):
+            result = find_shortest_path("100", "200")
+        assert isinstance(result, dict)
+
+    def test_result_structure(self):
+        """반환 딕셔너리에 필수 키가 있어야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=[]):
+            result = find_shortest_path(100, 200)
+        assert "path" in result
+        assert "hops" in result
+        assert "amounts" in result
+        assert "dates" in result
+
+
+# ──────────────────────────────────────────────
+# get_temporal_network
+# ──────────────────────────────────────────────
+class TestGetTemporalNetwork:
+    """get_temporal_network() 단위 테스트."""
+
+    def test_fallback_when_memgraph_unavailable(self):
+        """Memgraph 미실행 시 빈 DataFrame을 반환해야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=False):
+            result = get_temporal_network(20210101, 20241231)
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 0
+        expected_cols = {"source", "target", "거래횟수", "총금액", "이상거래여부"}
+        assert expected_cols.issubset(set(result.columns))
+
+    def test_returns_dataframe_with_results(self):
+        """Memgraph 실행 시 DataFrame을 반환해야 한다."""
+        mock_df = pd.DataFrame({
+            "source": [100, 200],
+            "target": [200, 300],
+            "거래횟수": [3, 2],
+            "총금액": [5000000, 3000000],
+            "이상거래여부": [1, 1],
+        })
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute_df", return_value=mock_df):
+            result = get_temporal_network(20210101, 20211231)
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 2
+
+    def test_empty_results_from_memgraph(self):
+        """Memgraph에서 빈 결과가 반환되면 빈 DataFrame을 반환해야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute_df", return_value=pd.DataFrame()):
+            result = get_temporal_network(20210101, 20241231)
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) == 0
+        expected_cols = {"source", "target", "거래횟수", "총금액", "이상거래여부"}
+        assert expected_cols.issubset(set(result.columns))
+
+    def test_fraud_only_true(self):
+        """fraud_only=True이면 이상거래 필터가 Cypher에 포함되어야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute_df", return_value=pd.DataFrame()) as mock_exec:
+            get_temporal_network(20210101, 20241231, fraud_only=True)
+        cypher = mock_exec.call_args[0][0]
+        assert "이상거래여부 = 1" in cypher
+
+    def test_fraud_only_false(self):
+        """fraud_only=False이면 이상거래 필터가 없어야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute_df", return_value=pd.DataFrame()) as mock_exec:
+            get_temporal_network(20210101, 20241231, fraud_only=False)
+        cypher = mock_exec.call_args[0][0]
+        # "AND r.이상거래여부 = 1" 조건이 포함되지 않아야 함
+        assert "AND r.이상거래여부 = 1" not in cypher
+
+    def test_date_parameters_passed(self):
+        """start_date, end_date가 파라미터로 전달되어야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute_df", return_value=pd.DataFrame()) as mock_exec:
+            get_temporal_network(20220101, 20221231)
+        call_args = mock_exec.call_args
+        params = call_args.args[1] if len(call_args.args) > 1 else call_args.kwargs
+        assert params.get("start_date") == 20220101
+        assert params.get("end_date") == 20221231
+
+    def test_parameter_type_safety(self):
+        """문자열 날짜 파라미터가 int로 변환되어야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute_df", return_value=pd.DataFrame()):
+            result = get_temporal_network("20210101", "20241231")
+        assert isinstance(result, pd.DataFrame)
+
+
+# ──────────────────────────────────────────────
+# compute_risk_score
+# ──────────────────────────────────────────────
+class TestComputeRiskScore:
+    """compute_risk_score() 단위 테스트."""
+
+    def test_fallback_when_memgraph_unavailable(self):
+        """Memgraph 미실행 시 에러가 포함된 딕셔너리를 반환해야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=False):
+            result = compute_risk_score(12345)
+        assert isinstance(result, dict)
+        assert result["account_id"] == 12345
+        assert result["risk_score"] == 0.0
+        assert "error" in result
+
+    def test_returns_risk_score_structure(self):
+        """정상 실행 시 올바른 구조의 딕셔너리를 반환해야 한다."""
+        fraud_rec = [{"total_txn": 10, "fraud_txn": 5, "fraud_ratio": 0.5}]
+        neighbor_rec = [{"neighbor_fraud_ratio": 0.3}]
+        cycle_rec = [{"cycle_count": 2}]
+        conc_rec = [{"in_count": 10, "out_count": 2, "concentration": 0.6667}]
+
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", side_effect=[fraud_rec, neighbor_rec, cycle_rec, conc_rec]):
+            result = compute_risk_score(12345)
+
+        assert isinstance(result, dict)
+        assert result["account_id"] == 12345
+        assert 0.0 <= result["risk_score"] <= 1.0
+        assert "components" in result
+        components = result["components"]
+        assert "fraud_ratio" in components
+        assert "neighbor_fraud_ratio" in components
+        assert "cycle_score" in components
+        assert "concentration_score" in components
+
+    def test_risk_score_calculation(self):
+        """위험 점수가 올바르게 계산되어야 한다."""
+        # fraud_ratio=0.5, neighbor_fraud_ratio=0.2, cycle_count=5->1.0, concentration=0.8
+        # risk = 0.4*0.5 + 0.3*0.2 + 0.2*1.0 + 0.1*0.8 = 0.2 + 0.06 + 0.2 + 0.08 = 0.54
+        fraud_rec = [{"total_txn": 10, "fraud_txn": 5, "fraud_ratio": 0.5}]
+        neighbor_rec = [{"neighbor_fraud_ratio": 0.2}]
+        cycle_rec = [{"cycle_count": 5}]
+        conc_rec = [{"in_count": 9, "out_count": 1, "concentration": 0.8}]
+
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", side_effect=[fraud_rec, neighbor_rec, cycle_rec, conc_rec]):
+            result = compute_risk_score(12345)
+
+        assert result["risk_score"] == 0.54
+
+    def test_zero_risk_score(self):
+        """모든 지표가 0이면 위험 점수도 0이어야 한다."""
+        fraud_rec = [{"total_txn": 10, "fraud_txn": 0, "fraud_ratio": 0.0}]
+        neighbor_rec = [{"neighbor_fraud_ratio": 0.0}]
+        cycle_rec = [{"cycle_count": 0}]
+        conc_rec = [{"in_count": 5, "out_count": 5, "concentration": 0.0}]
+
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", side_effect=[fraud_rec, neighbor_rec, cycle_rec, conc_rec]):
+            result = compute_risk_score(12345)
+
+        assert result["risk_score"] == 0.0
+
+    def test_max_risk_score_capped_at_1(self):
+        """위험 점수가 1.0을 초과할 수 없어야 한다."""
+        fraud_rec = [{"total_txn": 10, "fraud_txn": 10, "fraud_ratio": 1.0}]
+        neighbor_rec = [{"neighbor_fraud_ratio": 1.0}]
+        cycle_rec = [{"cycle_count": 100}]
+        conc_rec = [{"in_count": 100, "out_count": 0, "concentration": 1.0}]
+
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", side_effect=[fraud_rec, neighbor_rec, cycle_rec, conc_rec]):
+            result = compute_risk_score(12345)
+
+        assert result["risk_score"] <= 1.0
+
+    def test_no_fraud_records_returns_zero(self):
+        """fraud_records가 비어있으면 모든 컴포넌트가 0이어야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", return_value=[]):
+            result = compute_risk_score(12345)
+
+        assert result["risk_score"] == 0.0
+        assert result["components"]["fraud_ratio"] == 0.0
+        assert result["components"]["neighbor_fraud_ratio"] == 0.0
+
+    def test_cycle_score_scaling(self):
+        """사이클 점수가 올바르게 스케일링되어야 한다."""
+        # cycle_count=3 -> cycle_score = 3/5 = 0.6
+        fraud_rec = [{"total_txn": 0, "fraud_txn": 0, "fraud_ratio": 0.0}]
+        neighbor_rec = [{"neighbor_fraud_ratio": 0.0}]
+        cycle_rec = [{"cycle_count": 3}]
+        conc_rec = [{"in_count": 0, "out_count": 0, "concentration": 0.0}]
+
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", side_effect=[fraud_rec, neighbor_rec, cycle_rec, conc_rec]):
+            result = compute_risk_score(12345)
+
+        assert result["components"]["cycle_score"] == 0.6
+
+    def test_missing_neighbor_records(self):
+        """이웃 정보가 없어도 정상적으로 처리해야 한다."""
+        fraud_rec = [{"total_txn": 5, "fraud_txn": 2, "fraud_ratio": 0.4}]
+        neighbor_rec = []  # 이웃 없음
+        cycle_rec = [{"cycle_count": 0}]
+        conc_rec = [{"in_count": 5, "out_count": 5, "concentration": 0.0}]
+
+        with patch("src.features.network.graph_db.is_available", return_value=True), \
+             patch("src.features.network.graph_db.execute", side_effect=[fraud_rec, neighbor_rec, cycle_rec, conc_rec]):
+            result = compute_risk_score(12345)
+
+        assert result["components"]["neighbor_fraud_ratio"] == 0.0
+        # risk = 0.4*0.4 + 0.3*0.0 + 0.2*0.0 + 0.1*0.0 = 0.16
+        assert result["risk_score"] == 0.16
+
+    def test_account_id_type_safety(self):
+        """문자열 account_id가 int로 변환되어야 한다."""
+        with patch("src.features.network.graph_db.is_available", return_value=False):
+            result = compute_risk_score("12345")
+        assert result["account_id"] == 12345

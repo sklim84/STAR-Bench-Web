@@ -4,6 +4,8 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 
+import config
+
 from src.features.network import (
     get_bank_network,
     get_fraud_account_network,
@@ -16,7 +18,15 @@ from src.features.network import (
     detect_communities,
     get_fraud_flow_matrix,
     get_extended_network_stats,
+    detect_ring_transactions,
+    detect_layering_patterns,
+    detect_funnel_accounts,
+    get_account_ego_network_deep,
+    find_shortest_path,
+    get_temporal_network,
+    compute_risk_score,
 )
+from src.data import graph_db
 
 # ------------------------------------------------------------------
 # 다크 테마 상수
@@ -391,7 +401,7 @@ def _render_tab_fraud_account_network():
 
 
 # ------------------------------------------------------------------
-# 탭3: 계좌 탐색
+# 탭3: 계좌 탐색 (hop 확장 지원)
 # ------------------------------------------------------------------
 
 def _render_tab_account_explorer():
@@ -408,10 +418,23 @@ def _render_tab_account_explorer():
         key="account_select",
     )
 
-    hops = st.radio("탐색 범위", [1, 2], horizontal=True, key="hop_select")
+    hops = st.slider("탐색 범위 (hop)", 1, 5, 2, key="hop_select")
+
+    # hops > 2 인 경우 Memgraph 필요 안내
+    if hops > 2:
+        memgraph_ok = graph_db.is_available()
+        if not memgraph_ok:
+            st.info(
+                "3-hop 이상 탐색에는 Memgraph가 필요합니다. "
+                "Memgraph 미실행 시 최대 2-hop까지 DuckDB 폴백으로 탐색합니다."
+            )
 
     if selected:
-        ego_df = get_account_ego_network(selected, hops=hops)
+        with st.spinner(f"계좌 {selected}의 {hops}-hop 네트워크 탐색 중..."):
+            if hops > 2:
+                ego_df = get_account_ego_network_deep(selected, hops=hops)
+            else:
+                ego_df = get_account_ego_network(selected, hops=hops)
 
         if len(ego_df) == 0:
             st.warning("해당 계좌의 거래 데이터가 없습니다.")
@@ -529,6 +552,638 @@ def _format_amount(amount):
 
 
 # ------------------------------------------------------------------
+# 탭5: AML 패턴 탐지
+# ------------------------------------------------------------------
+
+def _render_memgraph_status():
+    """Memgraph 연결 상태 배너를 표시한다."""
+    available = graph_db.is_available()
+    if available:
+        st.markdown(
+            '<div style="padding:8px 16px; background:#1A2E28; border:1px solid #2A6B65; '
+            'border-radius:6px; margin-bottom:16px;">'
+            '<span style="color:#4ECDC4; font-weight:700;">Memgraph 연결됨</span>'
+            f'<span style="color:#8B8FA3; margin-left:12px;">'
+            f'bolt://{config.MEMGRAPH_HOST}:{config.MEMGRAPH_PORT}'
+            f'</span></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            '<div style="padding:8px 16px; background:#2E1A1A; border:1px solid #6B2A2A; '
+            'border-radius:6px; margin-bottom:16px;">'
+            '<span style="color:#E15759; font-weight:700;">Memgraph 미실행</span>'
+            '<span style="color:#8B8FA3; margin-left:12px;">'
+            'AML 패턴 탐지 기능을 사용하려면 Docker로 Memgraph를 실행하세요.'
+            '</span></div>',
+            unsafe_allow_html=True,
+        )
+    return available
+
+
+def _plot_ring_graph(ring_accounts, amounts=None):
+    """순환거래 경로를 원형 그래프로 시각화한다."""
+    if not ring_accounts or len(ring_accounts) < 3:
+        return
+
+    # 마지막 노드가 첫 노드와 같으면 (순환) 표시용으로 제거
+    display_nodes = ring_accounts
+    if display_nodes[0] == display_nodes[-1]:
+        display_nodes = display_nodes[:-1]
+
+    n = len(display_nodes)
+    # 원형 배치
+    angles = [2 * np.pi * i / n for i in range(n)]
+    node_x = [np.cos(a) for a in angles]
+    node_y = [np.sin(a) for a in angles]
+
+    # 엣지 (순환이므로 i -> i+1, 마지막 -> 첫번째)
+    edge_x, edge_y = [], []
+    for i in range(n):
+        j = (i + 1) % n
+        edge_x += [node_x[i], node_x[j], None]
+        edge_y += [node_y[i], node_y[j], None]
+
+    edge_trace = go.Scatter(
+        x=edge_x, y=edge_y, mode="lines",
+        line=dict(width=2, color=LINE_COLOR),
+        hoverinfo="none",
+    )
+
+    # 엣지 라벨 (금액 표시)
+    edge_annotations = []
+    if amounts and len(amounts) >= n:
+        for i in range(n):
+            j = (i + 1) % n
+            mid_x = (node_x[i] + node_x[j]) / 2
+            mid_y = (node_y[i] + node_y[j]) / 2
+            edge_annotations.append(
+                dict(
+                    x=mid_x, y=mid_y,
+                    text=f"{int(amounts[i]):,}",
+                    showarrow=False,
+                    font=dict(size=10, color=ACCENT_COLOR),
+                )
+            )
+
+    # 노드 라벨
+    node_labels = [str(a) for a in display_nodes]
+    node_hover = [f"계좌: {a}" for a in display_nodes]
+
+    node_trace = go.Scatter(
+        x=node_x, y=node_y, mode="markers+text",
+        marker=dict(size=30, color=LINE_COLOR, line=dict(width=2, color="#FFFFFF")),
+        text=node_labels,
+        textposition="top center",
+        textfont=dict(size=10, color="#E0E0E0"),
+        hovertext=node_hover,
+        hoverinfo="text",
+    )
+
+    fig = go.Figure(data=[edge_trace, node_trace])
+    fig.update_layout(
+        title=dict(text=f"순환거래 경로 ({n}개 계좌)", font=dict(color="#C0C4D0", size=14)),
+        showlegend=False, height=450,
+        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, scaleanchor="x"),
+        margin=dict(t=40, b=20, l=20, r=20),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#C0C4D0"),
+        annotations=edge_annotations,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _plot_path_graph(path, amounts=None, dates=None):
+    """최단경로를 선형 그래프로 시각화한다."""
+    if not path or len(path) < 2:
+        return
+
+    n = len(path)
+    # 선형 배치 (좌->우)
+    node_x = list(range(n))
+    node_y = [0] * n
+
+    # 엣지
+    edge_x, edge_y = [], []
+    for i in range(n - 1):
+        edge_x += [node_x[i], node_x[i + 1], None]
+        edge_y += [0, 0, None]
+
+    edge_trace = go.Scatter(
+        x=edge_x, y=edge_y, mode="lines",
+        line=dict(width=3, color=MINT_COLOR),
+        hoverinfo="none",
+    )
+
+    # 엣지 중간에 금액/날짜 표시
+    edge_annotations = []
+    for i in range(n - 1):
+        mid_x = (node_x[i] + node_x[i + 1]) / 2
+        parts = []
+        if amounts and i < len(amounts):
+            parts.append(f"{int(amounts[i]):,}원")
+        if dates and i < len(dates):
+            parts.append(f"({dates[i]})")
+        if parts:
+            edge_annotations.append(
+                dict(
+                    x=mid_x, y=0.15,
+                    text="<br>".join(parts),
+                    showarrow=False,
+                    font=dict(size=10, color=ACCENT_COLOR),
+                )
+            )
+
+    # 노드
+    node_labels = [str(a) for a in path]
+    node_colors_list = [BAR_COLOR] * n
+    node_colors_list[0] = MINT_COLOR  # 출발
+    node_colors_list[-1] = LINE_COLOR  # 도착
+
+    node_trace = go.Scatter(
+        x=node_x, y=node_y, mode="markers+text",
+        marker=dict(size=35, color=node_colors_list, line=dict(width=2, color="#FFFFFF")),
+        text=node_labels,
+        textposition="bottom center",
+        textfont=dict(size=10, color="#E0E0E0"),
+        hovertext=[f"계좌: {a}" for a in path],
+        hoverinfo="text",
+    )
+
+    fig = go.Figure(data=[edge_trace, node_trace])
+    fig.update_layout(
+        title=dict(text=f"최단경로 ({n - 1} hop)", font=dict(color="#C0C4D0", size=14)),
+        showlegend=False, height=300,
+        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-0.5, 0.5]),
+        margin=dict(t=40, b=40, l=20, r=20),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#C0C4D0"),
+        annotations=edge_annotations,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _render_sub_ring():
+    """서브탭: 순환거래 탐지."""
+    st.markdown('<p class="section-header">순환거래 탐지</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p style="color:#8B8FA3; font-size:13px;">'
+        'A -> B -> C -> ... -> A 형태의 순환 자금 이동 패턴을 탐지합니다.'
+        '</p>',
+        unsafe_allow_html=True,
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        min_len = st.number_input("최소 순환 길이", min_value=3, max_value=6, value=3, key="ring_min")
+    with c2:
+        max_len = st.number_input("최대 순환 길이", min_value=3, max_value=10, value=6, key="ring_max")
+    with c3:
+        min_amount = st.number_input("최소 거래금액", min_value=0, value=0, step=100000, key="ring_amt")
+    with c4:
+        limit = st.number_input("최대 결과 수", min_value=10, max_value=500, value=100, key="ring_limit")
+
+    if st.button("탐지 실행", key="ring_btn"):
+        with st.spinner("순환거래 패턴 탐지 중..."):
+            result_df = detect_ring_transactions(
+                min_len=min_len, max_len=max_len,
+                min_amount=min_amount, limit=limit,
+            )
+
+        if len(result_df) == 0:
+            st.info("탐지된 순환거래 패턴이 없습니다.")
+            return
+
+        # 메트릭 카드
+        mc1, mc2, mc3 = st.columns(3)
+        with mc1:
+            _metric_card("탐지 건수", f"{len(result_df):,}")
+        with mc2:
+            _metric_card("최대 순환 크기", f"{int(result_df['ring_size'].max())}")
+        with mc3:
+            _metric_card("최대 순환 금액", _format_amount(result_df["total_amount"].max()))
+
+        # 첫 번째 결과 시각화
+        first = result_df.iloc[0]
+        ring_accounts = first["ring_accounts"]
+        # ring_accounts 리스트에서 순환 시각화
+        _plot_ring_graph(ring_accounts)
+
+        # 결과 테이블
+        st.markdown('<p class="section-header">탐지 결과</p>', unsafe_allow_html=True)
+        display_df = result_df[["ring_size", "total_amount"]].copy()
+        display_df.columns = ["순환 크기", "총 거래금액"]
+        _render_dark_table(display_df, max_rows=20)
+
+        with st.expander("전체 결과 상세"):
+            _render_dark_table(result_df, max_rows=50)
+
+
+def _render_sub_layering():
+    """서브탭: 레이어링 패턴 탐지."""
+    st.markdown('<p class="section-header">레이어링 패턴 탐지</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p style="color:#8B8FA3; font-size:13px;">'
+        '출발 계좌에서 중개 계좌를 거쳐 도착 계좌에 이르는 다단계 자금 이동 패턴을 탐지합니다.'
+        '</p>',
+        unsafe_allow_html=True,
+    )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        min_layers = st.number_input("최소 레이어 수", min_value=2, max_value=10, value=3, key="layer_min")
+    with c2:
+        limit = st.number_input("최대 결과 수", min_value=10, max_value=500, value=100, key="layer_limit")
+
+    if st.button("탐지 실행", key="layer_btn"):
+        with st.spinner("레이어링 패턴 탐지 중..."):
+            result_df = detect_layering_patterns(min_layers=min_layers, limit=limit)
+
+        if len(result_df) == 0:
+            st.info("탐지된 레이어링 패턴이 없습니다.")
+            return
+
+        # 메트릭 카드
+        mc1, mc2, mc3 = st.columns(3)
+        with mc1:
+            _metric_card("탐지 건수", f"{len(result_df):,}")
+        with mc2:
+            _metric_card("최대 레이어 수", f"{int(result_df['layers'].max())}")
+        with mc3:
+            _metric_card("최대 금액", _format_amount(result_df["total_amount"].max()))
+
+        # 결과 테이블
+        st.markdown('<p class="section-header">탐지 결과</p>', unsafe_allow_html=True)
+        display_df = result_df[["source_account", "destination_account", "layers", "total_amount"]].copy()
+        display_df.columns = ["출발 계좌", "도착 계좌", "레이어 수", "총 거래금액"]
+        _render_dark_table(display_df, max_rows=20)
+
+        with st.expander("전체 결과 상세"):
+            _render_dark_table(result_df, max_rows=50)
+
+
+def _render_sub_funnel():
+    """서브탭: 대포통장(funnel) 패턴 탐지."""
+    st.markdown('<p class="section-header">대포통장 패턴 탐지</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p style="color:#8B8FA3; font-size:13px;">'
+        '다수의 계좌로부터 입금을 받고 소수의 계좌로 출금하는 의심 계좌를 탐지합니다.'
+        '</p>',
+        unsafe_allow_html=True,
+    )
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        min_inflow = st.number_input("최소 입금 계좌 수", min_value=5, max_value=50, value=10, key="funnel_in")
+    with c2:
+        max_outflow = st.number_input("최대 출금 계좌 수", min_value=1, max_value=10, value=3, key="funnel_out")
+    with c3:
+        limit = st.number_input("최대 결과 수", min_value=10, max_value=500, value=100, key="funnel_limit")
+
+    if st.button("탐지 실행", key="funnel_btn"):
+        with st.spinner("대포통장 패턴 탐지 중..."):
+            result_df = detect_funnel_accounts(
+                min_inflow=min_inflow, max_outflow=max_outflow, limit=limit,
+            )
+
+        if len(result_df) == 0:
+            st.info("탐지된 대포통장 의심 계좌가 없습니다.")
+            return
+
+        # 메트릭 카드
+        mc1, mc2, mc3 = st.columns(3)
+        with mc1:
+            _metric_card("의심 계좌 수", f"{len(result_df):,}")
+        with mc2:
+            _metric_card("최고 funnel_ratio", f"{result_df['funnel_ratio'].max():.2f}")
+        with mc3:
+            _metric_card("최대 입금 건수", f"{int(result_df['inflow_count'].max()):,}")
+
+        # 결과 테이블
+        st.markdown('<p class="section-header">탐지 결과</p>', unsafe_allow_html=True)
+        display_df = result_df[[
+            "account_id", "inflow_count", "inflow_amount",
+            "outflow_count", "outflow_amount", "funnel_ratio",
+        ]].copy()
+        display_df.columns = [
+            "계좌 ID", "입금 건수", "입금 금액",
+            "출금 건수", "출금 금액", "Funnel 비율",
+        ]
+        _render_dark_table(display_df, max_rows=20)
+
+
+def _render_sub_shortest_path():
+    """서브탭: 최단경로 탐색."""
+    st.markdown('<p class="section-header">최단경로 탐색</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p style="color:#8B8FA3; font-size:13px;">'
+        '두 계좌 간 최단 거래 경로를 탐색합니다.'
+        '</p>',
+        unsafe_allow_html=True,
+    )
+
+    c1, c2 = st.columns(2)
+    with c1:
+        account_a = st.number_input("출발 계좌 ID", min_value=0, value=0, step=1, key="path_a")
+    with c2:
+        account_b = st.number_input("도착 계좌 ID", min_value=0, value=0, step=1, key="path_b")
+
+    if st.button("경로 탐색", key="path_btn"):
+        if account_a == 0 or account_b == 0:
+            st.warning("출발 계좌와 도착 계좌를 모두 입력하세요.")
+            return
+        if account_a == account_b:
+            st.warning("출발 계좌와 도착 계좌가 동일합니다.")
+            return
+
+        with st.spinner(f"계좌 {account_a} -> {account_b} 최단경로 탐색 중..."):
+            result = find_shortest_path(account_a, account_b)
+
+        if "error" in result:
+            st.error(result["error"])
+            return
+
+        path = result.get("path", [])
+        hops = result.get("hops", 0)
+        amounts = result.get("amounts", [])
+        dates = result.get("dates", [])
+
+        if not path:
+            st.info("두 계좌 간 경로가 존재하지 않습니다.")
+            return
+
+        # 메트릭 카드
+        mc1, mc2, mc3 = st.columns(3)
+        with mc1:
+            _metric_card("경로 길이 (hop)", f"{hops}")
+        with mc2:
+            total_amt = sum(amounts) if amounts else 0
+            _metric_card("총 경유 금액", _format_amount(total_amt))
+        with mc3:
+            _metric_card("경유 계좌 수", f"{max(0, len(path) - 2)}")
+
+        # 경로 시각화
+        _plot_path_graph(path, amounts=amounts, dates=dates)
+
+        # 경로 상세 테이블
+        if len(path) >= 2:
+            path_rows = []
+            for i in range(len(path) - 1):
+                row_data = {"구간": f"{path[i]} -> {path[i+1]}"}
+                if amounts and i < len(amounts):
+                    row_data["거래금액"] = int(amounts[i])
+                if dates and i < len(dates):
+                    row_data["거래일자"] = dates[i]
+                path_rows.append(row_data)
+            path_df = pd.DataFrame(path_rows)
+            st.markdown('<p class="section-header">구간별 상세</p>', unsafe_allow_html=True)
+            _render_dark_table(path_df, max_rows=20)
+
+
+def _render_sub_temporal():
+    """서브탭: 시간대별 네트워크."""
+    st.markdown('<p class="section-header">시간대별 네트워크</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p style="color:#8B8FA3; font-size:13px;">'
+        '지정된 기간 내 거래 네트워크를 추출합니다.'
+        '</p>',
+        unsafe_allow_html=True,
+    )
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        start_date = st.number_input(
+            "시작일 (YYYYMMDD)", min_value=20210101, max_value=20241231,
+            value=20210101, step=1, key="temp_start",
+        )
+    with c2:
+        end_date = st.number_input(
+            "종료일 (YYYYMMDD)", min_value=20210101, max_value=20241231,
+            value=20241231, step=1, key="temp_end",
+        )
+    with c3:
+        fraud_only = st.checkbox("이상거래만 표시", value=True, key="temp_fraud")
+
+    if st.button("조회", key="temp_btn"):
+        if start_date > end_date:
+            st.warning("시작일이 종료일보다 클 수 없습니다.")
+            return
+
+        with st.spinner("시간대별 네트워크 조회 중..."):
+            result_df = get_temporal_network(start_date, end_date, fraud_only=fraud_only)
+
+        if len(result_df) == 0:
+            st.info("해당 기간의 네트워크 데이터가 없습니다.")
+            return
+
+        # 그래프 구축 및 시각화
+        temp_G = build_account_graph(result_df)
+
+        # 메트릭 카드
+        mc1, mc2, mc3, mc4 = st.columns(4)
+        with mc1:
+            _metric_card("노드 수 (계좌)", f"{len(temp_G.nodes()):,}")
+        with mc2:
+            _metric_card("엣지 수 (연결)", f"{len(temp_G.edges()):,}")
+        with mc3:
+            total_txn = int(result_df["거래횟수"].sum()) if "거래횟수" in result_df.columns else 0
+            _metric_card("총 거래 건수", f"{total_txn:,}")
+        with mc4:
+            total_amt = float(result_df["총금액"].sum()) if "총금액" in result_df.columns else 0
+            _metric_card("총 거래 금액", _format_amount(total_amt))
+
+        # 네트워크 시각화
+        fraud_label = "이상거래" if fraud_only else "전체 거래"
+        _plot_network(
+            temp_G,
+            f"시간대별 네트워크: {start_date}~{end_date} ({fraud_label})",
+        )
+
+        with st.expander("거래 상세"):
+            _render_dark_table(result_df, max_rows=50)
+
+
+def _render_sub_risk_score():
+    """서브탭: 위험도 분석."""
+    st.markdown('<p class="section-header">위험도 분석</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p style="color:#8B8FA3; font-size:13px;">'
+        '그래프 기반 복합 위험 점수를 산출합니다. '
+        '직접 이상거래 비율, 이웃 이상거래 비율, 사이클 참여, 입출금 집중도를 종합합니다.'
+        '</p>',
+        unsafe_allow_html=True,
+    )
+
+    # 계좌 선택: selectbox 또는 직접 입력
+    input_mode = st.radio("입력 방식", ["이상거래 계좌 선택", "계좌 번호 직접 입력"], horizontal=True, key="risk_mode")
+
+    if input_mode == "이상거래 계좌 선택":
+        fraud_accounts = get_fraud_accounts()
+        account_list = fraud_accounts["계좌"].tolist()
+        target_account = st.selectbox(
+            "분석 대상 계좌",
+            options=account_list[:100],
+            key="risk_select",
+        )
+    else:
+        target_account = st.number_input("계좌 번호", min_value=0, value=0, step=1, key="risk_input")
+
+    if st.button("분석", key="risk_btn"):
+        if target_account == 0:
+            st.warning("분석 대상 계좌를 선택하세요.")
+            return
+
+        with st.spinner(f"계좌 {target_account} 위험도 분석 중..."):
+            result = compute_risk_score(target_account)
+
+        if "error" in result:
+            st.error(result["error"])
+            return
+
+        risk_score = result["risk_score"]
+        components = result.get("components", {})
+
+        # 위험 점수 게이지 차트
+        # 색상을 위험도에 따라 변경
+        if risk_score >= 0.7:
+            gauge_bar_color = LINE_COLOR  # red
+        elif risk_score >= 0.4:
+            gauge_bar_color = ACCENT_COLOR  # orange
+        else:
+            gauge_bar_color = MINT_COLOR  # mint/green
+
+        fig_gauge = go.Figure(go.Indicator(
+            mode="gauge+number",
+            value=risk_score,
+            number=dict(
+                font=dict(size=48, color="#E0E0E0"),
+                valueformat=".4f",
+            ),
+            gauge=dict(
+                axis=dict(range=[0, 1], tickcolor="#8B8FA3", tickfont=dict(color="#8B8FA3")),
+                bar=dict(color=gauge_bar_color),
+                bgcolor="#1A1F2E",
+                bordercolor="#2A2F3E",
+                steps=[
+                    dict(range=[0, 0.3], color="#1A2E28"),
+                    dict(range=[0.3, 0.7], color="#2E2A1A"),
+                    dict(range=[0.7, 1.0], color="#2E1A1A"),
+                ],
+                threshold=dict(
+                    line=dict(color="#FFFFFF", width=2),
+                    thickness=0.8,
+                    value=risk_score,
+                ),
+            ),
+            title=dict(
+                text=f"계좌 {target_account} 위험 점수",
+                font=dict(color="#C0C4D0", size=16),
+            ),
+        ))
+        fig_gauge.update_layout(
+            height=320,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#C0C4D0"),
+            margin=dict(t=60, b=20, l=30, r=30),
+        )
+        st.plotly_chart(fig_gauge, use_container_width=True)
+
+        # 구성 요소별 점수 Bar 차트
+        if components:
+            comp_names = {
+                "fraud_ratio": "직접 이상거래 비율 (x0.4)",
+                "neighbor_fraud_ratio": "이웃 이상거래 비율 (x0.3)",
+                "cycle_score": "사이클 참여 점수 (x0.2)",
+                "concentration_score": "입출금 집중도 (x0.1)",
+            }
+            comp_keys = ["fraud_ratio", "neighbor_fraud_ratio", "cycle_score", "concentration_score"]
+            comp_labels = [comp_names[k] for k in comp_keys]
+            comp_values = [components.get(k, 0) for k in comp_keys]
+            comp_weights = [0.4, 0.3, 0.2, 0.1]
+            comp_weighted = [v * w for v, w in zip(comp_values, comp_weights)]
+
+            fig_bar = go.Figure()
+            fig_bar.add_trace(go.Bar(
+                x=comp_labels,
+                y=comp_values,
+                name="원시 점수",
+                marker_color=BAR_COLOR,
+                text=[f"{v:.4f}" for v in comp_values],
+                textposition="outside",
+                textfont=dict(color="#E0E0E0", size=11),
+            ))
+            fig_bar.add_trace(go.Bar(
+                x=comp_labels,
+                y=comp_weighted,
+                name="가중 기여도",
+                marker_color=MINT_COLOR,
+                text=[f"{v:.4f}" for v in comp_weighted],
+                textposition="outside",
+                textfont=dict(color="#E0E0E0", size=11),
+            ))
+            fig_bar.update_layout(
+                barmode="group",
+                title=dict(text="위험 점수 구성 요소", font=dict(color="#C0C4D0", size=14)),
+            )
+            _apply_dark(fig_bar, height=380)
+            fig_bar.update_xaxes(title_text="", tickangle=-15)
+            fig_bar.update_yaxes(title_text="점수", title_font=dict(color="#8B8FA3", size=11))
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+            # 상세 수치 테이블
+            detail_rows = []
+            for k, lbl in comp_names.items():
+                detail_rows.append({
+                    "구성 요소": lbl,
+                    "원시 점수": round(components.get(k, 0), 4),
+                    "가중치": comp_weights[comp_keys.index(k)],
+                    "가중 기여도": round(components.get(k, 0) * comp_weights[comp_keys.index(k)], 4),
+                })
+            detail_df = pd.DataFrame(detail_rows)
+            with st.expander("상세 점수 테이블"):
+                _render_dark_table(detail_df, max_rows=10)
+
+
+def _render_tab_aml_patterns():
+    """AML 패턴 탐지 탭을 렌더링한다."""
+    # Memgraph 연결 상태 표시
+    memgraph_available = _render_memgraph_status()
+
+    # 6개 서브탭
+    sub1, sub2, sub3, sub4, sub5, sub6 = st.tabs([
+        "순환거래",
+        "레이어링",
+        "대포통장",
+        "최단경로",
+        "시간대별",
+        "위험도",
+    ])
+
+    with sub1:
+        _render_sub_ring()
+
+    with sub2:
+        _render_sub_layering()
+
+    with sub3:
+        _render_sub_funnel()
+
+    with sub4:
+        _render_sub_shortest_path()
+
+    with sub5:
+        _render_sub_temporal()
+
+    with sub6:
+        _render_sub_risk_score()
+
+
+# ------------------------------------------------------------------
 # 메인 렌더 함수
 # ------------------------------------------------------------------
 
@@ -539,12 +1194,13 @@ def render():
         unsafe_allow_html=True,
     )
 
-    # 4개 탭 구성
-    tab1, tab2, tab3, tab4 = st.tabs([
+    # 5개 탭 구성
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "금융회사 네트워크",
         "이상거래 계좌 네트워크",
         "계좌 탐색",
         "이상거래 흐름",
+        "AML 패턴 탐지",
     ])
 
     with tab1:
@@ -558,3 +1214,6 @@ def render():
 
     with tab4:
         _render_tab_fraud_flow()
+
+    with tab5:
+        _render_tab_aml_patterns()
