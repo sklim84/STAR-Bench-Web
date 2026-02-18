@@ -1,0 +1,19 @@
+services:
+  memgraph:
+    image: memgraph/memgraph-mage:latest
+    container_name: aml-memgraph
+    ports:
+      - "7687:7687"
+    environment:
+      - MEMGRAPH_USER=${MEMGRAPH_USER:-}
+      - MEMGRAPH_PASSWORD=${MEMGRAPH_PASSWORD:-}
+    volumes:
+      - memgraph_data:/var/lib/memgraph
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+    restart: unless-stopped
+
+volumes:
+  memgraph_data:

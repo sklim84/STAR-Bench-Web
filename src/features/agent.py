@@ -15,7 +15,15 @@ import config
 from src.data.db import query
 from src.features.dashboard import get_summary, get_fraud_type_distribution
 from src.features.detector import load_model
-from src.features.network import get_account_ego_network
+from src.features.network import (
+    get_account_ego_network,
+    get_account_ego_network_deep,
+    detect_ring_transactions,
+    detect_layering_patterns,
+    detect_funnel_accounts,
+    find_shortest_path,
+    compute_risk_score,
+)
 
 
 TOOLS = [
@@ -123,7 +131,7 @@ TOOLS = [
                     },
                     "hops": {
                         "type": "integer",
-                        "description": "탐색 범위 (1 또는 2). 기본값은 1.",
+                        "description": "탐색 범위 (1~5). 기본값은 1. 3 이상은 Memgraph 필요.",
                         "default": 1,
                     },
                 },
@@ -143,6 +151,70 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "detect_aml_patterns",
+            "description": (
+                "Memgraph 그래프 DB를 활용하여 AML(자금세탁방지) 패턴을 탐지한다. "
+                "순환거래(ring), 다단계 레이어링, 대포통장(funnel) 패턴을 탐지하거나, "
+                "두 계좌 간 최단경로를 찾거나, 계좌의 위험도 점수를 산출한다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern_type": {
+                        "type": "string",
+                        "description": "탐지할 패턴 유형",
+                        "enum": ["ring", "layering", "funnel", "shortest_path", "risk_score"],
+                    },
+                    "account_id": {
+                        "type": "integer",
+                        "description": "분석 대상 계좌 번호 (risk_score 시 필수)",
+                    },
+                    "account_a": {
+                        "type": "integer",
+                        "description": "출발 계좌 (shortest_path 시 필수)",
+                    },
+                    "account_b": {
+                        "type": "integer",
+                        "description": "도착 계좌 (shortest_path 시 필수)",
+                    },
+                    "min_len": {
+                        "type": "integer",
+                        "description": "순환 최소 길이 (ring 시, 기본 3)",
+                        "default": 3,
+                    },
+                    "max_len": {
+                        "type": "integer",
+                        "description": "순환 최대 길이 (ring 시, 기본 6)",
+                        "default": 6,
+                    },
+                    "min_layers": {
+                        "type": "integer",
+                        "description": "최소 레이어 수 (layering 시, 기본 3)",
+                        "default": 3,
+                    },
+                    "min_inflow": {
+                        "type": "integer",
+                        "description": "최소 입금 계좌 수 (funnel 시, 기본 10)",
+                        "default": 10,
+                    },
+                    "max_outflow": {
+                        "type": "integer",
+                        "description": "최대 출금 계좌 수 (funnel 시, 기본 3)",
+                        "default": 3,
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "최대 결과 수 (기본 20)",
+                        "default": 20,
+                    },
+                },
+                "required": ["pattern_type"],
+            },
+        },
+    },
 ]
 
 SYSTEM_PROMPT = """당신은 자금세탁방지(AML) 전문 분석가입니다.
@@ -151,16 +223,18 @@ HOFINET(전자금융공동망) 이상거래탐지 데이터를 분석하여 자�
 사용 가능한 도구:
 1. get_statistics: 전체 거래 요약 통계 및 이상거래 유형별 분포 조회 (분석 시작 시 가장 먼저 사용)
 2. query_transactions: HOFINET DB에 SQL 쿼리를 실행하여 거래 통계, 패턴, 특정 계좌 거래 내역 등을 상세 조회
-3. analyze_network: 특정 계좌의 거래 네트워크를 분석하여 연결 계좌 수, 이상거래 관련 여부 파악
-4. predict_fraud: XGBoost 모델로 특정 거래의 이상거래 확률을 예측
-5. generate_str: 분석 결과를 의심거래보고서(STR) 양식으로 작성
+3. analyze_network: 특정 계좌의 거래 네트워크를 분석하여 연결 계좌 수, 이상거래 관련 여부 파악 (N-hop 심층 탐색 지원)
+4. detect_aml_patterns: Memgraph 그래프 DB를 활용한 AML 패턴 탐지 (순환거래, 레이어링, 대포통장, 최단경로, 위험도 산출)
+5. predict_fraud: XGBoost 모델로 특정 거래의 이상거래 확률을 예측
+6. generate_str: 분석 결과를 의심거래보고서(STR) 양식으로 작성
 
 권장 분석 절차:
 1. get_statistics로 전체 현황 파악
 2. query_transactions으로 의심 거래 상세 조회
-3. analyze_network으로 계좌 네트워크 분석 (특정 계좌가 있는 경우)
-4. predict_fraud로 이상거래 확률 예측
-5. 충분한 근거가 확보된 경우에만 generate_str로 STR 작성
+3. analyze_network으로 계좌 네트워크 분석 (N-hop 심층 탐색 지원)
+4. detect_aml_patterns으로 순환거래/레이어링/대포통장 패턴 탐지
+5. predict_fraud로 이상거래 확률 예측
+6. 충분한 근거가 확보된 경우에만 generate_str로 STR 작성
 
 STR 작성 시 주의사항:
 - 반드시 근거 데이터를 먼저 조회한 후 STR을 작성하세요
@@ -266,6 +340,8 @@ def _execute_tool(name: str, arguments: dict) -> str:
             return _tool_analyze_network(arguments)
         elif name == "get_statistics":
             return _tool_get_statistics()
+        elif name == "detect_aml_patterns":
+            return _tool_detect_aml_patterns(arguments)
         else:
             return json.dumps({"error": f"알 수 없는 도구: {name}"}, ensure_ascii=False)
     except Exception as exc:
@@ -383,12 +459,13 @@ def _tool_analyze_network(arguments: dict) -> str:
     if account_id is None:
         return json.dumps({"error": "account_id가 필요합니다."}, ensure_ascii=False)
 
-    hops = int(arguments.get("hops", 1))
-    if hops not in (1, 2):
-        hops = 1
+    hops = max(1, min(int(arguments.get("hops", 1)), 5))
 
     try:
-        df = get_account_ego_network(account_id, hops=hops)
+        if hops > 2:
+            df = get_account_ego_network_deep(account_id, hops=hops)
+        else:
+            df = get_account_ego_network(account_id, hops=hops)
     except Exception as exc:
         return json.dumps(
             {"error": f"네트워크 조회 오류: {str(exc)}"},
@@ -434,6 +511,114 @@ def _tool_analyze_network(arguments: dict) -> str:
         },
         ensure_ascii=False,
     )
+
+
+def _tool_detect_aml_patterns(arguments: dict) -> str:
+    pattern_type = arguments.get("pattern_type", "")
+
+    if pattern_type == "ring":
+        try:
+            df = detect_ring_transactions(
+                min_len=arguments.get("min_len", 3),
+                max_len=arguments.get("max_len", 6),
+                limit=arguments.get("limit", 20),
+            )
+        except Exception as exc:
+            return json.dumps({"error": f"순환거래 탐지 오류: {str(exc)}"}, ensure_ascii=False)
+
+        if df.empty:
+            return json.dumps(
+                {
+                    "안내": "순환거래 패턴이 탐지되지 않았습니다. Memgraph가 실행 중인지 확인하세요.",
+                    "결과": [],
+                },
+                ensure_ascii=False,
+            )
+        records = df.to_dict(orient="records")
+        return json.dumps(
+            {"패턴": "순환거래", "건수": len(records), "결과": records},
+            ensure_ascii=False,
+        )
+
+    elif pattern_type == "layering":
+        try:
+            df = detect_layering_patterns(
+                min_layers=arguments.get("min_layers", 3),
+                limit=arguments.get("limit", 20),
+            )
+        except Exception as exc:
+            return json.dumps({"error": f"레이어링 패턴 탐지 오류: {str(exc)}"}, ensure_ascii=False)
+
+        if df.empty:
+            return json.dumps(
+                {
+                    "안내": "레이어링 패턴이 탐지되지 않았습니다. Memgraph가 실행 중인지 확인하세요.",
+                    "결과": [],
+                },
+                ensure_ascii=False,
+            )
+        records = df.to_dict(orient="records")
+        return json.dumps(
+            {"패턴": "다단계 레이어링", "건수": len(records), "결과": records},
+            ensure_ascii=False,
+        )
+
+    elif pattern_type == "funnel":
+        try:
+            df = detect_funnel_accounts(
+                min_inflow=arguments.get("min_inflow", 10),
+                max_outflow=arguments.get("max_outflow", 3),
+                limit=arguments.get("limit", 20),
+            )
+        except Exception as exc:
+            return json.dumps({"error": f"대포통장 패턴 탐지 오류: {str(exc)}"}, ensure_ascii=False)
+
+        if df.empty:
+            return json.dumps(
+                {
+                    "안내": "대포통장 패턴이 탐지되지 않았습니다. Memgraph가 실행 중인지 확인하세요.",
+                    "결과": [],
+                },
+                ensure_ascii=False,
+            )
+        records = df.to_dict(orient="records")
+        return json.dumps(
+            {"패턴": "대포통장(funnel)", "건수": len(records), "결과": records},
+            ensure_ascii=False,
+        )
+
+    elif pattern_type == "shortest_path":
+        account_a = arguments.get("account_a")
+        account_b = arguments.get("account_b")
+        if not account_a or not account_b:
+            return json.dumps(
+                {"error": "shortest_path에는 account_a와 account_b가 필요합니다."},
+                ensure_ascii=False,
+            )
+        try:
+            result = find_shortest_path(account_a, account_b)
+        except Exception as exc:
+            return json.dumps({"error": f"최단경로 탐색 오류: {str(exc)}"}, ensure_ascii=False)
+        return json.dumps(result, ensure_ascii=False)
+
+    elif pattern_type == "risk_score":
+        account_id = arguments.get("account_id")
+        if not account_id:
+            return json.dumps(
+                {"error": "risk_score에는 account_id가 필요합니다."},
+                ensure_ascii=False,
+            )
+        try:
+            result = compute_risk_score(account_id)
+        except Exception as exc:
+            return json.dumps({"error": f"위험도 점수 산출 오류: {str(exc)}"}, ensure_ascii=False)
+        return json.dumps(result, ensure_ascii=False)
+
+    else:
+        return json.dumps(
+            {"error": f"알 수 없는 패턴 유형: {pattern_type}. 유효한 값: ring, layering, funnel, shortest_path, risk_score"},
+            ensure_ascii=False,
+        )
 
 
 def _tool_get_statistics() -> str:

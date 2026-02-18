@@ -40,8 +40,8 @@ class TestToolsDefinition:
         assert isinstance(TOOLS, list)
 
     def test_tools_count(self):
-        """도구가 정확히 5개이어야 한다 (analyze_network, get_statistics 추가)."""
-        assert len(TOOLS) == 5
+        """도구가 정확히 6개이어야 한다 (detect_aml_patterns 추가)."""
+        assert len(TOOLS) == 6
 
     def test_tools_have_required_structure(self):
         """각 도구가 type과 function 키를 가져야 한다."""
@@ -59,6 +59,7 @@ class TestToolsDefinition:
             "generate_str",
             "analyze_network",
             "get_statistics",
+            "detect_aml_patterns",
         }
         assert names == expected
 
@@ -746,12 +747,12 @@ class TestExecuteToolAnalyzeNetwork:
         parsed = json.loads(result)
         assert "error" in parsed
 
-    def test_invalid_hops_clamped(self):
-        """잘못된 hops 값(예: 5)은 1로 클램프되어야 한다."""
+    def test_hops_clamped_to_valid_range(self):
+        """hops 값은 1~5 범위로 클램프되어 오류 없이 처리되어야 한다."""
         from src.features.network import get_fraud_accounts
         accounts = get_fraud_accounts()
         account_id = int(accounts["계좌"].iloc[0])
-        # hops=5는 유효하지 않지만 오류 없이 처리되어야 함
+        # hops=5는 최대 허용값이므로 오류 없이 처리되어야 함
         result = _execute_tool("analyze_network", {"account_id": account_id, "hops": 5})
         parsed = json.loads(result)
         # 오류가 아닌 정상 응답이어야 함
@@ -972,3 +973,184 @@ class TestGetStatisticsToolDefinition:
         """properties가 비어 있어야 한다 (파라미터 없는 도구)."""
         props = get_statistics_tool["function"]["parameters"].get("properties", {})
         assert isinstance(props, dict)
+
+
+# ──────────────────────────────────────────────
+# detect_aml_patterns TOOLS 정의 세부 검증
+# ──────────────────────────────────────────────
+class TestDetectAmlPatternsToolDefinition:
+    """detect_aml_patterns 도구 정의 세부 검증."""
+
+    @pytest.fixture(scope="class")
+    def aml_tool(self):
+        """detect_aml_patterns 도구 정의를 반환한다."""
+        return next(t for t in TOOLS if t["function"]["name"] == "detect_aml_patterns")
+
+    def test_pattern_type_is_required(self, aml_tool):
+        """pattern_type이 required 파라미터여야 한다."""
+        required = aml_tool["function"]["parameters"]["required"]
+        assert "pattern_type" in required
+
+    def test_pattern_type_enum_values(self, aml_tool):
+        """pattern_type enum에 5개 유형이 모두 포함되어야 한다."""
+        props = aml_tool["function"]["parameters"]["properties"]
+        enum_values = set(props["pattern_type"]["enum"])
+        expected = {"ring", "layering", "funnel", "shortest_path", "risk_score"}
+        assert enum_values == expected
+
+    def test_optional_params_not_required(self, aml_tool):
+        """account_id, account_a, account_b 등은 optional이어야 한다."""
+        required = set(aml_tool["function"]["parameters"]["required"])
+        optional = {"account_id", "account_a", "account_b", "min_len", "max_len",
+                    "min_layers", "min_inflow", "max_outflow", "limit"}
+        assert required.isdisjoint(optional)
+
+    def test_description_mentions_memgraph(self, aml_tool):
+        """description에 Memgraph 또는 AML 관련 내용이 포함되어야 한다."""
+        desc = aml_tool["function"]["description"]
+        assert "Memgraph" in desc or "AML" in desc or "자금세탁" in desc
+
+
+# ──────────────────────────────────────────────
+# _execute_tool - detect_aml_patterns
+# ──────────────────────────────────────────────
+class TestExecuteToolDetectAmlPatterns:
+    """_execute_tool('detect_aml_patterns', ...) 단위 테스트."""
+
+    def test_unknown_pattern_type_returns_error(self):
+        """알 수 없는 pattern_type은 오류를 반환해야 한다."""
+        result = _execute_tool("detect_aml_patterns", {"pattern_type": "unknown_pattern"})
+        parsed = json.loads(result)
+        assert "error" in parsed
+
+    def test_shortest_path_missing_accounts_returns_error(self):
+        """shortest_path에 account_a, account_b가 없으면 오류를 반환해야 한다."""
+        result = _execute_tool("detect_aml_patterns", {"pattern_type": "shortest_path"})
+        parsed = json.loads(result)
+        assert "error" in parsed
+
+    def test_risk_score_missing_account_id_returns_error(self):
+        """risk_score에 account_id가 없으면 오류를 반환해야 한다."""
+        result = _execute_tool("detect_aml_patterns", {"pattern_type": "risk_score"})
+        parsed = json.loads(result)
+        assert "error" in parsed
+
+    def test_ring_pattern_returns_json(self):
+        """ring 패턴 탐지가 JSON을 반환해야 한다 (Memgraph 없으면 안내 메시지)."""
+        result = _execute_tool("detect_aml_patterns", {"pattern_type": "ring"})
+        parsed = json.loads(result)
+        assert isinstance(parsed, dict)
+        # Memgraph 미실행 시 안내 메시지 또는 결과 목록이 있어야 함
+        assert "안내" in parsed or "결과" in parsed or "패턴" in parsed or "error" in parsed
+
+    def test_layering_pattern_returns_json(self):
+        """layering 패턴 탐지가 JSON을 반환해야 한다 (Memgraph 없으면 안내 메시지)."""
+        result = _execute_tool("detect_aml_patterns", {"pattern_type": "layering"})
+        parsed = json.loads(result)
+        assert isinstance(parsed, dict)
+        assert "안내" in parsed or "결과" in parsed or "패턴" in parsed or "error" in parsed
+
+    def test_funnel_pattern_returns_json(self):
+        """funnel 패턴 탐지가 JSON을 반환해야 한다 (Memgraph 없으면 안내 메시지)."""
+        result = _execute_tool("detect_aml_patterns", {"pattern_type": "funnel"})
+        parsed = json.loads(result)
+        assert isinstance(parsed, dict)
+        assert "안내" in parsed or "결과" in parsed or "패턴" in parsed or "error" in parsed
+
+    def test_shortest_path_with_accounts_returns_json(self):
+        """account_a, account_b가 있는 shortest_path는 JSON을 반환해야 한다."""
+        result = _execute_tool("detect_aml_patterns", {
+            "pattern_type": "shortest_path",
+            "account_a": 12345,
+            "account_b": 67890,
+        })
+        parsed = json.loads(result)
+        assert isinstance(parsed, dict)
+        # Memgraph 미실행 시 error 키가 있어야 함
+        assert "path" in parsed or "error" in parsed
+
+    def test_risk_score_with_account_id_returns_json(self):
+        """account_id가 있는 risk_score는 JSON을 반환해야 한다."""
+        result = _execute_tool("detect_aml_patterns", {
+            "pattern_type": "risk_score",
+            "account_id": 12345,
+        })
+        parsed = json.loads(result)
+        assert isinstance(parsed, dict)
+        # Memgraph 미실행 시 risk_score=0.0과 error 키가 있어야 함
+        assert "risk_score" in parsed or "error" in parsed
+
+    def test_ring_with_custom_params(self):
+        """커스텀 min_len, max_len, limit이 적용되어 오류 없이 동작해야 한다."""
+        result = _execute_tool("detect_aml_patterns", {
+            "pattern_type": "ring",
+            "min_len": 3,
+            "max_len": 5,
+            "limit": 10,
+        })
+        parsed = json.loads(result)
+        assert isinstance(parsed, dict)
+
+    def test_result_is_always_parseable_json(self):
+        """모든 pattern_type에 대해 유효한 JSON이 반환되어야 한다."""
+        for pt in ["ring", "layering", "funnel"]:
+            result = _execute_tool("detect_aml_patterns", {"pattern_type": pt})
+            parsed = json.loads(result)
+            assert isinstance(parsed, dict), f"{pt} 패턴 결과가 dict가 아닙니다"
+
+
+# ──────────────────────────────────────────────
+# analyze_network hop 확장 검증
+# ──────────────────────────────────────────────
+class TestAnalyzeNetworkHopExpansion:
+    """analyze_network hop 1~5 확장 동작 검증."""
+
+    @pytest.fixture(scope="class")
+    def sample_account_id(self):
+        """테스트용 이상거래 계좌 ID를 반환한다."""
+        from src.features.network import get_fraud_accounts
+        accounts = get_fraud_accounts()
+        return int(accounts["계좌"].iloc[0])
+
+    def test_hops_1_works(self, sample_account_id):
+        """hops=1 분석이 정상 동작해야 한다."""
+        result = _execute_tool("analyze_network", {"account_id": sample_account_id, "hops": 1})
+        parsed = json.loads(result)
+        assert isinstance(parsed, dict)
+        assert "error" not in parsed or "네트워크" not in parsed.get("error", "")
+
+    def test_hops_2_works(self, sample_account_id):
+        """hops=2 분석이 정상 동작해야 한다."""
+        result = _execute_tool("analyze_network", {"account_id": sample_account_id, "hops": 2})
+        parsed = json.loads(result)
+        assert isinstance(parsed, dict)
+        if "탐색범위_hop" in parsed:
+            assert parsed["탐색범위_hop"] == 2
+
+    def test_hops_3_does_not_raise(self, sample_account_id):
+        """hops=3은 Memgraph 미실행 시 DuckDB 폴백으로 오류 없이 동작해야 한다."""
+        result = _execute_tool("analyze_network", {"account_id": sample_account_id, "hops": 3})
+        parsed = json.loads(result)
+        assert isinstance(parsed, dict)
+        assert "error" not in parsed or "네트워크" not in parsed.get("error", "")
+
+    def test_hops_5_does_not_raise(self, sample_account_id):
+        """hops=5는 Memgraph 미실행 시 DuckDB 폴백으로 오류 없이 동작해야 한다."""
+        result = _execute_tool("analyze_network", {"account_id": sample_account_id, "hops": 5})
+        parsed = json.loads(result)
+        assert isinstance(parsed, dict)
+        assert "error" not in parsed or "네트워크" not in parsed.get("error", "")
+
+    def test_hops_above_5_clamped(self, sample_account_id):
+        """hops=10은 5로 클램프되어 오류 없이 처리되어야 한다."""
+        result = _execute_tool("analyze_network", {"account_id": sample_account_id, "hops": 10})
+        parsed = json.loads(result)
+        assert isinstance(parsed, dict)
+        assert "error" not in parsed or "네트워크" not in parsed.get("error", "")
+
+    def test_hops_below_1_clamped(self, sample_account_id):
+        """hops=0은 1로 클램프되어 오류 없이 처리되어야 한다."""
+        result = _execute_tool("analyze_network", {"account_id": sample_account_id, "hops": 0})
+        parsed = json.loads(result)
+        assert isinstance(parsed, dict)
+        assert "error" not in parsed or "네트워크" not in parsed.get("error", "")
