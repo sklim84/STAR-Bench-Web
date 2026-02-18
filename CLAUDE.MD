@@ -29,26 +29,44 @@ python -c "from src.data.graph_etl import run_etl; print(run_etl())"  # DuckDB �
 
 ## Architecture
 
-`app.py`가 `streamlit-option-menu` 기반 상단 가로 메뉴를 렌더링하고, 선택된 메뉴에 따라 `_pages/` 모듈의 `render()` 함수를 호출한다. 각 페이지는 `src/features/` 모듈의 비즈니스 로직을 호출하고, features 모듈은 `src/data/db`를 통해 DuckDB에 쿼리한다.
+### 레이어 구조
 
 ```
-app.py (라우팅 + 글로벌 CSS) → _pages/ (UI, render()) → src/features/ (비즈니스 로직) → src/data/db (쿼리) → DuckDB
-                                                                                        → src/data/graph_db (Cypher) → Memgraph (Docker)
+app.py (라우팅 + 글로벌 CSS)
+  → _pages/ (UI, 각 모듈은 render() 함수를 export)
+    → src/features/ (비즈니스 로직)
+      → src/data/db (DuckDB 쿼리)
+      → src/data/graph_db (Memgraph Cypher 쿼리)
 ```
 
-**Dual-Store 아키텍처**: DuckDB(분석/집계용) + Memgraph(그래프 패턴 탐지용) 공존. Memgraph 미실행 시 DuckDB+NetworkX로 자동 폴백 (Graceful Degradation).
+### Dual-Store 아키텍처
 
-**Data pipeline**: CSV → Parquet (PyArrow, snappy 압축, 타입 최적화) → DuckDB 인메모리 테이블(`hofinet`). 앱 시작 시 Parquet이 없으면 `src/data/loader`가 자동 변환하고, `src/data/db`가 테이블을 생성한다. **Graph pipeline**: DuckDB → Memgraph ETL(`src/data/graph_etl.run_etl()`). Account/Company 노드 + TRANSFER/BELONGS_TO 엣지. `docker-compose up -d`로 Memgraph 실행 후 ETL 1회 실행.
+DuckDB(분석/집계)와 Memgraph(그래프 패턴 탐지)가 공존한다. Memgraph 미실행 시 DuckDB+NetworkX로 자동 폴백한다 (Graceful Degradation).
 
-**Dashboard (기능1)**: `src/features/dashboard.py`에 17개 함수. 글로벌 필터(`_build_filter_conditions`, `_apply_filters`) 지원으로 모든 쿼리 함수에 `filters=None` 파라미터 적용. 자금구분 분석, 이상거래 금액 분석, 교차 히트맵(시간대x유형), 유형별 추이 포함.
+### Data Pipeline
 
-**Network (기능2)**: `src/features/network.py`에 18개 함수 (DuckDB+NetworkX 11개 + Memgraph Cypher 7개). 금융회사/계좌 간 거래 네트워크 구축, 4대 중심성 지표(`compute_centrality_metrics`), Louvain 커뮤니티 탐지(`detect_communities`), 이상거래 흐름 매트릭스(`get_fraud_flow_matrix`), 확장 네트워크 통계(`get_extended_network_stats`). **Memgraph 기반 AML 패턴 탐지**: 순환거래(`detect_ring_transactions`), 레이어링(`detect_layering_patterns`), 대포통장(`detect_funnel_accounts`), N-hop 심층 탐색(`get_account_ego_network_deep`, 최대 5-hop), 최단경로(`find_shortest_path`), 시간 윈도우 네트워크(`get_temporal_network`), 복합 위험 점수(`compute_risk_score`). UI 5개 탭: 금융회사 네트워크, 이상거래 계좌 네트워크, 계좌 탐색(1~5 hop), 이상거래 흐름, AML 패턴 탐지(6개 서브탭).
+- **DuckDB**: CSV → Parquet (PyArrow, snappy) → DuckDB 인메모리 테이블(`hofinet`). 앱 시작 시 Parquet이 없으면 `src/data/loader`가 자동 변환
+- **Memgraph**: `src/data/graph_etl.run_etl()`로 DuckDB → Memgraph 일괄 ETL (최초 1회). `docker-compose up -d` 후 실행
 
-**Detector (기능3)**: `src/features/detector.py`에 11개 함수. XGBoost 이상거래 탐지. 학습 피처: `["거래시간대", "출금금융회사일련번호", "입금금융회사일련번호", "자금구분", "매체구분", "거래금액"]`. 모델 저장: `_models/xgb_detector.joblib`. `train_model(params=None)`로 하이퍼파라미터 튜닝 지원. F1 기반 임계값 최적화(`find_optimal_threshold`), ROC 커브(`get_roc_curve_data`), 이상거래 유형별 탐지 성능(`evaluate_by_fraud_type`), 확률 구간 분포(`get_probability_distribution`).
+### Memgraph 그래프 모델
 
-**Agent (기능4)**: `src/features/agent.py`에서 OpenAI `gpt-4o-mini` + function calling. 도구 6개: `query_transactions` (SQL 실행, 최대 100행, 위험 키워드 차단), `predict_fraud` (XGBoost 예측 + 파라미터 검증), `generate_str` (구조화된 STR 보고서 생성), `analyze_network` (계좌 네트워크 분석, 1~5 hop 지원), `get_statistics` (대시보드 요약 통계 조회), `detect_aml_patterns` (Memgraph 기반 AML 패턴 탐지 — 순환거래/레이어링/대포통장/최단경로/위험도). 최대 5라운드 tool calling. UI에서 도구 호출 시각화(expander) + 대화 내보내기(JSON) 지원.
+```
+(:Company {id: int})
+(:Account {id: int, company_id: int})
+(:Account)-[:BELONGS_TO]->(:Company)
+(:Account)-[:TRANSFER {거래일자, 거래시간대, 자금구분, 매체구분, 거래금액, 이상거래여부, 이상거래유형}]->(:Account)
+```
 
-**새 기능 추가 패턴**: `src/features/`에 비즈니스 로직 모듈 생성 → `_pages/`에 `render()` 함수가 있는 페이지 모듈 생성 → `app.py`의 `option_menu` options/icons와 라우팅 if-elif에 추가
+### 기능별 핵심 구조
+
+- **기능1 (Dashboard)**: 글로벌 필터(`filters=None` 파라미터) 패턴. 모든 쿼리 함수가 동일 필터 인터페이스 지원
+- **기능2 (Network)**: DuckDB+NetworkX 함수(중심성, 커뮤니티) + Memgraph Cypher 함수(순환거래, 레이어링, 대포통장, N-hop, 최단경로, 시간 윈도우, 위험도). UI 5개 탭 + AML 패턴 탐지 탭(6개 서브탭)
+- **기능3 (Detector)**: XGBoost 모델. 학습 피처: `["거래시간대", "출금금융회사일련번호", "입금금융회사일련번호", "자금구분", "매체구분", "거래금액"]`. 모델 저장: `_models/xgb_detector.joblib`
+- **기능4 (Agent)**: OpenAI `gpt-4o-mini` + function calling. 도구 6개(`query_transactions`, `predict_fraud`, `generate_str`, `analyze_network`, `get_statistics`, `detect_aml_patterns`). 최대 5라운드 tool calling
+
+### 새 기능 추가 패턴
+
+`src/features/`에 비즈니스 로직 모듈 생성 → `_pages/`에 `render()` 함수가 있는 페이지 모듈 생성 → `app.py`의 `option_menu` options/icons와 라우팅 if-elif에 추가
 
 ## Data
 
@@ -81,14 +99,31 @@ DuckDB 테이블명 `hofinet`. **컬럼명이 한글**이므로 SQL에서 그대
 
 ## Coding Standards
 
+### 레이어 규칙
 - DB 쿼리는 반드시 `src/data/db.query()` 또는 `db.query_arrow()`를 통해 실행. 그래프 쿼리는 `src/data/graph_db.execute()` 또는 `graph_db.execute_df()` 사용
 - **`_pages/`에서 `src/data/db`를 직접 import하지 않는다** — 반드시 `src/features/` 레이어를 경유
+- `_pages/`에서 `graph_db`는 `is_available()` 상태 확인 목적으로만 import 허용
 - 경로는 `config.py`의 상수를 사용 (하드코딩 금지)
+- 페이지 모듈은 `_pages/`에 위치하며, 반드시 `render()` 함수를 export
+
+### 시각화
 - 시각화는 Plotly 사용, 위 색상 팔레트 준수
 - Plotly 차트에 다크 테마 적용 필수 (투명 배경, `#1E2333` 그리드)
-- 페이지 모듈은 `_pages/`에 위치하며, 반드시 `render()` 함수를 export
-- `.env` 파일 커밋 금지, API 키를 코드에 노출하지 않기
+
+### 쿼리 안전성
 - SQL 안전성: 외부 입력에 `int()` 변환 또는 파라미터 바인딩 사용
+- Cypher 안전성: Memgraph는 LIMIT에 파라미터 바인딩 불가. `int()` 변환 후 f-string 삽입. 파라미터 바인딩 가능한 곳은 `$param` 형식 사용
+
+### Memgraph Graceful Degradation 패턴
+모든 Cypher 기반 함수는 아래 패턴을 따른다:
+```python
+def detect_something(...):
+    if not graph_db.is_available():
+        logger.warning("Memgraph 미실행으로 ... 불가")
+        return pd.DataFrame()  # 또는 빈 dict
+    # Cypher 쿼리 실행
+```
+
+### 테스트
 - 테스트 네이밍: `Test<FunctionName>::test_<description>` 패턴 사용
-- Cypher 안전성: Memgraph는 LIMIT에 파라미터 바인딩 불가. `int()` 변환 후 f-string 삽입
-- 테스트 커버리지: dashboard(115), network(131), detector(76), agent(116), db(19), graph_db(27), graph_etl(36), config(16), loader(13), modules(21) — 총 570개
+- Memgraph 의존 함수는 `unittest.mock.patch`로 `graph_db` 모킹하여 테스트
