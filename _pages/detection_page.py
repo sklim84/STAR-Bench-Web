@@ -59,8 +59,7 @@ def _metric_card(label, value, sub=""):
     return f"""<div class="metric-card">
         <div class="label">{label}</div>
         <div class="value">{value}</div>
-        {sub_html}
-    </div>"""
+        {sub_html}</div>"""
 
 
 def render():
@@ -241,7 +240,7 @@ def _render_evaluation(model, result):
         )
         _apply_dark(fig_fi, height=300)
         fig_fi.update_layout(yaxis=dict(autorange="reversed"))
-        st.plotly_chart(fig_fi, use_container_width=True)
+        st.plotly_chart(fig_fi, width='stretch')
 
     with col_right:
         st.markdown('<p class="section-header">혼동 행렬</p>', unsafe_allow_html=True)
@@ -253,7 +252,7 @@ def _render_evaluation(model, result):
             color_continuous_scale="Blues",
         )
         _apply_dark(fig_cm, height=300)
-        st.plotly_chart(fig_cm, use_container_width=True)
+        st.plotly_chart(fig_cm, width='stretch')
 
     st.markdown("---")
 
@@ -281,7 +280,7 @@ def _render_evaluation(model, result):
                              title_font=dict(color="#8B8FA3", size=11))
         fig_roc.update_yaxes(title_text="True Positive Rate",
                              title_font=dict(color="#8B8FA3", size=11))
-        st.plotly_chart(fig_roc, use_container_width=True)
+        st.plotly_chart(fig_roc, width='stretch')
 
     with col_pr:
         st.markdown('<p class="section-header">Precision-Recall 커브</p>', unsafe_allow_html=True)
@@ -313,7 +312,7 @@ def _render_evaluation(model, result):
                             title_font=dict(color="#8B8FA3", size=11))
         fig_pr.update_yaxes(title_text="Precision",
                             title_font=dict(color="#8B8FA3", size=11))
-        st.plotly_chart(fig_pr, use_container_width=True)
+        st.plotly_chart(fig_pr, width='stretch')
 
     st.markdown("---")
 
@@ -378,7 +377,7 @@ def _render_evaluation(model, result):
         _apply_dark(fig_th, height=350)
         fig_th.update_xaxes(title_text="임계값", title_font=dict(color="#8B8FA3", size=11))
         fig_th.update_yaxes(title_text="Score", title_font=dict(color="#8B8FA3", size=11))
-        st.plotly_chart(fig_th, use_container_width=True)
+        st.plotly_chart(fig_th, width='stretch')
 
         # 임계값별 성능 테이블
         with st.expander("임계값별 상세 성능"):
@@ -419,7 +418,7 @@ def _render_evaluation(model, result):
     _apply_dark(fig_dist, height=350)
     fig_dist.update_xaxes(title_text="예측 확률", title_font=dict(color="#8B8FA3", size=11))
     fig_dist.update_yaxes(title_text="빈도", title_font=dict(color="#8B8FA3", size=11))
-    st.plotly_chart(fig_dist, use_container_width=True)
+    st.plotly_chart(fig_dist, width='stretch')
 
     # --- 확률 구간별 정상/이상 분포 (stacked bar) ---
     st.markdown('<p class="section-header">확률 구간별 정상/이상 분포</p>', unsafe_allow_html=True)
@@ -439,7 +438,7 @@ def _render_evaluation(model, result):
         _apply_dark(fig_prob, height=350)
         fig_prob.update_xaxes(title_text="예측 확률 구간", title_font=dict(color="#8B8FA3", size=11))
         fig_prob.update_yaxes(title_text="건수", title_font=dict(color="#8B8FA3", size=11))
-        st.plotly_chart(fig_prob, use_container_width=True)
+        st.plotly_chart(fig_prob, width='stretch')
 
     # --- 분류 리포트 ---
     with st.expander("상세 분류 리포트"):
@@ -539,7 +538,7 @@ def _render_detection_results(model, result_df):
         color_continuous_scale="Blues",
     )
     _apply_dark(fig_cross, height=300)
-    st.plotly_chart(fig_cross, use_container_width=True)
+    st.plotly_chart(fig_cross, width='stretch')
 
     st.markdown("---")
 
@@ -583,7 +582,7 @@ def _render_detection_results(model, result_df):
         fig_ft.update_yaxes(title_text="Recall (탐지율)",
                             title_font=dict(color="#8B8FA3", size=11),
                             range=[0, 1.1])
-        st.plotly_chart(fig_ft, use_container_width=True)
+        st.plotly_chart(fig_ft, width='stretch')
 
         # 상세 테이블
         with st.expander("유형별 탐지 상세"):
@@ -628,4 +627,4 @@ def _render_detection_results(model, result_df):
                                title_font=dict(color="#8B8FA3", size=11))
         fig_prob2.update_yaxes(title_text="건수",
                                title_font=dict(color="#8B8FA3", size=11))
-        st.plotly_chart(fig_prob2, use_container_width=True)
+        st.plotly_chart(fig_prob2, width='stretch')

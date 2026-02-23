@@ -1,3 +1,5 @@
+import pathlib
+
 import streamlit as st
 from streamlit_option_menu import option_menu
 
@@ -10,129 +12,13 @@ st.set_page_config(
 )
 
 # ------------------------------------------------------------------
-# 다크 테마 커스텀 CSS
+# 글래스모피즘 테마 CSS (assets/style.css)
 # ------------------------------------------------------------------
-st.markdown("""
-<style>
-/* ── 전역 배경 ── */
-.stApp {
-    background-color: #0E1117;
-}
+def _load_css() -> None:
+    css = pathlib.Path("assets/style.css").read_text(encoding="utf-8")
+    st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
 
-/* ── 카드 컨테이너 ── */
-.dark-card {
-    background-color: #1A1F2E;
-    border: 1px solid #2A2F3E;
-    border-radius: 12px;
-    padding: 20px 24px;
-    margin-bottom: 16px;
-}
-
-/* ── 메트릭 카드 ── */
-.metric-card {
-    background-color: #1A1F2E;
-    border: 1px solid #2A2F3E;
-    border-radius: 12px;
-    padding: 18px 22px;
-    text-align: left;
-}
-.metric-card .label {
-    color: #8B8FA3;
-    font-size: 13px;
-    font-weight: 500;
-    margin-bottom: 6px;
-}
-.metric-card .value {
-    color: #4ECDC4;
-    font-size: 26px;
-    font-weight: 700;
-    letter-spacing: -0.5px;
-}
-.metric-card .value.white {
-    color: #E0E0E0;
-}
-.metric-card .sub {
-    color: #6B7080;
-    font-size: 12px;
-    margin-top: 4px;
-}
-
-/* ── 섹션 헤더 ── */
-.section-header {
-    color: #FFFFFF;
-    font-size: 18px;
-    font-weight: 700;
-    margin: 28px 0 16px 0;
-    padding-bottom: 0;
-}
-
-/* ── Streamlit 기본 metric 다크 스타일 ── */
-[data-testid="stMetric"] {
-    background-color: #1A1F2E;
-    border: 1px solid #2A2F3E;
-    border-radius: 12px;
-    padding: 18px 22px;
-}
-[data-testid="stMetricLabel"] {
-    color: #8B8FA3 !important;
-}
-[data-testid="stMetricValue"] {
-    color: #4ECDC4 !important;
-    font-weight: 700 !important;
-}
-
-/* ── 탭 스타일 ── */
-.stTabs [data-baseweb="tab-list"] {
-    gap: 0px;
-    background-color: #1A1F2E;
-    border-radius: 10px;
-    padding: 4px;
-}
-.stTabs [data-baseweb="tab"] {
-    border-radius: 8px;
-    color: #8B8FA3;
-    font-weight: 500;
-    padding: 10px 20px;
-}
-.stTabs [aria-selected="true"] {
-    background-color: #2A2F3E !important;
-    color: #FFFFFF !important;
-}
-
-/* ── divider ── */
-.stDivider {
-    border-color: #2A2F3E !important;
-}
-hr {
-    border-color: #2A2F3E !important;
-}
-
-/* ── 테이블 ── */
-.dark-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 8px;
-}
-.dark-table th {
-    background-color: #1E2333;
-    color: #8B8FA3;
-    font-weight: 600;
-    font-size: 13px;
-    padding: 10px 16px;
-    text-align: left;
-    border-bottom: 1px solid #2A2F3E;
-}
-.dark-table td {
-    color: #E0E0E0;
-    font-size: 14px;
-    padding: 10px 16px;
-    border-bottom: 1px solid #1E2333;
-}
-.dark-table tr:hover td {
-    background-color: #1E2333;
-}
-</style>
-""", unsafe_allow_html=True)
+_load_css()
 
 
 @st.cache_resource
@@ -158,13 +44,15 @@ selected = option_menu(
     styles={
         "container": {
             "padding": "4px",
-            "background-color": "#1A1F2E",
-            "border-radius": "12px",
-            "border": "1px solid #2A2F3E",
+            "background": "rgba(255, 255, 255, 0.04)",
+            "backdrop-filter": "blur(16px)",
+            "border-radius": "14px",
+            "border": "1px solid rgba(255, 255, 255, 0.09)",
             "margin-bottom": "20px",
+            "box-shadow": "0 4px 24px rgba(0, 0, 0, 0.35)",
         },
         "icon": {
-            "color": "#8B8FA3",
+            "color": "#9EA3B8",
             "font-size": "16px",
         },
         "nav-link": {
@@ -173,15 +61,16 @@ selected = option_menu(
             "text-align": "center",
             "margin": "2px",
             "padding": "10px 24px",
-            "color": "#8B8FA3",
+            "color": "#9EA3B8",
             "border-radius": "10px",
-            "--hover-color": "#252A3A",
+            "--hover-color": "rgba(255, 255, 255, 0.06)",
         },
         "nav-link-selected": {
-            "background-color": "#4ECDC4",
-            "color": "#0E1117",
+            "background": "rgba(78, 205, 196, 0.15)",
+            "color": "#4ECDC4",
             "font-weight": "700",
             "border-radius": "10px",
+            "border": "1px solid rgba(78, 205, 196, 0.3)",
         },
     },
 )

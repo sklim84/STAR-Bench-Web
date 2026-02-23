@@ -68,6 +68,15 @@ def _format_amount(amount):
         return f"{amount:,.0f}"
 
 
+def _render_insight(bullets: list) -> None:
+    """차트 하단에 AI 분석 인사이트 카드를 렌더링한다."""
+    items = "".join(f"<li>{b}</li>" for b in bullets)
+    st.markdown(
+        f'<div class="ai-insight"><span class="ai-label">🤖 AI 분석</span><ul>{items}</ul></div>',
+        unsafe_allow_html=True,
+    )
+
+
 # ------------------------------------------------------------------
 # 필터 UI 구성
 # ------------------------------------------------------------------
@@ -158,6 +167,9 @@ def render():
             st.info("선택한 조건에 해당하는 데이터가 없습니다.")
             return
         row = summary.iloc[0]
+        if row['총거래'] == 0:
+            st.info("선택한 조건에 해당하는 데이터가 없습니다.")
+            return
     except Exception as e:
         st.error(f"요약 데이터를 불러올 수 없습니다: {e}")
         return
@@ -178,8 +190,7 @@ def render():
             st.markdown(f"""<div class="metric-card">
                 <div class="label">{label}</div>
                 <div class="value">{value}</div>
-                {sub_html}
-            </div>""", unsafe_allow_html=True)
+                {sub_html}</div>""", unsafe_allow_html=True)
 
     # ── FR-002: 이상거래 금액 메트릭 카드 ──
     try:
@@ -254,7 +265,16 @@ def render():
             _apply_dark(fig_monthly, height=400, secondary_y=True)
             fig_monthly.update_yaxes(title_text="거래 건수", title_font=dict(color="#8B8FA3", size=11), secondary_y=False)
             fig_monthly.update_yaxes(title_text="이상거래 비율(%)", title_font=dict(color="#8B8FA3", size=11), secondary_y=True)
-            st.plotly_chart(fig_monthly, use_container_width=True)
+            st.plotly_chart(fig_monthly, width='stretch')
+            peak_m = monthly.loc[monthly['총거래'].idxmax(), '연월str']
+            max_ratio_m = monthly.loc[monthly['이상거래비율'].idxmax()]
+            mid = len(monthly) // 2
+            trend_dir = "증가" if monthly.iloc[mid:]['이상거래비율'].mean() > monthly.iloc[:mid]['이상거래비율'].mean() else "감소"
+            _render_insight([
+                f"거래량 최고 월: {peak_m}",
+                f"이상거래 비율 최고: {max_ratio_m['연월str']} ({max_ratio_m['이상거래비율']:.2f}%)",
+                f"후반기 이상거래 비율 추세: {trend_dir} 방향",
+            ])
     except Exception as e:
         st.error(f"월별 추이 데이터를 불러올 수 없습니다: {e}")
 
@@ -284,7 +304,15 @@ def render():
                 _apply_dark(fig_hour, height=350, secondary_y=True)
                 fig_hour.update_yaxes(title_text="거래 건수", title_font=dict(color="#8B8FA3", size=11), secondary_y=False)
                 fig_hour.update_yaxes(title_text="이상거래 비율(%)", title_font=dict(color="#8B8FA3", size=11), secondary_y=True)
-                st.plotly_chart(fig_hour, use_container_width=True)
+                st.plotly_chart(fig_hour, width='stretch')
+                peak_h = hourly.loc[hourly['총거래'].idxmax(), '시간대명']
+                max_ratio_h = hourly.loc[hourly['이상거래비율'].idxmax()]
+                min_ratio_h = hourly.loc[hourly['이상거래비율'].idxmin()]
+                _render_insight([
+                    f"거래 집중 시간대: {peak_h}",
+                    f"이상거래 비율 최고: {max_ratio_h['시간대명']} ({max_ratio_h['이상거래비율']:.2f}%)",
+                    f"이상거래 비율 최저: {min_ratio_h['시간대명']} ({min_ratio_h['이상거래비율']:.2f}%)",
+                ])
         except Exception as e:
             st.error(f"시간대별 데이터를 불러올 수 없습니다: {e}")
 
@@ -309,7 +337,13 @@ def render():
                 _apply_dark(fig_amt, height=350, secondary_y=True)
                 fig_amt.update_yaxes(title_text="거래 건수", title_font=dict(color="#8B8FA3", size=11), secondary_y=False)
                 fig_amt.update_yaxes(title_text="이상거래 비율(%)", title_font=dict(color="#8B8FA3", size=11), secondary_y=True)
-                st.plotly_chart(fig_amt, use_container_width=True)
+                st.plotly_chart(fig_amt, width='stretch')
+                peak_a = amount.loc[amount['총거래'].idxmax(), '금액구간']
+                max_ratio_a = amount.loc[amount['이상거래비율'].idxmax()]
+                _render_insight([
+                    f"거래 집중 금액 구간: {peak_a}",
+                    f"이상거래 비율 최고 구간: {max_ratio_a['금액구간']} ({max_ratio_a['이상거래비율']:.2f}%)",
+                ])
         except Exception as e:
             st.error(f"금액 구간별 데이터를 불러올 수 없습니다: {e}")
 
@@ -337,7 +371,14 @@ def render():
                 )
                 fig_fraud.update_traces(textposition="outside", textinfo="label+percent",
                                         textfont=dict(color="#C0C4D0", size=10))
-                st.plotly_chart(fig_fraud, use_container_width=True)
+                st.plotly_chart(fig_fraud, width='stretch')
+                total_ft = fraud_type['건수'].sum()
+                top1_ft = fraud_type.loc[fraud_type['건수'].idxmax()]
+                top1_ft_pct = top1_ft['건수'] / total_ft * 100
+                _render_insight([
+                    f"최다 발생 유형: {int(top1_ft['이상거래유형'])}. {top1_ft['이상거래설명']} ({top1_ft_pct:.1f}%)",
+                    f"탐지된 이상거래 유형 수: {len(fraud_type)}종",
+                ])
         except Exception as e:
             st.error(f"이상거래 유형 데이터를 불러올 수 없습니다: {e}")
 
@@ -364,7 +405,11 @@ def render():
                 _apply_dark(fig_fraud_amt, height=380)
                 fig_fraud_amt.update_xaxes(title_text="총 거래금액", title_font=dict(color="#8B8FA3", size=11))
                 fig_fraud_amt.update_yaxes(title_text="", autorange="reversed")
-                st.plotly_chart(fig_fraud_amt, use_container_width=True)
+                st.plotly_chart(fig_fraud_amt, width='stretch')
+                top_amt_row = fraud_by_type.loc[fraud_by_type['총금액'].idxmax()]
+                _render_insight([
+                    f"최다 금액 유형: {int(top_amt_row['이상거래유형'])}. {top_amt_row['이상거래설명']} ({_format_amount(float(top_amt_row['총금액']))})",
+                ])
         except Exception as e:
             st.error(f"유형별 금액 데이터를 불러올 수 없습니다: {e}")
 
@@ -394,7 +439,13 @@ def render():
                 _apply_dark(fig_med, height=380, secondary_y=True)
                 fig_med.update_yaxes(title_text="거래 건수", title_font=dict(color="#8B8FA3", size=11), secondary_y=False)
                 fig_med.update_yaxes(title_text="이상거래 비율(%)", title_font=dict(color="#8B8FA3", size=11), secondary_y=True)
-                st.plotly_chart(fig_med, use_container_width=True)
+                st.plotly_chart(fig_med, width='stretch')
+                peak_med = medium.loc[medium['총거래'].idxmax(), '매체명']
+                max_ratio_med = medium.loc[medium['이상거래비율'].idxmax()]
+                _render_insight([
+                    f"거래 집중 매체: {peak_med}",
+                    f"이상거래 비율 최고 매체: {max_ratio_med['매체명']} ({max_ratio_med['이상거래비율']:.2f}%)",
+                ])
         except Exception as e:
             st.error(f"매체구분 데이터를 불러올 수 없습니다: {e}")
 
@@ -422,7 +473,13 @@ def render():
                 _apply_dark(fig_fund, height=380, secondary_y=True)
                 fig_fund.update_yaxes(title_text="거래 건수", title_font=dict(color="#8B8FA3", size=11), secondary_y=False)
                 fig_fund.update_yaxes(title_text="이상거래 비율(%)", title_font=dict(color="#8B8FA3", size=11), secondary_y=True)
-                st.plotly_chart(fig_fund, use_container_width=True)
+                st.plotly_chart(fig_fund, width='stretch')
+                peak_fund = fund_type.loc[fund_type['총거래'].idxmax(), '자금명']
+                max_ratio_fund = fund_type.loc[fund_type['이상거래비율'].idxmax()]
+                _render_insight([
+                    f"거래 집중 자금구분: {peak_fund}",
+                    f"이상거래 비율 최고 자금구분: {max_ratio_fund['자금명']} ({max_ratio_fund['이상거래비율']:.2f}%)",
+                ])
         except Exception as e:
             st.error(f"자금구분 데이터를 불러올 수 없습니다: {e}")
 
@@ -467,7 +524,17 @@ def render():
                 xaxis=dict(title_font=dict(color="#8B8FA3", size=11)),
                 yaxis=dict(title_font=dict(color="#8B8FA3", size=11)),
             )
-            st.plotly_chart(fig_heatmap, use_container_width=True)
+            st.plotly_chart(fig_heatmap, width='stretch')
+            peak_hm = heatmap_data.loc[heatmap_data['건수'].idxmax()]
+            peak_hm_type = type_map.get(int(peak_hm['이상거래유형']), f"유형 {int(peak_hm['이상거래유형'])}")
+            peak_hm_hour = f"{int(peak_hm['거래시간대']):02d}~{int(peak_hm['거래시간대'])+3:02d}시"
+            top_types = heatmap_data.groupby('이상거래유형')['건수'].sum().nlargest(1)
+            top_type_val = int(top_types.index[0])
+            top_type_label = type_map.get(top_type_val, f"유형 {top_type_val}")
+            _render_insight([
+                f"이상거래 집중 조합: {peak_hm_type} × {peak_hm_hour} ({int(peak_hm['건수']):,}건)",
+                f"시간대 전체 합산 최다 유형: {top_type_label}",
+            ])
     except Exception as e:
         st.error(f"히트맵 데이터를 불러올 수 없습니다: {e}")
 
@@ -511,7 +578,19 @@ def render():
             )
             fig_trend.update_xaxes(title_text="연월", title_font=dict(color="#8B8FA3", size=11))
             fig_trend.update_yaxes(title_text="이상거래 건수", title_font=dict(color="#8B8FA3", size=11))
-            st.plotly_chart(fig_trend, use_container_width=True)
+            st.plotly_chart(fig_trend, width='stretch')
+            type_growths = {}
+            for lbl in trend_data['레이블'].unique():
+                subset = trend_data[trend_data['레이블'] == lbl].sort_values('연월str')
+                if len(subset) >= 2:
+                    type_growths[lbl] = int(subset.iloc[-1]['건수']) - int(subset.iloc[0]['건수'])
+            if type_growths:
+                growing = max(type_growths, key=type_growths.get)
+                declining = min(type_growths, key=type_growths.get)
+                _render_insight([
+                    f"증가 추세 유형: {growing} (+{type_growths[growing]:,}건)",
+                    f"감소 추세 유형: {declining} ({type_growths[declining]:,}건)",
+                ])
     except Exception as e:
         st.error(f"유형별 월별 추이 데이터를 불러올 수 없습니다: {e}")
 
@@ -547,7 +626,11 @@ def render():
                     fig_bank_out.update_xaxes(title_text="금융회사 코드", title_font=dict(color="#8B8FA3", size=11))
                     fig_bank_out.update_yaxes(title_text="이상거래 건수", title_font=dict(color="#8B8FA3", size=11), secondary_y=False)
                     fig_bank_out.update_yaxes(title_text="이상거래 비율(%)", title_font=dict(color="#8B8FA3", size=11), secondary_y=True)
-                    st.plotly_chart(fig_bank_out, use_container_width=True)
+                    st.plotly_chart(fig_bank_out, width='stretch')
+                    top_out = banks_out.iloc[0]
+                    _render_insight([
+                        f"이상거래 최다 출금 금융회사: {int(top_out['금융회사'])}번 ({int(top_out['이상거래']):,}건, 비율 {top_out['이상거래비율']:.2f}%)",
+                    ])
 
             with tab_in:
                 banks_in = banks[banks["구분"] == "입금"].sort_values("이상거래", ascending=False).head(20)
@@ -571,6 +654,10 @@ def render():
                     fig_bank_in.update_xaxes(title_text="금융회사 코드", title_font=dict(color="#8B8FA3", size=11))
                     fig_bank_in.update_yaxes(title_text="이상거래 건수", title_font=dict(color="#8B8FA3", size=11), secondary_y=False)
                     fig_bank_in.update_yaxes(title_text="이상거래 비율(%)", title_font=dict(color="#8B8FA3", size=11), secondary_y=True)
-                    st.plotly_chart(fig_bank_in, use_container_width=True)
+                    st.plotly_chart(fig_bank_in, width='stretch')
+                    top_in = banks_in.iloc[0]
+                    _render_insight([
+                        f"이상거래 최다 입금 금융회사: {int(top_in['금융회사'])}번 ({int(top_in['이상거래']):,}건, 비율 {top_in['이상거래비율']:.2f}%)",
+                    ])
     except Exception as e:
         st.error(f"금융회사 데이터를 불러올 수 없습니다: {e}")

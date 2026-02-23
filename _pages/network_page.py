@@ -70,8 +70,7 @@ def _metric_card(label, value, sub=""):
     st.markdown(f"""<div class="metric-card">
         <div class="label">{label}</div>
         <div class="value">{value}</div>
-        {sub_html}
-    </div>""", unsafe_allow_html=True)
+        {sub_html}</div>""", unsafe_allow_html=True)
 
 
 def _plot_network(G, title, node_color_attr=None, edge_color_attr=None,
@@ -156,7 +155,7 @@ def _plot_network(G, title, node_color_attr=None, edge_color_attr=None,
         plot_bgcolor="rgba(0,0,0,0)",
         font=dict(color="#C0C4D0"),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
 
 def _render_dark_table(df, max_rows=20):
@@ -273,7 +272,7 @@ def _render_tab_bank_network():
             _apply_dark(fig_degree, height=350)
             fig_degree.update_xaxes(title_text="금융회사", title_font=dict(color="#8B8FA3", size=11))
             fig_degree.update_yaxes(title_text="연결 수", title_font=dict(color="#8B8FA3", size=11))
-            st.plotly_chart(fig_degree, use_container_width=True)
+            st.plotly_chart(fig_degree, width='stretch')
 
         with col_right:
             fig_between = go.Figure(go.Bar(
@@ -290,7 +289,7 @@ def _render_tab_bank_network():
             _apply_dark(fig_between, height=350)
             fig_between.update_xaxes(title_text="금융회사", title_font=dict(color="#8B8FA3", size=11))
             fig_between.update_yaxes(title_text="매개 중심성", title_font=dict(color="#8B8FA3", size=11))
-            st.plotly_chart(fig_between, use_container_width=True)
+            st.plotly_chart(fig_between, width='stretch')
 
     else:
         st.info("중심성 지표를 계산할 노드가 없습니다.")
@@ -531,7 +530,7 @@ def _render_tab_fraud_flow():
         xaxis=dict(title_font=dict(color="#8B8FA3", size=11), side="bottom"),
         yaxis=dict(title_font=dict(color="#8B8FA3", size=11), autorange="reversed"),
     )
-    st.plotly_chart(fig_heatmap, use_container_width=True)
+    st.plotly_chart(fig_heatmap, width='stretch')
 
     # 상위 이상거래 경로 테이블
     st.markdown('<p class="section-header">상위 이상거래 경로 (상위 20)</p>', unsafe_allow_html=True)
@@ -652,7 +651,7 @@ def _plot_ring_graph(ring_accounts, amounts=None):
         font=dict(color="#C0C4D0"),
         annotations=edge_annotations,
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
 
 def _plot_path_graph(path, amounts=None, dates=None):
@@ -724,7 +723,7 @@ def _plot_path_graph(path, amounts=None, dates=None):
         font=dict(color="#C0C4D0"),
         annotations=edge_annotations,
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
 
 def _render_sub_ring():
@@ -1091,7 +1090,7 @@ def _render_sub_risk_score():
             font=dict(color="#C0C4D0"),
             margin=dict(t=60, b=20, l=30, r=30),
         )
-        st.plotly_chart(fig_gauge, use_container_width=True)
+        st.plotly_chart(fig_gauge, width='stretch')
 
         # 구성 요소별 점수 Bar 차트
         if components:
@@ -1133,7 +1132,7 @@ def _render_sub_risk_score():
             _apply_dark(fig_bar, height=380)
             fig_bar.update_xaxes(title_text="", tickangle=-15)
             fig_bar.update_yaxes(title_text="점수", title_font=dict(color="#8B8FA3", size=11))
-            st.plotly_chart(fig_bar, use_container_width=True)
+            st.plotly_chart(fig_bar, width='stretch')
 
             # 상세 수치 테이블
             detail_rows = []

@@ -128,7 +128,7 @@ def render() -> None:
 
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
-                if st.button("대화 초기화", use_container_width=True):
+                if st.button("대화 초기화", width='stretch'):
                     st.session_state.messages = []
                     st.session_state.pending_prompt = None
                     st.session_state.tool_events_map = {}
@@ -145,10 +145,10 @@ def render() -> None:
                         data=export_data,
                         file_name=filename,
                         mime="application/json",
-                        use_container_width=True,
+                        width='stretch',
                     )
                 else:
-                    st.button("대화 내보내기", disabled=True, use_container_width=True)
+                    st.button("대화 내보내기", disabled=True, width='stretch')
 
         with col_examples:
             st.markdown("**예시 질문**")
