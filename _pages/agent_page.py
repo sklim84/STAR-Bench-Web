@@ -19,11 +19,23 @@ _TOOL_LABELS = {
     "generate_str": "STR 보고서 생성",
     "analyze_network": "네트워크 분석",
     "get_statistics": "요약 통계 조회",
+    "detect_aml_patterns": "AML 패턴 탐지",
+}
+
+_TOOL_ICONS = {
+    "query_transactions": "🔍",
+    "predict_fraud": "🤖",
+    "generate_str": "📄",
+    "analyze_network": "🔗",
+    "get_statistics": "📊",
+    "detect_aml_patterns": "⚠️",
 }
 
 
 def _tool_label(name: str) -> str:
-    return _TOOL_LABELS.get(name, name)
+    icon = _TOOL_ICONS.get(name, "🔧")
+    label = _TOOL_LABELS.get(name, name)
+    return f"{icon} {label}"
 
 
 # ---------------------------------------------------------------------------
@@ -40,18 +52,18 @@ def _render_tool_event(event: dict, index: int) -> None:
 
         with col_in:
             st.markdown(
-                "<p style='color:#8B8FA3;font-size:0.8rem;margin-bottom:4px;'>입력 파라미터</p>",
+                "<p class='tool-label'>입력 파라미터</p>",
                 unsafe_allow_html=True,
             )
             args = event.get("arguments", {})
             if args:
                 st.json(args)
             else:
-                st.caption("파라미터 없음")
+                st.markdown('<span class="caption-text">파라미터 없음</span>', unsafe_allow_html=True)
 
         with col_out:
             st.markdown(
-                "<p style='color:#8B8FA3;font-size:0.8rem;margin-bottom:4px;'>결과</p>",
+                "<p class='tool-label'>결과</p>",
                 unsafe_allow_html=True,
             )
             raw = event.get("result", "{}")
@@ -86,17 +98,12 @@ def _build_export_json(messages: list[dict]) -> str:
 # ---------------------------------------------------------------------------
 
 def render() -> None:
-    st.markdown(
-        '<p style="color:#FFFFFF; font-size:24px; font-weight:800; margin-bottom:4px;">'
-        'AI 분석 에이전트</p>',
-        unsafe_allow_html=True,
-    )
+    st.markdown('<p class="page-title">AI 분석 에이전트</p>', unsafe_allow_html=True)
+    st.markdown('<p class="page-subtitle">자금세탁의심거래 분석 및 의심거래보고서(STR) 자동 작성</p>', unsafe_allow_html=True)
 
     if not config.OPENAI_API_KEY:
         st.error("OPENAI_API_KEY가 설정되지 않았습니다. `.env` 파일을 확인하세요.")
         st.stop()
-
-    st.caption("자금세탁의심거래 분석 및 STR 작성을 위한 대화형 에이전트")
 
     # 세션 초기화
     if "messages" not in st.session_state:
@@ -108,50 +115,60 @@ def render() -> None:
         st.session_state.tool_events_map = {}
 
     # ------------------------------------------------------------------
-    # 상단 기능 안내 및 예시 질문
+    # 툴바: 대화 초기화 / 내보내기 + 대화 상태 (항상 표시)
+    # ------------------------------------------------------------------
+    messages = st.session_state.messages
+    turn_count = sum(1 for m in messages if m.get("role") == "user")
+
+    btn_c1, btn_c2, info_c = st.columns([1, 1, 4])
+    with btn_c1:
+        if st.button("대화 초기화", width='stretch'):
+            st.session_state.messages = []
+            st.session_state.pending_prompt = None
+            st.session_state.tool_events_map = {}
+            st.rerun()
+    with btn_c2:
+        if messages:
+            export_data = _build_export_json(messages)
+            filename = f"aml_analysis_{date.today().strftime('%Y%m%d')}.json"
+            st.download_button(
+                label="대화 내보내기",
+                data=export_data,
+                file_name=filename,
+                mime="application/json",
+                width='stretch',
+            )
+        else:
+            st.button("대화 내보내기", disabled=True, width='stretch')
+    with info_c:
+        if turn_count > 0:
+            st.markdown(
+                f'<p class="caption-text" style="padding-top:8px">현재 {turn_count}턴 대화 중</p>',
+                unsafe_allow_html=True,
+            )
+
+    # ------------------------------------------------------------------
+    # 기능 안내 및 예시 질문
     # ------------------------------------------------------------------
     with st.expander("에이전트 기능 안내 및 예시 질문"):
         col_info, col_examples = st.columns(2)
 
         with col_info:
+            st.markdown('<p class="section-header">에이전트 기능</p>', unsafe_allow_html=True)
             st.markdown("""
-**에이전트 기능**
-- **통계 조회**: 전체 이상거래 현황 대시보드
-- **거래 조회**: DB에서 거래 데이터 조회/분석
-- **네트워크 분석**: 특정 계좌의 거래 연결 관계 분석
-- **이상 탐지**: 모델로 이상거래 확률 예측
-- **STR 작성**: 의심거래보고서 자동 생성
+- 📊 **통계 조회**: 전체 이상거래 현황 대시보드
+- 🔍 **거래 조회**: DB에서 거래 데이터 조회/분석
+- 🔗 **네트워크 분석**: 특정 계좌의 거래 연결 관계 분석
+- 🤖 **이상 탐지**: 모델로 이상거래 확률 예측
+- ⚠️ **AML 패턴 탐지**: 순환거래·레이어링 등 자금세탁 패턴 감지
+- 📄 **STR 작성**: 의심거래보고서 자동 생성
 
 **권장 분석 순서**
-1. 전체 통계 파악 → 2. 상세 쿼리 → 3. 네트워크 분석 → 4. 모델 예측 → 5. STR 작성
+1. 전체 통계 → 2. 상세 쿼리 → 3. 네트워크 분석 → 4. 모델 예측 → 5. STR 작성
 """)
 
-            col_btn1, col_btn2 = st.columns(2)
-            with col_btn1:
-                if st.button("대화 초기화", width='stretch'):
-                    st.session_state.messages = []
-                    st.session_state.pending_prompt = None
-                    st.session_state.tool_events_map = {}
-                    st.rerun()
-
-            with col_btn2:
-                # 대화 내보내기 버튼
-                messages = st.session_state.messages
-                if messages:
-                    export_data = _build_export_json(messages)
-                    filename = f"aml_analysis_{date.today().strftime('%Y%m%d')}.json"
-                    st.download_button(
-                        label="대화 내보내기",
-                        data=export_data,
-                        file_name=filename,
-                        mime="application/json",
-                        width='stretch',
-                    )
-                else:
-                    st.button("대화 내보내기", disabled=True, width='stretch')
-
         with col_examples:
-            st.markdown("**예시 질문**")
+            st.markdown('<p class="section-header">예시 질문</p>', unsafe_allow_html=True)
             examples = [
                 "전체 이상거래 통계를 요약해줘",
                 "2024년 이상거래 현황을 요약해줘",

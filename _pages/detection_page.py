@@ -18,62 +18,31 @@ from src.features.detector import (
     get_probability_distribution,
     FRAUD_TYPE_LABELS,
 )
+from src.ui.chart_utils import (
+    BAR_COLOR, LINE_COLOR, ACCENT_COLOR, MINT_COLOR,
+    apply_dark as _apply_dark,
+)
 
 
-# ------------------------------------------------------------------
-# 다크 테마 상수
-# ------------------------------------------------------------------
-BAR_COLOR = "#4E79A7"
-LINE_COLOR = "#E15759"
-ACCENT_COLOR = "#F28E2B"
-MINT_COLOR = "#4ECDC4"
-
-
-def _apply_dark(fig, height=380, secondary_y=False):
-    """Plotly figure에 다크 테마를 적용한다."""
-    fig.update_layout(
-        height=height,
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="#C0C4D0", size=12),
-        legend=dict(
-            orientation="h", y=1.12,
-            font=dict(color="#8B8FA3", size=11),
-            bgcolor="rgba(0,0,0,0)",
-        ),
-        margin=dict(t=30, b=30, l=10, r=10),
-    )
-    fig.update_xaxes(gridcolor="#1E2333", zerolinecolor="#1E2333",
-                     tickfont=dict(color="#8B8FA3"))
-    fig.update_yaxes(gridcolor="#1E2333", zerolinecolor="#1E2333",
-                     tickfont=dict(color="#8B8FA3"))
-    if secondary_y:
-        fig.update_yaxes(gridcolor="#1E2333", tickfont=dict(color="#8B8FA3"),
-                         secondary_y=True)
-    return fig
-
-
-def _metric_card(label, value, sub=""):
-    """HTML 메트릭 카드를 반환한다."""
-    sub_html = f'<div class="sub">{sub}</div>' if sub else ""
-    return f"""<div class="metric-card">
+def _metric_card(label, value, sub="", white=False):
+    """HTML 메트릭 카드를 렌더링한다."""
+    value_class = "value white" if white else "value"
+    st.markdown(f"""<div class="metric-card">
         <div class="label">{label}</div>
-        <div class="value">{value}</div>
-        {sub_html}</div>"""
+        <div class="{value_class}">{value}</div>
+        <div class="sub">{sub}</div>
+    </div>""", unsafe_allow_html=True)
 
 
 def render():
-    st.markdown(
-        '<p style="color:#FFFFFF; font-size:24px; font-weight:800; margin-bottom:4px;">'
-        '이상거래 탐지</p>',
-        unsafe_allow_html=True,
-    )
+    st.markdown('<p class="page-title">이상거래 탐지</p>', unsafe_allow_html=True)
+    st.markdown('<p class="page-subtitle">XGBoost 모델 기반 자금세탁의심거래 학습, 평가 및 확률 예측</p>', unsafe_allow_html=True)
 
     # --- 모델 상태 확인 ---
     model = load_model()
 
     if model is None:
-        st.warning("학습된 모델이 없습니다. 아래 버튼을 눌러 모델을 학습하세요.")
+        st.info("학습된 모델이 없습니다. '모델 학습 및 평가' 탭에서 모델을 먼저 학습하세요.")
 
     # --- 탭 구성 ---
     tab1, tab2 = st.tabs(["모델 학습 및 평가", "이상거래 탐지"])
@@ -178,13 +147,12 @@ def render():
         if model is None:
             st.info("먼저 '모델 학습 및 평가' 탭에서 모델을 학습하세요.")
         else:
-            st.markdown(
-                '<p style="color:#8B8FA3; font-size:14px;">'
-                '학습된 모델로 거래 데이터를 분석하여 이상거래 확률을 예측합니다.</p>',
-                unsafe_allow_html=True,
-            )
-
-            sample_size = st.slider("분석할 거래 수", 100, 5000, 1000, 100)
+            with st.expander("탐지 설정", expanded=True):
+                st.markdown(
+                    '<p class="caption-text">학습된 모델로 거래 데이터를 분석하여 이상거래 확률을 예측합니다.</p>',
+                    unsafe_allow_html=True,
+                )
+                sample_size = st.slider("분석할 거래 수", 100, 5000, 1000, 100)
 
             if st.button("탐지 실행", type="primary"):
                 with st.spinner("예측 중..."):
@@ -207,7 +175,6 @@ def _render_evaluation(model, result):
     report = result["report"]
 
     # --- 주요 성능 지표 (메트릭 카드) ---
-    st.markdown("---")
     st.markdown('<p class="section-header">모델 성능 지표</p>', unsafe_allow_html=True)
 
     f1_class1 = report.get("1", report.get("1.0", {})).get("f1-score", 0)
@@ -216,17 +183,15 @@ def _render_evaluation(model, result):
 
     c1, c2, c3, c4, c5 = st.columns(5)
     with c1:
-        st.markdown(_metric_card("ROC-AUC", f"{result['roc_auc']:.4f}"), unsafe_allow_html=True)
+        _metric_card("ROC-AUC", f"{result['roc_auc']:.4f}", "1에 가까울수록 우수")
     with c2:
-        st.markdown(_metric_card("PR-AUC (AUPRC)", f"{result['pr_auc']:.4f}"), unsafe_allow_html=True)
+        _metric_card("PR-AUC", f"{result['pr_auc']:.4f}", "불균형 데이터 핵심 지표")
     with c3:
-        st.markdown(_metric_card("F1-Score (이상)", f"{f1_class1:.4f}"), unsafe_allow_html=True)
+        _metric_card("F1-Score", f"{f1_class1:.4f}", "Precision × Recall 조화평균")
     with c4:
-        st.markdown(_metric_card("Precision (이상)", f"{prec_class1:.4f}"), unsafe_allow_html=True)
+        _metric_card("Precision", f"{prec_class1:.4f}", "탐지 중 실제 이상 비율")
     with c5:
-        st.markdown(_metric_card("Recall (이상)", f"{rec_class1:.4f}"), unsafe_allow_html=True)
-
-    st.markdown("---")
+        _metric_card("Recall", f"{rec_class1:.4f}", "실제 이상 중 탐지 비율")
 
     # --- 피처 중요도 + 혼동 행렬 ---
     col_left, col_right = st.columns(2)
@@ -236,9 +201,9 @@ def _render_evaluation(model, result):
         fi = get_feature_importance(model)
         fig_fi = px.bar(
             fi, x="중요도", y="피처", orientation="h",
-            color="중요도", color_continuous_scale="Blues",
+            color_discrete_sequence=[MINT_COLOR],
         )
-        _apply_dark(fig_fi, height=300)
+        _apply_dark(fig_fi, height=340)
         fig_fi.update_layout(yaxis=dict(autorange="reversed"))
         st.plotly_chart(fig_fi, width='stretch')
 
@@ -249,12 +214,10 @@ def _render_evaluation(model, result):
             cm, text_auto=True,
             labels=dict(x="예측", y="실제", color="건수"),
             x=["정상", "이상"], y=["정상", "이상"],
-            color_continuous_scale="Blues",
+            color_continuous_scale=[[0, "#1A1F2E"], [0.5, "#2A6B65"], [1, "#4ECDC4"]],
         )
-        _apply_dark(fig_cm, height=300)
+        _apply_dark(fig_cm, height=340)
         st.plotly_chart(fig_cm, width='stretch')
-
-    st.markdown("---")
 
     # --- ROC 커브 + PR 커브 ---
     col_roc, col_pr = st.columns(2)
@@ -275,7 +238,7 @@ def _render_evaluation(model, result):
             name="랜덤 기준선",
             line=dict(color="#AAAAAA", width=1, dash="dash"),
         ))
-        _apply_dark(fig_roc, height=350)
+        _apply_dark(fig_roc, height=340)
         fig_roc.update_xaxes(title_text="False Positive Rate",
                              title_font=dict(color="#8B8FA3", size=11))
         fig_roc.update_yaxes(title_text="True Positive Rate",
@@ -294,7 +257,6 @@ def _render_evaluation(model, result):
             name=f"PR (AUPRC={result['pr_auc']:.4f})",
             line=dict(color=MINT_COLOR, width=2),
         ))
-        # 최적 임계값 표시
         opt_t = threshold_result["optimal_threshold"]
         opt_p = threshold_result["precision"]
         opt_r = threshold_result["recall"]
@@ -307,43 +269,29 @@ def _render_evaluation(model, result):
             textposition="top right",
             textfont=dict(color=LINE_COLOR, size=11),
         ))
-        _apply_dark(fig_pr, height=350)
+        _apply_dark(fig_pr, height=340)
         fig_pr.update_xaxes(title_text="Recall",
                             title_font=dict(color="#8B8FA3", size=11))
         fig_pr.update_yaxes(title_text="Precision",
                             title_font=dict(color="#8B8FA3", size=11))
         st.plotly_chart(fig_pr, width='stretch')
 
-    st.markdown("---")
-
     # --- 임계값 최적화 결과 ---
     st.markdown('<p class="section-header">임계값 최적화</p>', unsafe_allow_html=True)
 
     opt_c1, opt_c2, opt_c3, opt_c4 = st.columns(4)
     with opt_c1:
-        st.markdown(
-            _metric_card("최적 임계값", f"{threshold_result['optimal_threshold']:.2f}",
-                         "F1-Score 최대화"),
-            unsafe_allow_html=True,
-        )
+        _metric_card("최적 임계값", f"{threshold_result['optimal_threshold']:.2f}",
+                     "F1-Score 최대화")
     with opt_c2:
-        st.markdown(
-            _metric_card("Precision", f"{threshold_result['precision']:.4f}",
-                         f"임계값 {threshold_result['optimal_threshold']:.2f} 기준"),
-            unsafe_allow_html=True,
-        )
+        _metric_card("Precision", f"{threshold_result['precision']:.4f}",
+                     f"임계값 {threshold_result['optimal_threshold']:.2f} 기준")
     with opt_c3:
-        st.markdown(
-            _metric_card("Recall", f"{threshold_result['recall']:.4f}",
-                         f"임계값 {threshold_result['optimal_threshold']:.2f} 기준"),
-            unsafe_allow_html=True,
-        )
+        _metric_card("Recall", f"{threshold_result['recall']:.4f}",
+                     f"임계값 {threshold_result['optimal_threshold']:.2f} 기준")
     with opt_c4:
-        st.markdown(
-            _metric_card("F1-Score", f"{threshold_result['f1']:.4f}",
-                         f"임계값 {threshold_result['optimal_threshold']:.2f} 기준"),
-            unsafe_allow_html=True,
-        )
+        _metric_card("F1-Score", f"{threshold_result['f1']:.4f}",
+                     f"임계값 {threshold_result['optimal_threshold']:.2f} 기준")
 
     # 임계값별 성능 차트
     th_df = threshold_result["thresholds_df"]
@@ -386,7 +334,7 @@ def _render_evaluation(model, result):
                 <th>F1-Score</th><th>TP</th><th>FP</th><th>FN</th></tr></thead>
                 <tbody>"""
             for _, row in th_df.iterrows():
-                highlight = ' style="background-color:#1E2333;"' if row["임계값"] == threshold_result["optimal_threshold"] else ""
+                highlight = ' class="row-highlight"' if row["임계값"] == threshold_result["optimal_threshold"] else ""
                 table_html += f"""<tr{highlight}>
                     <td>{row['임계값']:.2f}</td>
                     <td>{row['Precision']:.4f}</td>
@@ -398,8 +346,6 @@ def _render_evaluation(model, result):
                 </tr>"""
             table_html += "</tbody></table>"
             st.markdown(table_html, unsafe_allow_html=True)
-
-    st.markdown("---")
 
     # --- 예측 확률 분포 (히스토그램) ---
     st.markdown('<p class="section-header">예측 확률 분포</p>', unsafe_allow_html=True)
@@ -471,14 +417,12 @@ def _render_detection_results(model, result_df):
     st.markdown('<p class="section-header">탐지 결과 요약</p>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.markdown(_metric_card("분석 거래 수", f"{len(result_df):,}"), unsafe_allow_html=True)
+        _metric_card("분석 거래 수", f"{len(result_df):,}", "샘플 크기")
     with c2:
-        st.markdown(_metric_card("탐지된 이상거래", f"{len(detected):,}"), unsafe_allow_html=True)
+        _metric_card("탐지된 이상거래", f"{len(detected):,}", "예측 이상 건수")
     with c3:
         rate = len(detected) / max(len(result_df), 1) * 100
-        st.markdown(_metric_card("탐지율", f"{rate:.2f}%"), unsafe_allow_html=True)
-
-    st.markdown("---")
+        _metric_card("탐지율", f"{rate:.2f}%", "전체 대비 비율")
 
     # --- 이상거래 의심 거래 테이블 ---
     st.markdown('<p class="section-header">이상거래 의심 거래 (확률 높은 순)</p>', unsafe_allow_html=True)
@@ -498,9 +442,9 @@ def _render_detection_results(model, result_df):
         # 예측확률에 따라 행 스타일링
         prob = float(row["예측확률"])
         if prob >= 0.8:
-            style = ' style="background-color: rgba(225,87,89,0.15);"'
+            style = ' class="row-risk-high"'
         elif prob >= 0.5:
-            style = ' style="background-color: rgba(242,142,43,0.10);"'
+            style = ' class="row-risk-medium"'
         else:
             style = ""
 
@@ -520,8 +464,6 @@ def _render_detection_results(model, result_df):
     table_html += "</tbody></table>"
     st.markdown(table_html, unsafe_allow_html=True)
 
-    st.markdown("---")
-
     # --- 실제 vs 예측 비교 ---
     st.markdown('<p class="section-header">실제 레이블 vs 예측 비교</p>', unsafe_allow_html=True)
 
@@ -535,12 +477,10 @@ def _render_detection_results(model, result_df):
         cross.values, text_auto=True,
         labels=dict(x="예측", y="실제", color="건수"),
         x=cross.columns.tolist(), y=cross.index.tolist(),
-        color_continuous_scale="Blues",
+        color_continuous_scale=[[0, "#1A1F2E"], [0.5, "#2A6B65"], [1, "#4ECDC4"]],
     )
     _apply_dark(fig_cross, height=300)
     st.plotly_chart(fig_cross, width='stretch')
-
-    st.markdown("---")
 
     # --- 이상거래 유형별 탐지 성능 ---
     st.markdown('<p class="section-header">이상거래 유형별 탐지 성능</p>', unsafe_allow_html=True)
@@ -553,13 +493,10 @@ def _render_detection_results(model, result_df):
         cols = st.columns(len(fraud_type_perf))
         for i, (_, row) in enumerate(fraud_type_perf.iterrows()):
             with cols[i]:
-                st.markdown(
-                    _metric_card(
-                        f"유형 {int(row['이상거래유형'])}",
-                        f"{row['Recall']*100:.1f}%",
-                        row["유형설명"],
-                    ),
-                    unsafe_allow_html=True,
+                _metric_card(
+                    f"유형 {int(row['이상거래유형'])}",
+                    f"{row['Recall']*100:.1f}%",
+                    row["유형설명"],
                 )
 
         # 바 차트
@@ -602,8 +539,6 @@ def _render_detection_results(model, result_df):
             st.markdown(ft_table, unsafe_allow_html=True)
     else:
         st.info("이상거래 데이터가 없어 유형별 분석을 수행할 수 없습니다.")
-
-    st.markdown("---")
 
     # --- 확률 구간별 분포 (탐지 결과 기반) ---
     st.markdown('<p class="section-header">확률 구간별 정상/이상 분포</p>', unsafe_allow_html=True)

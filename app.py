@@ -53,14 +53,15 @@ selected = option_menu(
         },
         "icon": {
             "color": "#9EA3B8",
-            "font-size": "16px",
+            "font-size": "15px",
         },
         "nav-link": {
-            "font-size": "15px",
+            "flex": "1",
+            "font-size": "14px",
             "font-weight": "500",
             "text-align": "center",
             "margin": "2px",
-            "padding": "10px 24px",
+            "padding": "10px 8px",
             "color": "#9EA3B8",
             "border-radius": "10px",
             "--hover-color": "rgba(255, 255, 255, 0.06)",
@@ -79,13 +80,10 @@ selected = option_menu(
 # 선택된 메뉴에 따라 페이지 렌더링
 # ------------------------------------------------------------------
 if selected == "Home":
-    st.markdown('<p style="color:#FFFFFF; font-size:28px; font-weight:800; margin-bottom:4px;">'
-                'AML Assistant Platform</p>', unsafe_allow_html=True)
-    st.markdown('<p style="color:#6B7080; font-size:15px; margin-top:0;">'
-                '에이전트를 활용하여 자금세탁의심거래를 분석하는 웹 서비스</p>',
-                unsafe_allow_html=True)
+    st.markdown('<p class="page-title page-title-lg">AML Assistant Platform</p>', unsafe_allow_html=True)
+    st.markdown('<p class="page-subtitle">에이전트를 활용하여 자금세탁의심거래를 분석하는 웹 서비스</p>', unsafe_allow_html=True)
 
-    st.markdown("---")
+    st.markdown("<br>", unsafe_allow_html=True)
 
     # 요약 메트릭 카드 (dashboard.get_summary() 활용)
     from src.features.dashboard import get_summary
@@ -95,52 +93,65 @@ if selected == "Home":
         st.stop()
     row = summary.iloc[0]
 
-    # Home 페이지에서는 출금+입금 금융회사 수 합산으로 표시 (기존 동작 유지)
+    total = int(row['총거래'])
+    fraud = int(row['이상거래'])
+    fraud_rate = fraud / total * 100 if total > 0 else 0
     banks_count = int(row['출금금융회사수']) + int(row['입금금융회사수'])
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         st.markdown(f"""<div class="metric-card">
             <div class="label">총 거래 건수</div>
-            <div class="value">{int(row['총거래']):,}</div>
+            <div class="value">{total:,}</div>
+            <div class="sub">2021 Q4 ~ 2024 Q4</div>
         </div>""", unsafe_allow_html=True)
     with c2:
         st.markdown(f"""<div class="metric-card">
             <div class="label">이상거래 건수</div>
-            <div class="value">{int(row['이상거래']):,}</div>
+            <div class="value">{fraud:,}</div>
+            <div class="sub">전체 대비 {fraud_rate:.2f}%</div>
         </div>""", unsafe_allow_html=True)
     with c3:
         st.markdown(f"""<div class="metric-card">
             <div class="label">출금 계좌 수</div>
             <div class="value">{int(row['출금계좌수']):,}</div>
+            <div class="sub">고유 계좌 기준</div>
         </div>""", unsafe_allow_html=True)
     with c4:
         st.markdown(f"""<div class="metric-card">
-            <div class="label">금융회사 수</div>
+            <div class="label">참여 금융회사</div>
             <div class="value">{banks_count:,}</div>
+            <div class="sub">출금 + 입금 기관</div>
         </div>""", unsafe_allow_html=True)
 
     st.markdown("---")
 
-    # 기능 안내
+    # 기능 안내 카드 그리드
     st.markdown('<p class="section-header">기능 안내</p>', unsafe_allow_html=True)
     st.markdown("""
-    <table class="dark-table">
-        <thead>
-            <tr><th>페이지</th><th>설명</th></tr>
-        </thead>
-        <tbody>
-            <tr><td><strong>Dashboard</strong></td><td>대시보드 형태로 자금세탁의심거래들의 기본 분석 정보 출력</td></tr>
-            <tr><td><strong>Network</strong></td><td>대시보드 형태로 자금세탁의심거래들의 네트워크(그래프) 분석 정보 출력</td></tr>
-            <tr><td><strong>Detection</strong></td><td>AI 모델(부스팅 모델) 기반 자금세탁의심거래 학습 및 탐지(확률)</td></tr>
-            <tr><td><strong>Agent</strong></td><td>에이전트와 대화를 통해 자금세탁의심거래를 분석하고 STR 작성</td></tr>
-        </tbody>
-    </table>
+    <div class="feature-grid">
+        <div class="feature-card">
+            <span class="f-icon">📊</span>
+            <div class="f-name">Dashboard</div>
+            <div class="f-desc">거래 통계, 이상거래 유형 분포, 시간대·금융회사별 패턴을 대시보드로 시각화</div>
+        </div>
+        <div class="feature-card">
+            <span class="f-icon">🔗</span>
+            <div class="f-name">Network</div>
+            <div class="f-desc">금융회사·계좌 간 거래 그래프, 커뮤니티 탐지, 순환거래·레이어링 등 AML 패턴 분석</div>
+        </div>
+        <div class="feature-card">
+            <span class="f-icon">🤖</span>
+            <div class="f-name">Detection</div>
+            <div class="f-desc">XGBoost 모델 기반 이상거래 확률 예측, 모델 학습·평가 및 특성 중요도 분석</div>
+        </div>
+        <div class="feature-card">
+            <span class="f-icon">💬</span>
+            <div class="f-name">Agent</div>
+            <div class="f-desc">AI 에이전트와 대화로 거래 조회·분석하고 의심거래보고서(STR) 자동 작성</div>
+        </div>
+    </div>
     """, unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown('<p style="color:#6B7080; font-size:13px;">상단 메뉴에서 페이지를 선택하세요.</p>',
-                unsafe_allow_html=True)
 
 elif selected == "Dashboard":
     from _pages.dashboard_page import render

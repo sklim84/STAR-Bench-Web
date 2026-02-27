@@ -1,8 +1,25 @@
 /* ══════════════════════════════════════════════════════════════
-   AML Assistant – Glassmorphism Theme
+   AML Assistant – Design System
    ══════════════════════════════════════════════════════════════ */
 
-/* ── 전역 배경 ── */
+/* ── CSS 변수 ── */
+:root {
+    --mint:        #4ECDC4;
+    --mint-dim:    rgba(78, 205, 196, 0.15);
+    --mint-border: rgba(78, 205, 196, 0.28);
+    --bg-card:     rgba(255, 255, 255, 0.05);
+    --border:      rgba(255, 255, 255, 0.09);
+    --text-hi:     #E8EAED;
+    --text-mid:    #9EA3B8;
+    --text-lo:     #6B7080;
+    --shadow:      0 4px 24px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    --blur:        blur(16px);
+    --r-lg:        16px;
+    --r-md:        12px;
+    --r-sm:        8px;
+}
+
+/* ══ 1. 전역 배경 ══ */
 .stApp {
     background: #070B14;
     background-image:
@@ -12,22 +29,51 @@
     background-attachment: fixed;
 }
 
-/* ── 글래스 공통 믹스인 ── */
+/* ── 메인 컨텐츠 패딩 (Streamlit 기본값 override) ── */
+section.main > div.block-container {
+    padding-top: 1.5rem !important;
+    padding-bottom: 3rem !important;
+    max-width: 100% !important;
+}
+
+/* ── 컬럼 가로 간격 (align-items 없이 gap만) ── */
+[data-testid="stHorizontalBlock"] {
+    gap: 1rem !important;
+}
+
+/* ══ 2. 네비게이션 메뉴 ══ */
+/* streamlit-option-menu는 nav.nav-pills 를 생성 */
+nav.nav-pills {
+    width: 100% !important;
+    display: flex !important;
+    flex-wrap: nowrap !important;
+}
+
+nav.nav-pills > li.nav-item {
+    flex: 1 1 0% !important;
+    min-width: 0 !important;
+}
+
+nav.nav-pills > li.nav-item > a.nav-link {
+    width: 100% !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+}
+
+/* ══ 3. 글래스 카드 공통 ══ */
 .glass-card,
 .dark-card,
 .metric-card {
-    background: rgba(255, 255, 255, 0.05);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(255, 255, 255, 0.09);
-    border-radius: 16px;
-    box-shadow:
-        0 4px 24px rgba(0, 0, 0, 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    background: var(--bg-card);
+    backdrop-filter: var(--blur);
+    -webkit-backdrop-filter: var(--blur);
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow);
     transition: box-shadow 0.25s ease, transform 0.25s ease;
 }
 
-/* ── 카드 컨테이너 ── */
 .dark-card {
     padding: 20px 24px;
     margin-bottom: 16px;
@@ -35,49 +81,83 @@
 
 /* ── 메트릭 카드 ── */
 .metric-card {
-    padding: 18px 22px;
-    text-align: left;
+    padding: 20px 22px;
+    min-height: 100px;
+    margin-bottom: 12px;
 }
 
 .metric-card:hover {
     box-shadow:
         0 8px 32px rgba(0, 0, 0, 0.5),
-        0 0 0 1px rgba(78, 205, 196, 0.18),
+        0 0 0 1px rgba(78, 205, 196, 0.2),
         inset 0 1px 0 rgba(255, 255, 255, 0.1);
     transform: translateY(-2px);
 }
 
 .metric-card .label {
-    color: #9EA3B8;
-    font-size: 13px;
+    color: var(--text-mid);
+    font-size: 12px;
     font-weight: 500;
-    margin-bottom: 6px;
-    letter-spacing: 0.3px;
+    margin-bottom: 8px;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
 }
 
 .metric-card .value {
-    color: #4ECDC4;
-    font-size: 26px;
+    color: var(--mint);
+    font-size: 28px;
     font-weight: 700;
     letter-spacing: -0.5px;
+    line-height: 1;
 }
 
 .metric-card .value.white {
-    color: #E8EAED;
+    color: var(--text-hi);
 }
 
 .metric-card .sub {
-    color: #6B7080;
+    color: var(--text-lo);
     font-size: 12px;
-    margin-top: 4px;
+    margin-top: 6px;
 }
 
-/* ── 섹션 헤더 ── */
+/* ══ 4. 타이포그래피 ══ */
+.page-title {
+    color: var(--text-hi);
+    font-size: 24px;
+    font-weight: 800;
+    margin: 0 0 4px 0;
+    letter-spacing: -0.3px;
+}
+
+.page-title-lg {
+    font-size: 28px;
+}
+
+.page-subtitle {
+    color: var(--text-lo);
+    font-size: 15px;
+    margin: 0;
+}
+
+.caption-text {
+    color: var(--text-mid);
+    font-size: 13px;
+    line-height: 1.6;
+    margin: 4px 0;
+}
+
+.tool-label {
+    color: var(--text-mid);
+    font-size: 0.8rem;
+    font-weight: 500;
+    margin-bottom: 4px;
+}
+
 .section-header {
-    color: #E8EAED;
-    font-size: 18px;
+    font-size: 17px;
     font-weight: 700;
-    margin: 28px 0 16px 0;
+    margin: 24px 0 14px 0;
     padding-bottom: 8px;
     border-bottom: 1px solid rgba(78, 205, 196, 0.2);
     background: linear-gradient(90deg, #4ECDC4, #6B8EFF);
@@ -86,40 +166,47 @@
     background-clip: text;
 }
 
-/* ── Streamlit 기본 metric 글래스 스타일 ── */
+/* ══ 5. Streamlit 컴포넌트 스타일 ══ */
+
+/* st.metric */
 [data-testid="stMetric"] {
-    background: rgba(255, 255, 255, 0.05) !important;
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(255, 255, 255, 0.09) !important;
-    border-radius: 16px !important;
-    padding: 18px 22px !important;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+    background: var(--bg-card) !important;
+    backdrop-filter: var(--blur);
+    -webkit-backdrop-filter: var(--blur);
+    border: 1px solid var(--border) !important;
+    border-radius: var(--r-lg) !important;
+    padding: 20px 22px !important;
+    box-shadow: var(--shadow);
+    min-height: 100px;
+    box-sizing: border-box !important;
 }
 
 [data-testid="stMetricLabel"] {
-    color: #9EA3B8 !important;
+    color: var(--text-mid) !important;
+    font-size: 12px !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.4px !important;
 }
 
 [data-testid="stMetricValue"] {
-    color: #4ECDC4 !important;
+    color: var(--mint) !important;
     font-weight: 700 !important;
 }
 
-/* ── 탭 스타일 ── */
+/* 탭 */
 .stTabs [data-baseweb="tab-list"] {
-    gap: 0px;
+    gap: 0;
     background: rgba(255, 255, 255, 0.04);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(255, 255, 255, 0.09);
-    border-radius: 12px;
+    backdrop-filter: var(--blur);
+    -webkit-backdrop-filter: var(--blur);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
     padding: 4px;
 }
 
 .stTabs [data-baseweb="tab"] {
-    border-radius: 8px;
-    color: #9EA3B8;
+    border-radius: var(--r-sm);
+    color: var(--text-mid);
     font-weight: 500;
     padding: 10px 20px;
     transition: background 0.2s ease, color 0.2s ease;
@@ -127,36 +214,114 @@
 
 .stTabs [data-baseweb="tab"]:hover {
     background: rgba(255, 255, 255, 0.06) !important;
-    color: #E8EAED !important;
+    color: var(--text-hi) !important;
 }
 
 .stTabs [aria-selected="true"] {
-    background: rgba(78, 205, 196, 0.14) !important;
-    color: #4ECDC4 !important;
-    border: 1px solid rgba(78, 205, 196, 0.28) !important;
+    background: var(--mint-dim) !important;
+    color: var(--mint) !important;
+    border: 1px solid var(--mint-border) !important;
 }
 
-/* ── Divider ── */
-.stDivider {
-    border-color: rgba(255, 255, 255, 0.08) !important;
+/* 버튼 */
+.stButton > button {
+    background: var(--mint-dim);
+    border: 1px solid var(--mint-border);
+    color: var(--mint);
+    border-radius: 10px;
+    font-weight: 600;
+    transition: all 0.2s ease;
 }
 
+.stButton > button:hover {
+    background: rgba(78, 205, 196, 0.22);
+    border-color: rgba(78, 205, 196, 0.55);
+    box-shadow: 0 0 20px rgba(78, 205, 196, 0.2);
+    transform: translateY(-1px);
+}
+
+.stButton > button:active {
+    transform: translateY(0);
+}
+
+/* 입력 요소 */
+.stSelectbox > div > div,
+.stMultiSelect > div > div,
+.stTextInput > div > div {
+    background: var(--bg-card) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 10px !important;
+    color: var(--text-hi) !important;
+}
+
+.stSelectbox > div > div:focus-within,
+.stTextInput > div > div:focus-within {
+    border-color: rgba(78, 205, 196, 0.5) !important;
+    box-shadow: 0 0 0 2px rgba(78, 205, 196, 0.12) !important;
+}
+
+/* 슬라이더 */
+[data-testid="stSlider"] [data-baseweb="slider"] [role="slider"] {
+    background: var(--mint) !important;
+    border-color: var(--mint) !important;
+    box-shadow: 0 0 8px rgba(78, 205, 196, 0.4) !important;
+}
+
+/* Expander */
+.streamlit-expanderHeader {
+    background: rgba(255, 255, 255, 0.04) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 10px !important;
+    color: var(--text-hi) !important;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.streamlit-expanderHeader:hover {
+    background: rgba(255, 255, 255, 0.07) !important;
+    border-color: rgba(78, 205, 196, 0.25) !important;
+}
+
+details[open] summary.streamlit-expanderHeader {
+    background: rgba(78, 205, 196, 0.07) !important;
+    border-color: rgba(78, 205, 196, 0.25) !important;
+    color: var(--mint) !important;
+    border-bottom-left-radius: 0 !important;
+    border-bottom-right-radius: 0 !important;
+}
+
+/* Alert */
+[data-testid="stAlert"] {
+    border-radius: var(--r-md) !important;
+}
+
+/* 데이터프레임 */
+[data-testid="stDataFrame"],
+[data-testid="stTable"] {
+    background: rgba(255, 255, 255, 0.03) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    border-radius: var(--r-md) !important;
+}
+
+/* Divider / HR */
+.stDivider,
 hr {
     border-color: rgba(255, 255, 255, 0.08) !important;
 }
 
-/* ── 테이블 ── */
+/* ══ 6. 커스텀 HTML 컴포넌트 ══ */
+
+/* 테이블 */
 .dark-table {
     width: 100%;
     border-collapse: collapse;
     margin-top: 8px;
-    border-radius: 12px;
+    border-radius: var(--r-md);
     overflow: hidden;
 }
 
 .dark-table th {
     background: rgba(78, 205, 196, 0.08);
-    color: #9EA3B8;
+    color: var(--text-mid);
     font-weight: 600;
     font-size: 13px;
     padding: 10px 16px;
@@ -166,7 +331,7 @@ hr {
 }
 
 .dark-table td {
-    color: #E8EAED;
+    color: var(--text-hi);
     font-size: 14px;
     padding: 10px 16px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.04);
@@ -176,79 +341,32 @@ hr {
     background: rgba(78, 205, 196, 0.05);
 }
 
-/* ── 입력 요소 (selectbox, text input) ── */
-.stSelectbox > div > div,
-.stMultiSelect > div > div,
-.stTextInput > div > div {
-    background: rgba(255, 255, 255, 0.05) !important;
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
-    border-radius: 10px !important;
-    color: #E8EAED !important;
-}
-
-.stSelectbox > div > div:focus-within,
-.stTextInput > div > div:focus-within {
-    border-color: rgba(78, 205, 196, 0.5) !important;
-    box-shadow: 0 0 0 2px rgba(78, 205, 196, 0.12) !important;
-}
-
-/* ── 버튼 ── */
-.stButton > button {
+.dark-table tr.row-highlight td {
     background: rgba(78, 205, 196, 0.1);
-    border: 1px solid rgba(78, 205, 196, 0.28);
-    color: #4ECDC4;
-    border-radius: 10px;
-    font-weight: 600;
-    transition: all 0.2s ease;
+    border-left: 2px solid rgba(78, 205, 196, 0.6);
 }
 
-.stButton > button:hover {
-    background: rgba(78, 205, 196, 0.2);
-    border-color: rgba(78, 205, 196, 0.5);
-    box-shadow: 0 0 20px rgba(78, 205, 196, 0.2);
-    transform: translateY(-1px);
+.dark-table tr.row-risk-high td {
+    background: rgba(225, 87, 89, 0.12);
 }
 
-.stButton > button:active {
-    transform: translateY(0);
+.dark-table tr.row-risk-medium td {
+    background: rgba(242, 142, 43, 0.09);
 }
 
-/* ── 슬라이더 ── */
-[data-testid="stSlider"] [data-baseweb="slider"] [role="slider"] {
-    background: #4ECDC4 !important;
-    border-color: #4ECDC4 !important;
-    box-shadow: 0 0 8px rgba(78, 205, 196, 0.4) !important;
-}
-
-/* ── Expander ── */
-.streamlit-expanderHeader {
-    background: rgba(255, 255, 255, 0.04) !important;
-    border: 1px solid rgba(255, 255, 255, 0.09) !important;
-    border-radius: 10px !important;
-    color: #E8EAED !important;
-}
-
-/* ── 데이터프레임 / 테이블 ── */
-[data-testid="stDataFrame"],
-[data-testid="stTable"] {
-    background: rgba(255, 255, 255, 0.03) !important;
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
-    border-radius: 12px !important;
-}
-
-/* ── AI 인사이트 카드 ── */
+/* AI 인사이트 카드 */
 .ai-insight {
     background: rgba(78, 205, 196, 0.04);
     border: 1px solid rgba(78, 205, 196, 0.15);
     border-left: 3px solid rgba(78, 205, 196, 0.55);
-    border-radius: 8px;
+    border-radius: var(--r-sm);
     padding: 10px 16px;
     margin-top: 6px;
     margin-bottom: 8px;
 }
 
 .ai-label {
-    color: #4ECDC4;
+    color: var(--mint);
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.8px;
@@ -263,26 +381,87 @@ hr {
 }
 
 .ai-insight li {
-    color: #9EA3B8;
+    color: var(--text-mid);
     font-size: 13px;
     line-height: 1.7;
 }
 
-/* ── 스크롤바 ── */
+/* ══ 7. Memgraph 상태 배너 ══ */
+.memgraph-badge {
+    padding: 8px 16px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    font-size: 13px;
+}
+
+.memgraph-badge.connected {
+    background: rgba(78, 205, 196, 0.07);
+    border: 1px solid rgba(78, 205, 196, 0.28);
+}
+
+.memgraph-badge.disconnected {
+    background: rgba(225, 87, 89, 0.08);
+    border: 1px solid rgba(225, 87, 89, 0.28);
+}
+
+/* ══ 8. Home 기능 안내 카드 ══ */
+.feature-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-top: 8px;
+    margin-bottom: 8px;
+}
+
+.feature-card {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 14px;
+    padding: 22px 20px;
+    transition: background 0.25s ease, border-color 0.25s ease, transform 0.25s ease;
+}
+
+.feature-card:hover {
+    background: rgba(78, 205, 196, 0.06);
+    border-color: rgba(78, 205, 196, 0.28);
+    transform: translateY(-3px);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+}
+
+.feature-card .f-icon {
+    font-size: 26px;
+    margin-bottom: 12px;
+    display: block;
+}
+
+.feature-card .f-name {
+    color: var(--mint);
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 8px;
+}
+
+.feature-card .f-desc {
+    color: var(--text-mid);
+    font-size: 13px;
+    line-height: 1.65;
+}
+
+/* ══ 8. 스크롤바 ══ */
 ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
 }
 
 ::-webkit-scrollbar-track {
-    background: rgba(255, 255, 255, 0.03);
+    background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-    background: rgba(78, 205, 196, 0.3);
+    background: rgba(78, 205, 196, 0.25);
     border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: rgba(78, 205, 196, 0.5);
+    background: rgba(78, 205, 196, 0.45);
 }
