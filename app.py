@@ -37,7 +37,7 @@ init_database()
 # ------------------------------------------------------------------
 selected = option_menu(
     menu_title=None,
-    options=["Home", "Dashboard", "Network", "Detection", "Agent"],
+    options=["홈", "대시보드", "네트워크", "탐지", "에이전트"],
     icons=["house-fill", "bar-chart-fill", "diagram-3-fill", "robot", "chat-dots-fill"],
     default_index=0,
     orientation="horizontal",
@@ -79,7 +79,7 @@ selected = option_menu(
 # ------------------------------------------------------------------
 # 선택된 메뉴에 따라 페이지 렌더링
 # ------------------------------------------------------------------
-if selected == "Home":
+if selected == "홈":
     st.markdown('<p class="page-title page-title-lg">AML Assistant Platform</p>', unsafe_allow_html=True)
     st.markdown('<p class="page-subtitle">에이전트를 활용하여 자금세탁의심거래를 분석하는 웹 서비스</p>', unsafe_allow_html=True)
 
@@ -124,47 +124,45 @@ if selected == "Home":
             <div class="sub">출금 + 입금 기관</div>
         </div>""", unsafe_allow_html=True)
 
-    st.markdown("---")
-
     # 기능 안내 카드 그리드
     st.markdown('<p class="section-header">기능 안내</p>', unsafe_allow_html=True)
     st.markdown("""
     <div class="feature-grid">
         <div class="feature-card">
             <span class="f-icon">📊</span>
-            <div class="f-name">Dashboard</div>
+            <div class="f-name">대시보드</div>
             <div class="f-desc">거래 통계, 이상거래 유형 분포, 시간대·금융회사별 패턴을 대시보드로 시각화</div>
         </div>
         <div class="feature-card">
             <span class="f-icon">🔗</span>
-            <div class="f-name">Network</div>
+            <div class="f-name">네트워크</div>
             <div class="f-desc">금융회사·계좌 간 거래 그래프, 커뮤니티 탐지, 순환거래·레이어링 등 AML 패턴 분석</div>
         </div>
         <div class="feature-card">
             <span class="f-icon">🤖</span>
-            <div class="f-name">Detection</div>
+            <div class="f-name">탐지</div>
             <div class="f-desc">XGBoost 모델 기반 이상거래 확률 예측, 모델 학습·평가 및 특성 중요도 분석</div>
         </div>
         <div class="feature-card">
             <span class="f-icon">💬</span>
-            <div class="f-name">Agent</div>
+            <div class="f-name">에이전트</div>
             <div class="f-desc">AI 에이전트와 대화로 거래 조회·분석하고 의심거래보고서(STR) 자동 작성</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
-elif selected == "Dashboard":
+elif selected == "대시보드":
     from _pages.dashboard_page import render
     render()
 
-elif selected == "Network":
+elif selected == "네트워크":
     from _pages.network_page import render
     render()
 
-elif selected == "Detection":
+elif selected == "탐지":
     from _pages.detection_page import render
     render()
 
-elif selected == "Agent":
+elif selected == "에이전트":
     from _pages.agent_page import render
     render()
