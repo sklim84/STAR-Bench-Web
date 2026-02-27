@@ -32,11 +32,13 @@ python -c "from src.data.graph_etl import run_etl; print(run_etl())"  # DuckDB �
 ### 레이어 구조
 
 ```
-app.py (라우팅 + 글로벌 CSS)
+app.py (라우팅 + 글로벌 CSS 주입)
   → _pages/ (UI, 각 모듈은 render() 함수를 export)
     → src/features/ (비즈니스 로직)
       → src/data/db (DuckDB 쿼리)
       → src/data/graph_db (Memgraph Cypher 쿼리)
+  → assets/style.css (글로벌 CSS 클래스 정의)
+  → src/ui/chart_utils.py (Plotly 색상 상수 + apply_dark() 공통 모듈)
 ```
 
 ### Dual-Store 아키텍처
@@ -62,7 +64,7 @@ DuckDB(분석/집계)와 Memgraph(그래프 패턴 탐지)가 공존한다. Memg
 - **기능1 (Dashboard)**: 글로벌 필터(`filters=None` 파라미터) 패턴. 모든 쿼리 함수가 동일 필터 인터페이스 지원
 - **기능2 (Network)**: DuckDB+NetworkX 함수(중심성, 커뮤니티) + Memgraph Cypher 함수(순환거래, 레이어링, 대포통장, N-hop, 최단경로, 시간 윈도우, 위험도). UI 5개 탭 + AML 패턴 탐지 탭(6개 서브탭)
 - **기능3 (Detector)**: XGBoost 모델. 학습 피처: `["거래시간대", "출금금융회사일련번호", "입금금융회사일련번호", "자금구분", "매체구분", "거래금액"]`. 모델 저장: `_models/xgb_detector.joblib`
-- **기능4 (Agent)**: OpenAI `gpt-4o-mini` + function calling. 도구 6개(`query_transactions`, `predict_fraud`, `generate_str`, `analyze_network`, `get_statistics`, `detect_aml_patterns`). 최대 5라운드 tool calling
+- **기능4 (Agent)**: OpenAI `gpt-4o-mini` + function calling. 도구 6개(`query_transactions`, `predict_fraud`, `generate_str`, `analyze_network`, `get_statistics`, `detect_aml_patterns`). 최대 5라운드 tool calling. `generate_str`은 STR 공식 양식 I~VII 섹션 구조로 출력하며 `transactions`(거래 레코드), `fraud_probability`(확률 0~1→의심강도 1~5), `aml_patterns`(탐지 패턴) 파라미터를 통해 자동 추출
 
 ### 새 기능 추가 패턴
 
@@ -91,11 +93,13 @@ DuckDB 테이블명 `hofinet`. **컬럼명이 한글**이므로 SQL에서 그대
 - 텍스트: `#E0E0E0` (본문), `#8B8FA3` (라벨/보조), `#6B7080` (설명)
 
 **UI 패턴**:
-- 메트릭 카드: `st.metric()` 대신 HTML `.metric-card` 클래스 사용 (라벨 회색, 값 민트색)
+- 페이지 타이틀/부제목: `<p class="page-title">`, `<p class="page-subtitle">` HTML 사용
+- 메트릭 카드: `st.metric()` 대신 `_metric_card(label, value, sub="", white=False)` 헬퍼 사용. 이 함수는 `st.markdown()`을 직접 호출하며 문자열을 반환하지 않는다. `sub` 인자는 항상 렌더링(빈 문자열도)하여 카드 높이 일관성 보장
 - 섹션 헤더: `st.subheader()` 대신 `<p class="section-header">` HTML 사용
-- Plotly 차트: `_apply_dark()` 헬퍼로 투명 배경 + `#1E2333` 그리드 적용 (각 페이지에 로컬 정의)
+- Plotly 차트: `from src.ui.chart_utils import apply_dark as _apply_dark`로 import하여 사용. 색상 상수(`BAR_COLOR`, `LINE_COLOR`, `ACCENT_COLOR`, `MINT_COLOR`)도 동일 모듈에서 import
 - 테이블: `.dark-table` HTML 클래스 사용
 - 히트맵 colorscale: `[[0,'#1A1F2E'],[0.5,'#2A6B65'],[1,'#4ECDC4']]`
+- 공통 CSS 클래스는 `assets/style.css`에 정의. 새 클래스 추가 시 이 파일에 작성
 
 ## Coding Standards
 
@@ -127,3 +131,4 @@ def detect_something(...):
 ### 테스트
 - 테스트 네이밍: `Test<FunctionName>::test_<description>` 패턴 사용
 - Memgraph 의존 함수는 `unittest.mock.patch`로 `graph_db` 모킹하여 테스트
+- **DuckDB 격리**: `tests/conftest.py`의 `patch_db_connection` fixture(autouse, session scope)가 `src/data/db._conn`을 in-memory DuckDB로 교체한다. 파일 기반 DuckDB는 단일 프로세스만 write 모드로 열 수 있으므로 앱 실행 중 pytest를 돌리면 파일 잠금 충돌이 발생한다 — 앱을 종료한 뒤 테스트를 실행할 것
