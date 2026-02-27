@@ -6,6 +6,7 @@ OpenAI function calling을 활용하여 기능1~3을 도구로 등록하고,
 
 import json
 import re
+from collections import Counter
 from datetime import date
 
 import pandas as pd
@@ -94,23 +95,55 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "generate_str",
-            "description": "분석 결과를 기반으로 의심거래보고서(STR)를 작성한다. 분석 내용 요약을 입력하면 STR 양식에 맞춰 구조화된 보고서를 생성한다. STR 작성 전에 반드시 관련 거래 데이터를 먼저 조회할 것.",
+            "description": (
+                "분석 결과를 기반으로 의심거래보고서(STR) 공식 양식(I~VII섹션)에 맞게 작성한다. "
+                "STR 작성 전에 반드시 query_transactions로 관련 거래 데이터를 먼저 조회하고, "
+                "조회한 거래 레코드를 transactions 파라미터에 포함하여 호출할 것."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "summary": {
                         "type": "string",
-                        "description": "분석 결과 요약 (의심 사유, 관련 계좌, 금액, 거래 패턴 등 구체적인 수치 포함)",
+                        "description": "분석 결과 요약 및 혐의 판단 사유 (의심 사유, 거래 패턴, 수치 등 구체적으로 기술)",
                     },
                     "fraud_type": {
                         "type": "string",
-                        "description": "의심 활동 분류: '자금세탁', '사기', '기타' 중 하나",
-                        "enum": ["자금세탁", "사기", "기타"],
+                        "description": "HOFINET 이상거래유형 분류",
+                        "enum": ["자금세탁", "대포통장", "보이스피싱", "불법도박", "유사수신", "신규거래처", "기타"],
+                    },
+                    "transactions": {
+                        "type": "array",
+                        "description": "query_transactions 결과에서 가져온 관련 거래 레코드 목록. 계좌·금액·날짜·채널 자동 추출에 사용됨.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "거래일자": {"type": "integer"},
+                                "거래시간대": {"type": "integer"},
+                                "출금금융회사일련번호": {"type": "integer"},
+                                "출금계좌일련번호": {"type": "integer"},
+                                "입금금융회사일련번호": {"type": "integer"},
+                                "입금계좌일련번호": {"type": "integer"},
+                                "자금구분": {"type": "integer"},
+                                "매체구분": {"type": "integer"},
+                                "거래금액": {"type": "integer"},
+                                "이상거래유형": {"type": "integer"},
+                            },
+                        },
+                    },
+                    "fraud_probability": {
+                        "type": "number",
+                        "description": "predict_fraud 도구로 예측한 이상거래 확률 (0.0~1.0). 의심 강도(1~5) 산출에 사용됨.",
+                    },
+                    "aml_patterns": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "detect_aml_patterns로 탐지된 AML 패턴 목록 (예: ['순환거래', '레이어링'])",
                     },
                     "tools_used": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "분석에 사용된 도구 목록 (예: ['query_transactions', 'predict_fraud'])",
+                        "description": "분석에 사용된 도구 목록 (예: ['query_transactions', 'predict_fraud', 'analyze_network'])",
                     },
                 },
                 "required": ["summary"],
@@ -237,16 +270,18 @@ HOFINET(전자금융공동망) 이상거래탐지 데이터를 분석하여 자�
 6. 충분한 근거가 확보된 경우에만 generate_str로 STR 작성
 
 STR 작성 시 주의사항:
-- 반드시 근거 데이터를 먼저 조회한 후 STR을 작성하세요
-- 구체적인 계좌번호, 금액, 거래 패턴 수치를 포함하세요
-- 의심 사유를 명확하게 기술하세요
+- 반드시 query_transactions로 근거 데이터를 먼저 조회한 후 STR을 작성하세요
+- 조회한 거래 레코드를 transactions 파라미터에 담아 generate_str을 호출하면 계좌·금액·채널이 자동 추출됩니다
+- predict_fraud 결과가 있으면 fraud_probability에 확률값을 전달하세요
+- detect_aml_patterns 탐지 결과가 있으면 aml_patterns에 포함하세요
 
 데이터 스키마:
 - 테이블: hofinet (4,732,130건)
 - 컬럼: 거래일자(YYYYMMDD), 거래시간대(0~21, 3시간단위), 출금금융회사일련번호, 출금계좌일련번호, 입금금융회사일련번호, 입금계좌일련번호, 자금구분(0,1,3,4), 매체구분(1~7), 거래금액, 이상거래여부(0/1), 이상거래유형(1~7), 이상거래설명
 
-이상거래유형:
-1=계좌수집형 거래패턴의 변화, 2=신규 거래처 거래, 3=분산 거래, 4=다중거래처 자금 회수, 5=대량 입금 후 자금 이탈, 7=심야/새벽 대량 거래
+이상거래유형: 1=자금세탁, 2=신규거래처(최다 63.87%), 3=대포통장, 4=보이스피싱, 5=불법도박, 6=유사수신, 7=기타
+매체구분: 1=창구, 2=자동화기기(ATM), 3=PB센터, 4=인터넷뱅킹, 5=전화/휴대전화, 6=콜센터, 7=기타
+자금구분: 0=해당없음, 1=입금, 3=출금, 4=이체
 
 한국어로 응답하세요. 분석 시 구체적인 수치와 근거를 제시하세요."""
 
@@ -279,43 +314,189 @@ def _validate_predict_fraud_args(arguments: dict) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# STR 구조화 헬퍼
+# STR 구조화 헬퍼 -코드 매핑 테이블
 # ---------------------------------------------------------------------------
 
-def _build_str_report(summary: str, fraud_type: str, tools_used: list[str]) -> dict:
-    """STR 양식에 맞는 구조화된 보고서 딕셔너리를 생성한다."""
+_매체구분_MAP = {
+    1: "창구", 2: "자동화기기(ATM)", 3: "PB센터",
+    4: "인터넷뱅킹", 5: "전화/휴대전화", 6: "콜센터", 7: "기타",
+}
+
+_자금구분_MAP = {0: "해당없음", 1: "입금", 3: "출금", 4: "이체"}
+
+_이상거래유형_MAP = {
+    1: "자금세탁", 2: "신규거래처", 3: "대포통장",
+    4: "보이스피싱", 5: "불법도박", 6: "유사수신", 7: "기타",
+}
+
+# 이상거래유형 코드 → STR VI섹션 의심거래유형 체크항목 매핑
+_유형_to_VI항목 = {
+    1: ["분할거래", "갑작스러운 거래패턴의 변화"],
+    2: ["사전거래가 없는 고객의 의심스러운 거래 요청"],
+    3: ["타인의 명의 또는 계좌의 이용", "단발성 계좌의 이용"],
+    4: ["거액 입금 후 당일 또는 익일 중 인출", "빈번한 입출금(입출고)"],
+    5: ["빈번한 입출금(입출고)", "갑작스러운 거래패턴의 변화"],
+    6: ["다중거래의 동시요청", "단발성 계좌의 이용"],
+}
+
+_권고조치_MAP = {
+    "자금세탁":   ["거래 패턴 모니터링 강화", "관련 계좌 추가 조사", "금융정보분석원(FIU) 보고 검토"],
+    "대포통장":   ["계좌 즉시 모니터링", "계좌주 실명 확인", "수사기관 의뢰 검토"],
+    "보이스피싱": ["관련 계좌 즉시 동결 검토", "피해자 확인 및 보호 조치", "수사기관 의뢰"],
+    "불법도박":   ["거래 패턴 지속 모니터링", "관계 기관 신고 검토", "계좌 거래 제한 검토"],
+    "유사수신":   ["투자자 피해 확인", "관계 기관 신고", "계좌 동결 검토"],
+    "신규거래처": ["고객 실사(CDD) 강화", "추가 거래 모니터링"],
+    "기타":       ["추가 모니터링 실시", "거래 내역 보존", "내부 심사 위원회 검토"],
+}
+
+# AML 패턴 이름 → STR VI섹션 체크항목 매핑
+_패턴_VI항목_MAP = {
+    "순환거래": "분할거래",
+    "레이어링": "갑작스러운 거래패턴의 변화",
+    "대포통장": "타인의 명의 또는 계좌의 이용",
+}
+
+_도구설명_MAP = {
+    "query_transactions": "HOFINET DB 거래 데이터 직접 조회",
+    "predict_fraud":      "XGBoost 이상거래 확률 모델 예측",
+    "analyze_network":    "계좌 거래 네트워크 분석",
+    "get_statistics":     "전체 통계 대시보드 조회",
+    "detect_aml_patterns": "Memgraph 그래프 DB AML 패턴 탐지",
+    "generate_str":       "STR 보고서 생성",
+}
+
+
+def _build_str_report(
+    summary: str,
+    fraud_type: str,
+    tools_used: list[str],
+    transactions: list[dict],
+    fraud_probability: float | None,
+    aml_patterns: list[str],
+) -> dict:
+    """공식 STR 양식(I~VII 섹션)에 맞는 구조화된 보고서 딕셔너리를 생성한다."""
     today = date.today().strftime("%Y-%m-%d")
 
-    # 의심 사유 분류에 따른 권고 조치 결정
-    조치_map = {
-        "자금세탁": ["거래 패턴 모니터링 강화", "관련 계좌 추가 조사", "금융정보분석원(FIU) 보고 검토"],
-        "사기": ["관련 계좌 즉시 동결 검토", "피해자 확인 및 보호 조치", "수사기관 의뢰 검토"],
-        "기타": ["추가 모니터링 실시", "거래 내역 보존", "내부 심사 위원회 검토"],
-    }
-    권고조치 = 조치_map.get(fraud_type, 조치_map["기타"])
+    # ── 거래 데이터에서 필드 추출 ──────────────────────────────────────────
+    tx = transactions or []
 
-    # summary에서 계좌 정보 추출 시도 (숫자 패턴)
-    account_candidates = re.findall(r"(?:계좌|출금계좌|입금계좌)[^\d]*(\d{5,})", summary)
-    관련계좌 = list(set(account_candidates)) if account_candidates else ["요약에서 계좌 정보를 추출할 수 없습니다."]
+    tx_dates = sorted({str(t.get("거래일자", "")) for t in tx if t.get("거래일자")})
+    출금계좌목록 = list({str(t["출금계좌일련번호"]) for t in tx if t.get("출금계좌일련번호")})
+    입금계좌목록 = list({str(t["입금계좌일련번호"]) for t in tx if t.get("입금계좌일련번호")})
+    출금회사목록 = list({str(t["출금금융회사일련번호"]) for t in tx if t.get("출금금융회사일련번호")})
+    입금회사목록 = list({str(t["입금금융회사일련번호"]) for t in tx if t.get("입금금융회사일련번호")})
 
-    도구설명 = {
-        "query_transactions": "HOFINET DB 거래 데이터 직접 조회",
-        "predict_fraud": "XGBoost 이상거래 확률 모델 예측",
-        "analyze_network": "계좌 거래 네트워크 분석",
-        "get_statistics": "전체 통계 대시보드 조회",
-        "generate_str": "STR 보고서 생성",
-    }
-    분석근거 = [도구설명.get(t, t) for t in (tools_used or [])]
+    매체카운트 = Counter(t.get("매체구분") for t in tx if t.get("매체구분"))
+    거래채널 = _매체구분_MAP.get(
+        매체카운트.most_common(1)[0][0] if 매체카운트 else None, "미확인"
+    )
+
+    자금카운트 = Counter(t.get("자금구분") for t in tx if t.get("자금구분") is not None)
+    거래종류 = _자금구분_MAP.get(
+        자금카운트.most_common(1)[0][0] if 자금카운트 else None, "미확인"
+    )
+
+    총거래금액 = sum(t.get("거래금액", 0) for t in tx)
+    최대단건금액 = max((t.get("거래금액", 0) for t in tx), default=0)
+
+    유형카운트 = Counter(t.get("이상거래유형") for t in tx if t.get("이상거래유형"))
+    주요유형코드 = 유형카운트.most_common(1)[0][0] if 유형카운트 else None
+    주요유형명 = _이상거래유형_MAP.get(주요유형코드, fraud_type or "기타")
+
+    # summary regex 폴백 (transactions 없을 때)
+    if not tx:
+        account_candidates = re.findall(r"(?:계좌|출금계좌|입금계좌)[^\d]*(\d{5,})", summary)
+        출금계좌목록 = 입금계좌목록 = list(set(account_candidates))
+
+    # ── VI. 의심거래유형 체크항목 ──────────────────────────────────────────
+    vi_항목 = list(_유형_to_VI항목.get(주요유형코드, []))
+    for p in (aml_patterns or []):
+        for k, v in _패턴_VI항목_MAP.items():
+            if k in p and v not in vi_항목:
+                vi_항목.append(v)
+    if not vi_항목:
+        vi_항목 = ["기타 특징 및 유형 -VII 서술부 참조"]
+
+    # ── VII. 의심 강도 (1~5) ──────────────────────────────────────────────
+    if fraud_probability is not None:
+        의심강도 = min(5, max(1, round(fraud_probability * 4) + 1))
+        의심강도_설명 = f"AI 모델 예측 확률 {fraud_probability:.1%} 기반"
+    else:
+        의심강도 = 3
+        의심강도_설명 = "AI 예측 미수행 -담당자 판단 필요"
+
+    거래기간 = (
+        f"{tx_dates[0]} ~ {tx_dates[-1]}" if len(tx_dates) > 1
+        else (tx_dates[0] if tx_dates else "미확인")
+    )
+    관련계좌수 = len(set(출금계좌목록) | set(입금계좌목록))
+
+    종합의견 = (
+        f"[{today}] {주요유형명} 의심거래 탐지. "
+        f"거래기간 {거래기간}, 관련 계좌 {관련계좌수}개, "
+        f"총 거래금액 {총거래금액:,}원({len(tx)}건)."
+    )
+    if aml_patterns:
+        종합의견 += f" 탐지된 AML 패턴: {', '.join(aml_patterns)}."
+    종합의견 += " 담당자 검토 후 FIU 보고 여부 결정 요망."
+
+    분석근거 = [_도구설명_MAP.get(t, t) for t in (tools_used or [])]
+    권고조치 = _권고조치_MAP.get(주요유형명, _권고조치_MAP["기타"])
 
     return {
         "보고서유형": "의심거래보고서(STR)",
-        "보고일자": today,
-        "의심활동요약": summary,
-        "관련계좌정보": 관련계좌,
-        "의심사유분류": fraud_type or "기타",
+        "표제부": {
+            "보고일자": today,
+            "보고서구분": "신규보고",
+        },
+        "I_보고기관": {
+            "출금금융회사코드": 출금회사목록 or ["미확인"],
+            "비고": "금융회사일련번호 기준. 기관명은 담당자 확인 필요",
+        },
+        "II_거래자": {
+            "출금계좌번호": 출금계좌목록[:5] or ["미확인"],
+            "입금계좌번호": 입금계좌목록[:5] or ["미확인"],
+            "비고": "실명·주소·연락처는 HOFINET 미포함 -담당자 별도 확인 필요",
+        },
+        "III_거래내역": {
+            "거래기간": 거래기간,
+            "거래건수": len(tx),
+            "거래채널": 거래채널,
+            "거래종류": 거래종류,
+            "총거래금액_원": 총거래금액,
+            "최대단건금액_원": 최대단건금액,
+            "관련계좌존재여부": "여" if 관련계좌수 > 0 else "부",
+        },
+        "IV_관련계좌": {
+            "출금계좌목록": 출금계좌목록[:10],
+            "입금계좌목록": 입금계좌목록[:10],
+            "출금금융회사코드": 출금회사목록,
+            "입금금융회사코드": 입금회사목록,
+        },
+        "VI_거래유형": {
+            "주요의심유형": 주요유형명,
+            "해당항목": vi_항목,
+            "탐지된AML패턴": aml_patterns or [],
+        },
+        "VII_서술": {
+            "의심거래자관련": (
+                f"출금계좌 {', '.join(출금계좌목록[:3])} 등 "
+                f"입금계좌 {', '.join(입금계좌목록[:3])} 관련 의심 거래 확인."
+                if 출금계좌목록 or 입금계좌목록 else "거래자 정보 미확인 -담당자 확인 필요"
+            ),
+            "거래발생일자": 거래기간,
+            "거래방법특이사항": f"주요 채널: {거래채널} / 거래 종류: {거래종류}",
+            "혐의판단사유": summary,
+            "종합의견": 종합의견,
+            "의심강도_1to5": 의심강도,
+            "의심강도설명": 의심강도_설명,
+        },
         "권고조치": 권고조치,
-        "분석근거": 분석근거 if 분석근거 else ["분석 도구 미지정"],
-        "작성안내": "본 보고서는 AI 분석 에이전트가 자동 생성한 초안입니다. 담당자 검토 후 제출하시기 바랍니다.",
+        "분석근거": 분석근거 or ["분석 도구 미지정"],
+        "작성안내": (
+            "본 보고서는 AI 분석 에이전트가 자동 생성한 초안입니다. "
+            "실명·주소·연락처 등 HOFINET 미포함 항목은 담당자가 보완하고 검토 후 제출하시기 바랍니다."
+        ),
     }
 
 
@@ -447,10 +628,14 @@ def _tool_generate_str(arguments: dict) -> str:
     if not summary:
         return json.dumps({"error": "STR 작성을 위한 요약 내용이 비어 있습니다."}, ensure_ascii=False)
 
-    fraud_type = arguments.get("fraud_type", "기타")
-    tools_used = arguments.get("tools_used", [])
-
-    report = _build_str_report(summary, fraud_type, tools_used)
+    report = _build_str_report(
+        summary=summary,
+        fraud_type=arguments.get("fraud_type", "기타"),
+        tools_used=arguments.get("tools_used", []),
+        transactions=arguments.get("transactions", []),
+        fraud_probability=arguments.get("fraud_probability"),
+        aml_patterns=arguments.get("aml_patterns", []),
+    )
     return json.dumps(report, ensure_ascii=False)
 
 
@@ -680,7 +865,7 @@ def _message_to_dict(msg):
 
 
 # ---------------------------------------------------------------------------
-# 대화 실행 — 도구 호출 정보를 함께 반환
+# 대화 실행 -도구 호출 정보를 함께 반환
 # ---------------------------------------------------------------------------
 
 MAX_TOOL_ROUNDS = 5

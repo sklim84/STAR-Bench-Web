@@ -617,92 +617,102 @@ class TestValidatePredictFraudArgs:
 # _build_str_report
 # ──────────────────────────────────────────────
 class TestBuildStrReport:
-    """_build_str_report() 단위 테스트."""
+    """_build_str_report() 단위 테스트 - 새 6-파라미터 시그니처 기준."""
+
+    # 공통 헬퍼: 최소 필수 인수로 함수 호출
+    @staticmethod
+    def _call(**kwargs):
+        defaults = dict(
+            summary="테스트 요약",
+            fraud_type="자금세탁",
+            tools_used=[],
+            transactions=[],
+            fraud_probability=None,
+            aml_patterns=[],
+        )
+        defaults.update(kwargs)
+        return _build_str_report(**defaults)
 
     def test_returns_dict(self):
         """dict를 반환해야 한다."""
-        result = _build_str_report("테스트 요약", "자금세탁", ["query_transactions"])
+        result = self._call(tools_used=["query_transactions"])
         assert isinstance(result, dict)
 
-    def test_required_keys_present(self):
-        """필수 키가 모두 존재해야 한다."""
-        result = _build_str_report("요약", "자금세탁", [])
-        required_keys = {"보고서유형", "보고일자", "의심활동요약", "관련계좌정보", "의심사유분류", "권고조치", "분석근거", "작성안내"}
+    def test_required_top_level_keys_present(self):
+        """새 STR 구조의 필수 최상위 키가 모두 존재해야 한다."""
+        result = self._call()
+        required_keys = {
+            "보고서유형", "표제부", "I_보고기관", "II_거래자",
+            "III_거래내역", "IV_관련계좌", "VI_거래유형", "VII_서술",
+            "권고조치", "분석근거", "작성안내",
+        }
         assert required_keys.issubset(set(result.keys()))
 
     def test_보고서유형_is_str(self):
         """보고서유형이 STR 관련 문자열이어야 한다."""
-        result = _build_str_report("요약", "자금세탁", [])
+        result = self._call()
         assert "STR" in result["보고서유형"] or "의심거래" in result["보고서유형"]
 
-    def test_보고일자_format(self):
-        """보고일자가 YYYY-MM-DD 형식이어야 한다."""
+    def test_표제부_보고일자_format(self):
+        """표제부.보고일자가 YYYY-MM-DD 형식이어야 한다."""
         import re
-        result = _build_str_report("요약", "자금세탁", [])
-        assert re.match(r"^\d{4}-\d{2}-\d{2}$", result["보고일자"])
+        result = self._call()
+        assert re.match(r"^\d{4}-\d{2}-\d{2}$", result["표제부"]["보고일자"])
 
-    def test_summary_preserved(self):
-        """의심활동요약에 입력 요약이 포함되어야 한다."""
+    def test_summary_preserved_in_VII(self):
+        """summary가 VII_서술.혐의판단사유에 보존되어야 한다."""
         summary = "계좌 123에서 심야 대량 자금 이동"
-        result = _build_str_report(summary, "자금세탁", [])
-        assert result["의심활동요약"] == summary
+        result = self._call(summary=summary)
+        assert result["VII_서술"]["혐의판단사유"] == summary
 
     def test_fraud_type_자금세탁_권고조치(self):
         """자금세탁 유형의 권고조치가 존재해야 한다."""
-        result = _build_str_report("요약", "자금세탁", [])
+        result = self._call(fraud_type="자금세탁")
         assert isinstance(result["권고조치"], list)
         assert len(result["권고조치"]) > 0
-        # 자금세탁 관련 조치 키워드가 포함되어야 함
         actions_text = " ".join(result["권고조치"])
         assert "모니터링" in actions_text or "FIU" in actions_text or "조사" in actions_text
 
-    def test_fraud_type_사기_권고조치(self):
-        """사기 유형의 권고조치가 존재해야 한다."""
-        result = _build_str_report("요약", "사기", [])
-        assert isinstance(result["권고조치"], list)
-        assert len(result["권고조치"]) > 0
-
     def test_fraud_type_기타_권고조치(self):
         """기타 유형의 권고조치가 존재해야 한다."""
-        result = _build_str_report("요약", "기타", [])
+        result = self._call(fraud_type="기타")
         assert isinstance(result["권고조치"], list)
         assert len(result["권고조치"]) > 0
 
     def test_unknown_fraud_type_defaults_to_기타(self):
         """알 수 없는 의심사유 분류는 기타로 처리되어야 한다."""
-        result = _build_str_report("요약", "알수없음", [])
-        # 기타 권고조치가 적용되어야 함
+        result = self._call(fraud_type="알수없음")
         assert isinstance(result["권고조치"], list)
         assert len(result["권고조치"]) > 0
 
     def test_tools_used_in_분석근거(self):
         """사용된 도구 목록이 분석근거에 반영되어야 한다."""
         tools = ["query_transactions", "analyze_network"]
-        result = _build_str_report("요약", "자금세탁", tools)
+        result = self._call(tools_used=tools)
         근거 = result["분석근거"]
         assert isinstance(근거, list)
         assert len(근거) == len(tools)
 
     def test_empty_tools_used(self):
         """도구 목록이 비어 있어도 오류 없이 동작해야 한다."""
-        result = _build_str_report("요약", "자금세탁", [])
+        result = self._call(tools_used=[])
         assert "분석근거" in result
         assert isinstance(result["분석근거"], list)
 
     def test_작성안내_is_string(self):
         """작성안내가 문자열이어야 한다."""
-        result = _build_str_report("요약", "자금세탁", [])
+        result = self._call()
         assert isinstance(result["작성안내"], str)
         assert len(result["작성안내"]) > 0
 
-    def test_account_extracted_from_summary(self):
-        """요약에서 계좌 번호를 추출하여 관련계좌정보에 포함해야 한다."""
-        # 계좌 번호가 포함된 요약
+    def test_account_extracted_from_summary_when_no_transactions(self):
+        """transactions 없을 때 summary regex로 계좌 번호를 추출해야 한다."""
         summary = "출금계좌 1234567에서 500만원 이동"
-        result = _build_str_report(summary, "자금세탁", [])
-        assert isinstance(result["관련계좌정보"], list)
-        # 추출된 계좌 번호가 있거나, 추출 불가 메시지가 있어야 함
-        assert len(result["관련계좌정보"]) > 0
+        result = self._call(summary=summary, transactions=[])
+        # II_거래자 또는 IV_관련계좌에 계좌 정보가 있어야 함
+        ii = result["II_거래자"]
+        assert isinstance(ii["출금계좌번호"], list)
+        assert len(ii["출금계좌번호"]) > 0
 
 
 # ──────────────────────────────────────────────
@@ -893,16 +903,17 @@ class TestExecuteToolGenerateStrEnhanced:
         assert "error" not in parsed
 
     def test_str_contains_보고일자(self):
-        """STR 결과에 보고일자가 포함되어야 한다."""
+        """STR 결과에 보고일자가 포함되어야 한다 (표제부 섹션 내부)."""
         import re
         result = _execute_tool("generate_str", {
             "summary": "의심 거래 분석 완료",
             "fraud_type": "자금세탁",
         })
         parsed = json.loads(result)
-        # 보고일자 키가 있어야 함
-        assert "보고일자" in parsed
-        assert re.match(r"^\d{4}-\d{2}-\d{2}$", parsed["보고일자"])
+        # 새 STR 구조: 보고일자는 표제부 섹션 내부에 위치
+        assert "표제부" in parsed
+        assert "보고일자" in parsed["표제부"]
+        assert re.match(r"^\d{4}-\d{2}-\d{2}$", parsed["표제부"]["보고일자"])
 
     def test_str_contains_권고조치(self):
         """STR 결과에 권고조치가 포함되어야 한다."""
