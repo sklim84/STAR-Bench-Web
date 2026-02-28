@@ -234,6 +234,87 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "compare_periods",
+            "description": (
+                "두 기간의 거래·이상거래 통계를 비교하고 변화율(delta)을 반환한다. "
+                "기간별 거래 건수, 이상거래 건수, 평균 거래금액과 증감률을 산출한다. "
+                "분기 비교, 월간 비교, 특정 이벤트 전후 비교에 활용한다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "period1_start": {
+                        "type": "integer",
+                        "description": "첫 번째 기간 시작일 (YYYYMMDD 정수, 예: 20240101)",
+                    },
+                    "period1_end": {
+                        "type": "integer",
+                        "description": "첫 번째 기간 종료일 (YYYYMMDD 정수, 예: 20240331)",
+                    },
+                    "period2_start": {
+                        "type": "integer",
+                        "description": "두 번째 기간 시작일 (YYYYMMDD 정수, 예: 20240401)",
+                    },
+                    "period2_end": {
+                        "type": "integer",
+                        "description": "두 번째 기간 종료일 (YYYYMMDD 정수, 예: 20240630)",
+                    },
+                },
+                "required": ["period1_start", "period1_end", "period2_start", "period2_end"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_institution_report",
+            "description": (
+                "특정 금융회사의 종합 현황을 보고한다. "
+                "거래 규모(건수·금액), 이상거래 비율, 상위 거래 상대 기관, "
+                "주요 이상거래 유형별 분포, 최근 분기 추이를 반환한다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "bank_id": {
+                        "type": "integer",
+                        "description": "조회할 금융회사일련번호 (출금금융회사일련번호 기준)",
+                    }
+                },
+                "required": ["bank_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rank_risky_transactions",
+            "description": (
+                "학습된 XGBoost 모델로 데이터베이스에서 샘플 거래를 일괄 예측하여 "
+                "위험도 상위 K건을 반환한다. 대규모 탐지 및 우선순위 설정에 활용한다. "
+                "모델이 없으면 오류를 반환한다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sample_size": {
+                        "type": "integer",
+                        "description": "예측할 샘플 건수 (기본 1000, 최대 5000)",
+                        "default": 1000,
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": "반환할 상위 위험 거래 건수 (기본 20, 최대 100)",
+                        "default": 20,
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "detect_aml_patterns",
             "description": (
                 "Memgraph 그래프 DB를 활용하여 AML(자금세탁방지) 패턴을 탐지한다. "
@@ -305,10 +386,13 @@ HOFINET(전자금융공동망) 이상거래탐지 데이터를 분석하여 자�
 2. query_transactions: HOFINET DB에 SQL 쿼리를 실행하여 거래 통계, 패턴, 특정 계좌 거래 내역 등을 상세 조회
 3. get_account_profile: 특정 계좌의 거래 통계 프로파일 조회 (건수/금액/이상거래비율/주요시간대/상위거래상대)
 4. get_fraud_type_summary: 이상거래유형별 현황 조회 (건수·금액 통계, 상위 금융회사). 코드: 1=자금세탁, 2=신규거래처, 3=대포통장, 4=보이스피싱, 5=불법도박, 6=유사수신, 7=기타
-5. analyze_network: 특정 계좌의 거래 네트워크를 분석하여 연결 계좌 수, 이상거래 관련 여부 파악 (N-hop 심층 탐색 지원)
-6. detect_aml_patterns: Memgraph 그래프 DB를 활용한 AML 패턴 탐지 (순환거래, 레이어링, 대포통장, 최단경로, 위험도 산출)
-7. predict_fraud: XGBoost 모델로 특정 거래의 이상거래 확률을 예측
-8. generate_str: 분석 결과를 의심거래보고서(STR) 양식으로 작성
+5. compare_periods: 두 기간의 거래·이상거래 통계 비교 및 증감률 산출 (분기 비교, 월간 비교)
+6. get_institution_report: 특정 금융회사의 종합 현황 보고 (거래규모, 이상거래비율, 상위거래상대, 유형분포)
+7. rank_risky_transactions: XGBoost 모델 배치 예측으로 위험도 상위 K건 랭킹 반환
+8. analyze_network: 특정 계좌의 거래 네트워크를 분석하여 연결 계좌 수, 이상거래 관련 여부 파악 (N-hop 심층 탐색 지원)
+9. detect_aml_patterns: Memgraph 그래프 DB를 활용한 AML 패턴 탐지 (순환거래, 레이어링, 대포통장, 최단경로, 위험도 산출)
+10. predict_fraud: XGBoost 모델로 특정 거래의 이상거래 확률을 예측
+11. generate_str: 분석 결과를 의심거래보고서(STR) 양식으로 작성
 
 권장 분석 절차:
 1. get_statistics로 전체 현황 파악
@@ -413,6 +497,9 @@ _도구설명_MAP = {
     "get_account_profile":   "계좌 거래 통계 프로파일 조회",
     "get_fraud_type_summary": "이상거래유형별 현황 조회",
     "detect_aml_patterns":   "Memgraph 그래프 DB AML 패턴 탐지",
+    "compare_periods":        "기간별 거래 통계 비교 분석",
+    "get_institution_report": "금융회사 종합 현황 보고",
+    "rank_risky_transactions": "XGBoost 모델 배치 예측 위험도 랭킹",
     "generate_str":          "STR 보고서 생성",
 }
 
@@ -576,6 +663,12 @@ def _execute_tool(name: str, arguments: dict) -> str:
             return _tool_get_account_profile(arguments)
         elif name == "get_fraud_type_summary":
             return _tool_get_fraud_type_summary(arguments)
+        elif name == "compare_periods":
+            return _tool_compare_periods(arguments)
+        elif name == "get_institution_report":
+            return _tool_get_institution_report(arguments)
+        elif name == "rank_risky_transactions":
+            return _tool_rank_risky_transactions(arguments)
         elif name == "detect_aml_patterns":
             return _tool_detect_aml_patterns(arguments)
         else:
@@ -1120,6 +1213,214 @@ def _tool_get_fraud_type_summary(arguments: dict) -> str:
             "top_banks": top_banks,
             "sample_dates": sample_dates,
             "bank_filter": bid,
+        },
+        ensure_ascii=False,
+    )
+
+
+def _tool_compare_periods(arguments: dict) -> str:
+    try:
+        p1s = int(arguments.get("period1_start", 0))
+        p1e = int(arguments.get("period1_end", 0))
+        p2s = int(arguments.get("period2_start", 0))
+        p2e = int(arguments.get("period2_end", 0))
+    except (TypeError, ValueError):
+        return json.dumps({"error": "날짜는 YYYYMMDD 정수여야 합니다."}, ensure_ascii=False)
+
+    if p1s > p1e or p2s > p2e:
+        return json.dumps({"error": "시작일이 종료일보다 늦을 수 없습니다."}, ensure_ascii=False)
+
+    try:
+        # p1s, p1e, p2s, p2e는 상단에서 int()로 강제 변환했으므로 f-string 삽입 안전
+        # (DuckDB BETWEEN 절은 파라미터 바인딩도 지원하나 정수 리터럴로 삽입)
+        df1 = query(
+            f"""
+            SELECT COUNT(*) AS total_count,
+                   SUM(이상거래여부) AS fraud_count,
+                   AVG(거래금액) AS avg_amount
+            FROM hofinet
+            WHERE 거래일자 BETWEEN {p1s} AND {p1e}
+            """
+        )
+        df2 = query(
+            f"""
+            SELECT COUNT(*) AS total_count,
+                   SUM(이상거래여부) AS fraud_count,
+                   AVG(거래금액) AS avg_amount
+            FROM hofinet
+            WHERE 거래일자 BETWEEN {p2s} AND {p2e}
+            """
+        )
+    except Exception as exc:
+        return json.dumps({"error": f"기간 비교 조회 오류: {str(exc)}"}, ensure_ascii=False)
+
+    def _row(df):
+        if df is None or df.empty:
+            return {"total_count": 0, "fraud_count": 0, "avg_amount": 0.0}
+        r = df.iloc[0]
+        return {
+            "total_count": int(r["total_count"] or 0),
+            "fraud_count": int(r["fraud_count"] or 0),
+            "avg_amount": round(float(r["avg_amount"] or 0.0), 2),
+        }
+
+    r1 = _row(df1)
+    r2 = _row(df2)
+
+    def _delta(v1, v2):
+        if v1 == 0:
+            return None
+        return round((v2 - v1) / v1 * 100, 2)
+
+    fraud_ratio1 = round(r1["fraud_count"] / r1["total_count"] * 100, 4) if r1["total_count"] > 0 else 0.0
+    fraud_ratio2 = round(r2["fraud_count"] / r2["total_count"] * 100, 4) if r2["total_count"] > 0 else 0.0
+
+    return json.dumps(
+        {
+            "period1": {"start": p1s, "end": p1e, **r1, "fraud_ratio_percent": fraud_ratio1},
+            "period2": {"start": p2s, "end": p2e, **r2, "fraud_ratio_percent": fraud_ratio2},
+            "delta": {
+                "total_count_pct": _delta(r1["total_count"], r2["total_count"]),
+                "fraud_count_pct": _delta(r1["fraud_count"], r2["fraud_count"]),
+                "avg_amount_pct": _delta(r1["avg_amount"], r2["avg_amount"]),
+                "fraud_ratio_ppt": round(fraud_ratio2 - fraud_ratio1, 4),
+            },
+        },
+        ensure_ascii=False,
+    )
+
+
+def _tool_get_institution_report(arguments: dict) -> str:
+    bank_id_raw = arguments.get("bank_id")
+    if bank_id_raw is None:
+        return json.dumps({"error": "bank_id가 필요합니다."}, ensure_ascii=False)
+    try:
+        bid = int(bank_id_raw)
+    except (TypeError, ValueError):
+        return json.dumps({"error": "bank_id는 정수여야 합니다."}, ensure_ascii=False)
+
+    try:
+        # 기본 집계 (출금 방향 기준)
+        agg_df = query(
+            "SELECT COUNT(*) AS total_count, "
+            "SUM(이상거래여부) AS fraud_count, "
+            "SUM(거래금액) AS total_amount, "
+            "AVG(거래금액) AS avg_amount "
+            "FROM hofinet WHERE 출금금융회사일련번호 = $bid",
+            {"bid": bid},
+        )
+
+        if agg_df is None or agg_df.empty or int(agg_df.iloc[0]["total_count"] or 0) == 0:
+            return json.dumps(
+                {"bank_id": bid, "안내": "해당 금융회사의 거래 내역이 없습니다."},
+                ensure_ascii=False,
+            )
+
+        row = agg_df.iloc[0]
+        total_count = int(row["total_count"] or 0)
+        fraud_count = int(row["fraud_count"] or 0)
+        total_amount = int(row["total_amount"] or 0)
+        avg_amount = round(float(row["avg_amount"] or 0.0), 2)
+        fraud_ratio = round(fraud_count / total_count * 100, 4) if total_count > 0 else 0.0
+
+        # 상위 거래 상대 기관 (입금 기관 기준)
+        cp_df = query(
+            "SELECT 입금금융회사일련번호 AS counterpart_bank_id, "
+            "COUNT(*) AS tx_count, SUM(거래금액) AS total_amount "
+            "FROM hofinet WHERE 출금금융회사일련번호 = $bid "
+            "GROUP BY 입금금융회사일련번호 ORDER BY tx_count DESC LIMIT 5",
+            {"bid": bid},
+        )
+        top_counterparts = []
+        if cp_df is not None and not cp_df.empty:
+            for _, r in cp_df.iterrows():
+                top_counterparts.append({
+                    "bank_id": int(r["counterpart_bank_id"]),
+                    "count": int(r["tx_count"]),
+                    "amount": int(r["total_amount"] or 0),
+                })
+
+        # 이상거래 유형별 분포
+        type_df = query(
+            "SELECT 이상거래유형, COUNT(*) AS cnt "
+            "FROM hofinet "
+            "WHERE 출금금융회사일련번호 = $bid AND 이상거래여부 = 1 "
+            "GROUP BY 이상거래유형 ORDER BY cnt DESC",
+            {"bid": bid},
+        )
+        fraud_type_dist = []
+        if type_df is not None and not type_df.empty:
+            for _, r in type_df.iterrows():
+                ftype = int(r["이상거래유형"]) if r["이상거래유형"] is not None else 0
+                fraud_type_dist.append({
+                    "type_code": ftype,
+                    "type_name": _이상거래유형_MAP.get(ftype, "기타"),
+                    "count": int(r["cnt"]),
+                })
+
+    except Exception as exc:
+        return json.dumps(
+            {"error": f"금융회사 보고서 조회 오류: {str(exc)}"},
+            ensure_ascii=False,
+        )
+
+    return json.dumps(
+        {
+            "bank_id": bid,
+            "total_count": total_count,
+            "fraud_count": fraud_count,
+            "fraud_ratio_percent": fraud_ratio,
+            "total_amount": total_amount,
+            "avg_amount": avg_amount,
+            "top_counterpart_banks": top_counterparts,
+            "fraud_type_distribution": fraud_type_dist,
+        },
+        ensure_ascii=False,
+    )
+
+
+def _tool_rank_risky_transactions(arguments: dict) -> str:
+    sample_size = min(int(arguments.get("sample_size", 1000)), 5000)
+    top_k = min(int(arguments.get("top_k", 20)), 100)
+
+    model = load_model()
+    if model is None:
+        return json.dumps(
+            {"error": "학습된 모델이 없습니다. Detection 페이지에서 모델을 먼저 학습하세요."},
+            ensure_ascii=False,
+        )
+
+    try:
+        from src.features.detector import predict_from_db, FEATURE_COLS
+        df = predict_from_db(model, limit=sample_size)
+    except Exception as exc:
+        return json.dumps(
+            {"error": f"배치 예측 오류: {str(exc)}"},
+            ensure_ascii=False,
+        )
+
+    if df is None or df.empty:
+        return json.dumps({"안내": "예측할 거래 데이터가 없습니다.", "results": []}, ensure_ascii=False)
+
+    top_df = df.head(top_k)
+    records = []
+    for _, row in top_df.iterrows():
+        records.append({
+            "출금계좌일련번호": int(row["출금계좌일련번호"]),
+            "입금계좌일련번호": int(row["입금계좌일련번호"]),
+            "거래일자": int(row["거래일자"]),
+            "거래시간대": int(row["거래시간대"]),
+            "거래금액": int(row["거래금액"]),
+            "이상거래확률": round(float(row["예측확률"]), 4),
+            "실제이상거래여부": int(row["이상거래여부"]) if "이상거래여부" in row else None,
+        })
+
+    return json.dumps(
+        {
+            "sample_size": sample_size,
+            "top_k": top_k,
+            "총반환건수": len(records),
+            "results": records,
         },
         ensure_ascii=False,
     )

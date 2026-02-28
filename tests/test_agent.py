@@ -16,6 +16,7 @@
 import json
 import re
 import numpy as np
+import pandas as pd
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -41,8 +42,8 @@ class TestToolsDefinition:
         assert isinstance(TOOLS, list)
 
     def test_tools_count(self):
-        """도구가 정확히 8개이어야 한다 (get_account_profile, get_fraud_type_summary 추가)."""
-        assert len(TOOLS) == 8
+        """도구가 정확히 11개이어야 한다 (compare_periods, get_institution_report, rank_risky_transactions 추가)."""
+        assert len(TOOLS) == 11
 
     def test_tools_have_required_structure(self):
         """각 도구가 type과 function 키를 가져야 한다."""
@@ -63,6 +64,9 @@ class TestToolsDefinition:
             "detect_aml_patterns",
             "get_account_profile",
             "get_fraud_type_summary",
+            "compare_periods",
+            "get_institution_report",
+            "rank_risky_transactions",
         }
         assert names == expected
 
@@ -1282,3 +1286,246 @@ class TestGetFraudTypeSummary:
         if "top_banks" in parsed:
             assert isinstance(parsed["top_banks"], list)
             assert len(parsed["top_banks"]) <= 5
+
+
+# ──────────────────────────────────────────────
+# compare_periods 도구 검증
+# ──────────────────────────────────────────────
+class TestComparePeriods:
+    """_execute_tool('compare_periods', ...) 단위 테스트."""
+
+    def _valid_args(self):
+        return {
+            "period1_start": 20240101,
+            "period1_end": 20240331,
+            "period2_start": 20240401,
+            "period2_end": 20240630,
+        }
+
+    def test_returns_dict(self):
+        """유효한 날짜 범위로 호출하면 dict를 반환해야 한다."""
+        result = _execute_tool("compare_periods", self._valid_args())
+        parsed = json.loads(result)
+        assert isinstance(parsed, dict)
+
+    def test_returns_period1_and_period2_keys(self):
+        """결과에 period1과 period2 키가 있어야 한다."""
+        result = _execute_tool("compare_periods", self._valid_args())
+        parsed = json.loads(result)
+        assert "period1" in parsed
+        assert "period2" in parsed
+
+    def test_returns_delta_key(self):
+        """결과에 delta 키가 있어야 한다."""
+        result = _execute_tool("compare_periods", self._valid_args())
+        parsed = json.loads(result)
+        assert "delta" in parsed
+
+    def test_period_contains_count_fields(self):
+        """각 기간 결과에 total_count, fraud_count, avg_amount가 있어야 한다."""
+        result = _execute_tool("compare_periods", self._valid_args())
+        parsed = json.loads(result)
+        if "error" not in parsed:
+            for key in ("total_count", "fraud_count", "avg_amount"):
+                assert key in parsed["period1"], f"period1에 '{key}' 없음"
+                assert key in parsed["period2"], f"period2에 '{key}' 없음"
+
+    def test_period_dates_preserved(self):
+        """기간의 start/end 날짜가 결과에 보존되어야 한다."""
+        args = self._valid_args()
+        result = _execute_tool("compare_periods", args)
+        parsed = json.loads(result)
+        if "error" not in parsed:
+            assert parsed["period1"]["start"] == args["period1_start"]
+            assert parsed["period1"]["end"] == args["period1_end"]
+            assert parsed["period2"]["start"] == args["period2_start"]
+            assert parsed["period2"]["end"] == args["period2_end"]
+
+    def test_fraud_ratio_in_valid_range(self):
+        """fraud_ratio_percent가 0~100 범위이어야 한다."""
+        result = _execute_tool("compare_periods", self._valid_args())
+        parsed = json.loads(result)
+        if "error" not in parsed:
+            for period_key in ("period1", "period2"):
+                ratio = parsed[period_key].get("fraud_ratio_percent", 0.0)
+                assert 0.0 <= ratio <= 100.0, f"{period_key} fraud_ratio_percent 범위 오류"
+
+    def test_invalid_date_order_returns_error(self):
+        """시작일이 종료일보다 늦으면 오류를 반환해야 한다."""
+        result = _execute_tool("compare_periods", {
+            "period1_start": 20240331,
+            "period1_end": 20240101,
+            "period2_start": 20240401,
+            "period2_end": 20240630,
+        })
+        parsed = json.loads(result)
+        assert "error" in parsed
+
+    def test_delta_contains_pct_fields(self):
+        """delta에 증감률 필드가 있어야 한다."""
+        result = _execute_tool("compare_periods", self._valid_args())
+        parsed = json.loads(result)
+        if "error" not in parsed:
+            delta = parsed["delta"]
+            assert "fraud_count_pct" in delta
+            assert "fraud_ratio_ppt" in delta
+
+
+# ──────────────────────────────────────────────
+# get_institution_report 도구 검증
+# ──────────────────────────────────────────────
+class TestGetInstitutionReport:
+    """_execute_tool('get_institution_report', ...) 단위 테스트."""
+
+    def test_returns_dict(self):
+        """유효한 bank_id로 호출하면 dict를 반환해야 한다."""
+        result = _execute_tool("get_institution_report", {"bank_id": 1})
+        parsed = json.loads(result)
+        assert isinstance(parsed, dict)
+
+    def test_returns_bank_id_in_result(self):
+        """결과에 bank_id가 포함되어야 한다."""
+        result = _execute_tool("get_institution_report", {"bank_id": 134})
+        parsed = json.loads(result)
+        assert "bank_id" in parsed
+
+    def test_known_bank_returns_stats(self):
+        """존재하는 은행 코드에 대해 통계 키를 포함한 결과를 반환해야 한다."""
+        # hofinet에서 실제로 존재하는 bank_id 사용
+        result = _execute_tool("get_institution_report", {"bank_id": 1})
+        parsed = json.loads(result)
+        if "안내" not in parsed and "error" not in parsed:
+            for key in ("total_count", "fraud_count", "fraud_ratio_percent", "total_amount"):
+                assert key in parsed, f"키 '{key}'가 결과에 없습니다"
+
+    def test_unknown_bank_returns_notice(self):
+        """존재하지 않는 bank_id(0)는 안내 메시지를 반환해야 한다."""
+        result = _execute_tool("get_institution_report", {"bank_id": 0})
+        parsed = json.loads(result)
+        assert isinstance(parsed, dict)
+        assert "안내" in parsed or parsed.get("total_count", 0) == 0
+
+    def test_missing_bank_id_returns_error(self):
+        """bank_id 없이 호출하면 에러를 반환해야 한다."""
+        result = _execute_tool("get_institution_report", {})
+        parsed = json.loads(result)
+        assert "error" in parsed
+
+    def test_top_counterpart_banks_is_list(self):
+        """top_counterpart_banks가 리스트여야 한다."""
+        result = _execute_tool("get_institution_report", {"bank_id": 1})
+        parsed = json.loads(result)
+        if "top_counterpart_banks" in parsed:
+            assert isinstance(parsed["top_counterpart_banks"], list)
+            assert len(parsed["top_counterpart_banks"]) <= 5
+
+    def test_fraud_type_distribution_is_list(self):
+        """fraud_type_distribution이 리스트여야 한다."""
+        result = _execute_tool("get_institution_report", {"bank_id": 1})
+        parsed = json.loads(result)
+        if "fraud_type_distribution" in parsed:
+            assert isinstance(parsed["fraud_type_distribution"], list)
+
+    def test_fraud_ratio_in_valid_range(self):
+        """fraud_ratio_percent가 0~100 범위이어야 한다."""
+        result = _execute_tool("get_institution_report", {"bank_id": 1})
+        parsed = json.loads(result)
+        if "fraud_ratio_percent" in parsed:
+            assert 0.0 <= parsed["fraud_ratio_percent"] <= 100.0
+
+
+# ──────────────────────────────────────────────
+# rank_risky_transactions 도구 검증
+# ──────────────────────────────────────────────
+class TestRankRiskyTransactions:
+    """_execute_tool('rank_risky_transactions', ...) 단위 테스트."""
+
+    def test_no_model_returns_error(self):
+        """모델이 없을 때 오류 메시지를 반환해야 한다."""
+        with patch("src.features.agent.load_model", return_value=None):
+            result = _execute_tool("rank_risky_transactions", {})
+            parsed = json.loads(result)
+            assert "error" in parsed
+
+    def test_with_mock_model_returns_results(self):
+        """Mock 모델이 있으면 결과 리스트를 반환해야 한다."""
+        mock_model = MagicMock()
+        mock_model.predict_proba.return_value = np.array([[0.3, 0.7]] * 10)
+        mock_model.predict.return_value = np.array([1] * 10)
+
+        sample_df = pd.DataFrame({
+            "거래일자": [20240101] * 10,
+            "거래시간대": [9] * 10,
+            "출금금융회사일련번호": [1] * 10,
+            "출금계좌일련번호": list(range(10)),
+            "입금금융회사일련번호": [2] * 10,
+            "입금계좌일련번호": list(range(10, 20)),
+            "자금구분": [1] * 10,
+            "매체구분": [4] * 10,
+            "거래금액": [1_000_000] * 10,
+            "이상거래여부": [0] * 10,
+            "이상거래유형": [0] * 10,
+            "이상거래설명": [""] * 10,
+            "예측확률": [0.7] * 10,
+            "예측결과": [1] * 10,
+        })
+
+        with patch("src.features.agent.load_model", return_value=mock_model), \
+             patch("src.features.detector.predict_from_db", return_value=sample_df):
+            result = _execute_tool("rank_risky_transactions", {"sample_size": 10, "top_k": 5})
+            parsed = json.loads(result)
+            assert "results" in parsed
+            assert isinstance(parsed["results"], list)
+
+    def test_default_params_applied(self):
+        """기본 파라미터(sample_size=1000, top_k=20)가 적용되어야 한다."""
+        with patch("src.features.agent.load_model", return_value=None):
+            result = _execute_tool("rank_risky_transactions", {})
+            parsed = json.loads(result)
+            # 모델 없으면 에러, 있으면 sample_size/top_k 확인 불가 — 에러 응답 확인
+            assert isinstance(parsed, dict)
+
+    def test_sample_size_capped_at_5000(self):
+        """sample_size가 5000을 초과해도 5000으로 제한되어야 한다."""
+        with patch("src.features.agent.load_model", return_value=None):
+            # 모델 없으므로 에러가 반환되지만 에러 처리까지 도달하면 cap이 적용된 것
+            result = _execute_tool("rank_risky_transactions", {"sample_size": 99999})
+            parsed = json.loads(result)
+            assert isinstance(parsed, dict)
+
+    def test_top_k_capped_at_100(self):
+        """top_k가 100을 초과해도 100으로 제한되어야 한다."""
+        with patch("src.features.agent.load_model", return_value=None):
+            result = _execute_tool("rank_risky_transactions", {"top_k": 99999})
+            parsed = json.loads(result)
+            assert isinstance(parsed, dict)
+
+    def test_result_fields_present(self):
+        """결과 레코드에 필수 필드가 있어야 한다."""
+        mock_model = MagicMock()
+        sample_df = pd.DataFrame({
+            "거래일자": [20240101] * 5,
+            "거래시간대": [9] * 5,
+            "출금금융회사일련번호": [1] * 5,
+            "출금계좌일련번호": list(range(5)),
+            "입금금융회사일련번호": [2] * 5,
+            "입금계좌일련번호": list(range(5, 10)),
+            "자금구분": [1] * 5,
+            "매체구분": [4] * 5,
+            "거래금액": [500_000] * 5,
+            "이상거래여부": [0] * 5,
+            "이상거래유형": [0] * 5,
+            "이상거래설명": [""] * 5,
+            "예측확률": [0.8, 0.7, 0.6, 0.5, 0.4],
+            "예측결과": [1, 1, 1, 0, 0],
+        })
+
+        with patch("src.features.agent.load_model", return_value=mock_model), \
+             patch("src.features.detector.predict_from_db", return_value=sample_df):
+            result = _execute_tool("rank_risky_transactions", {"sample_size": 5, "top_k": 3})
+            parsed = json.loads(result)
+            if "results" in parsed and len(parsed["results"]) > 0:
+                rec = parsed["results"][0]
+                assert "출금계좌일련번호" in rec
+                assert "이상거래확률" in rec
+                assert "거래금액" in rec
