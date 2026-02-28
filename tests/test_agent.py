@@ -14,6 +14,7 @@
 """
 
 import json
+import re
 import numpy as np
 import pytest
 from unittest.mock import MagicMock, patch
@@ -40,8 +41,8 @@ class TestToolsDefinition:
         assert isinstance(TOOLS, list)
 
     def test_tools_count(self):
-        """도구가 정확히 6개이어야 한다 (detect_aml_patterns 추가)."""
-        assert len(TOOLS) == 6
+        """도구가 정확히 8개이어야 한다 (get_account_profile, get_fraud_type_summary 추가)."""
+        assert len(TOOLS) == 8
 
     def test_tools_have_required_structure(self):
         """각 도구가 type과 function 키를 가져야 한다."""
@@ -60,6 +61,8 @@ class TestToolsDefinition:
             "analyze_network",
             "get_statistics",
             "detect_aml_patterns",
+            "get_account_profile",
+            "get_fraud_type_summary",
         }
         assert names == expected
 
@@ -655,7 +658,6 @@ class TestBuildStrReport:
 
     def test_표제부_보고일자_format(self):
         """표제부.보고일자가 YYYY-MM-DD 형식이어야 한다."""
-        import re
         result = self._call()
         assert re.match(r"^\d{4}-\d{2}-\d{2}$", result["표제부"]["보고일자"])
 
@@ -904,7 +906,6 @@ class TestExecuteToolGenerateStrEnhanced:
 
     def test_str_contains_보고일자(self):
         """STR 결과에 보고일자가 포함되어야 한다 (표제부 섹션 내부)."""
-        import re
         result = _execute_tool("generate_str", {
             "summary": "의심 거래 분석 완료",
             "fraud_type": "자금세탁",
@@ -1165,3 +1166,119 @@ class TestAnalyzeNetworkHopExpansion:
         parsed = json.loads(result)
         assert isinstance(parsed, dict)
         assert "error" not in parsed or "네트워크" not in parsed.get("error", "")
+
+
+# ──────────────────────────────────────────────
+# get_account_profile 도구 검증
+# ──────────────────────────────────────────────
+class TestGetAccountProfile:
+    """_execute_tool('get_account_profile', ...) 단위 테스트."""
+
+    @pytest.fixture(scope="class")
+    def sample_profile(self):
+        """테스트용 이상거래 계좌의 프로파일 결과를 반환한다."""
+        from src.features.network import get_fraud_accounts
+        accounts = get_fraud_accounts()
+        account_id = int(accounts["계좌"].iloc[0])
+        result = _execute_tool("get_account_profile", {"account_id": account_id})
+        return json.loads(result), account_id
+
+    def test_returns_dict(self, sample_profile):
+        """유효한 계좌 ID로 호출하면 dict를 반환해야 한다."""
+        parsed, _ = sample_profile
+        assert isinstance(parsed, dict)
+
+    def test_returns_expected_keys(self, sample_profile):
+        """결과 dict에 필수 키가 포함되어야 한다."""
+        parsed, _ = sample_profile
+        if "error" not in parsed and "안내" not in parsed:
+            for key in ("account_id", "total_count", "total_amount", "fraud_count", "fraud_ratio"):
+                assert key in parsed, f"키 '{key}'가 결과에 없습니다"
+
+    def test_unknown_account_empty(self):
+        """존재하지 않는 계좌 ID는 안내 메시지를 반환해야 한다."""
+        result = _execute_tool("get_account_profile", {"account_id": 0})
+        parsed = json.loads(result)
+        assert isinstance(parsed, dict)
+        # 거래가 없으면 안내 메시지가 있거나 total_count == 0
+        if "안내" not in parsed:
+            assert parsed.get("total_count", 0) == 0
+
+    def test_missing_account_id_returns_error(self):
+        """account_id 없이 호출하면 에러를 반환해야 한다."""
+        result = _execute_tool("get_account_profile", {})
+        parsed = json.loads(result)
+        assert "error" in parsed
+
+    def test_fraud_ratio_in_range(self, sample_profile):
+        """fraud_ratio가 0~1 범위 내에 있어야 한다."""
+        parsed, _ = sample_profile
+        if "fraud_ratio" in parsed:
+            assert 0.0 <= parsed["fraud_ratio"] <= 1.0
+
+    def test_top_counterparts_is_list(self, sample_profile):
+        """top_counterparts가 리스트여야 한다."""
+        parsed, _ = sample_profile
+        if "top_counterparts" in parsed:
+            assert isinstance(parsed["top_counterparts"], list)
+            assert len(parsed["top_counterparts"]) <= 5
+
+
+# ──────────────────────────────────────────────
+# get_fraud_type_summary 도구 검증
+# ──────────────────────────────────────────────
+class TestGetFraudTypeSummary:
+    """_execute_tool('get_fraud_type_summary', ...) 단위 테스트."""
+
+    def test_valid_type_returns_dict(self):
+        """유효한 fraud_type(4=보이스피싱)으로 호출하면 dict를 반환해야 한다."""
+        result = _execute_tool("get_fraud_type_summary", {"fraud_type": 4})
+        parsed = json.loads(result)
+        assert isinstance(parsed, dict)
+
+    def test_returns_expected_keys(self):
+        """결과 dict에 필수 키가 포함되어야 한다."""
+        result = _execute_tool("get_fraud_type_summary", {"fraud_type": 1})
+        parsed = json.loads(result)
+        if "error" not in parsed and "안내" not in parsed:
+            for key in ("type_code", "type_name", "total_count", "total_amount"):
+                assert key in parsed, f"키 '{key}'가 결과에 없습니다"
+
+    def test_type_name_matches_code(self):
+        """type_name이 fraud_type 코드에 맞는 이름을 반환해야 한다."""
+        expected_names = {
+            1: "자금세탁", 2: "신규거래처", 3: "대포통장",
+            4: "보이스피싱", 5: "불법도박", 6: "유사수신", 7: "기타",
+        }
+        for code, name in expected_names.items():
+            result = _execute_tool("get_fraud_type_summary", {"fraud_type": code})
+            parsed = json.loads(result)
+            if "type_name" in parsed:
+                assert parsed["type_name"] == name, f"코드 {code}의 type_name 불일치"
+
+    def test_invalid_type_returns_error(self):
+        """범위 밖(0, 8) fraud_type은 에러를 반환해야 한다."""
+        for bad_type in (0, 8, -1):
+            result = _execute_tool("get_fraud_type_summary", {"fraud_type": bad_type})
+            parsed = json.loads(result)
+            assert "error" in parsed, f"fraud_type={bad_type}에 대해 에러가 반환되어야 합니다"
+
+    def test_missing_fraud_type_returns_error(self):
+        """fraud_type 없이 호출하면 에러를 반환해야 한다."""
+        result = _execute_tool("get_fraud_type_summary", {})
+        parsed = json.loads(result)
+        assert "error" in parsed
+
+    def test_bank_filter_returns_dict(self):
+        """bank_id 옵션 파라미터와 함께 호출해도 dict를 반환해야 한다."""
+        result = _execute_tool("get_fraud_type_summary", {"fraud_type": 4, "bank_id": 1})
+        parsed = json.loads(result)
+        assert isinstance(parsed, dict)
+
+    def test_top_banks_is_list(self):
+        """top_banks가 리스트여야 한다."""
+        result = _execute_tool("get_fraud_type_summary", {"fraud_type": 1})
+        parsed = json.loads(result)
+        if "top_banks" in parsed:
+            assert isinstance(parsed["top_banks"], list)
+            assert len(parsed["top_banks"]) <= 5

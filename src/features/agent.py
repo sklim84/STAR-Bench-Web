@@ -187,6 +187,53 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "get_account_profile",
+            "description": (
+                "특정 계좌의 거래 통계 프로파일을 조회한다. "
+                "총 거래 건수/금액, 이상거래 건수/비율, 주요 거래 시간대, "
+                "주 사용 매체, 상위 거래 상대 계좌 5개를 반환한다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "account_id": {
+                        "type": "integer",
+                        "description": "조회할 계좌 번호 (출금계좌일련번호 기준)",
+                    }
+                },
+                "required": ["account_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_fraud_type_summary",
+            "description": (
+                "이상거래 유형별(자금세탁/보이스피싱/대포통장 등) 현황을 조회한다. "
+                "유형 이름 또는 코드(1~7)로 필터하면 건수·금액 통계와 상위 금융회사를 반환한다. "
+                "코드 매핑: 1=자금세탁, 2=신규거래처, 3=대포통장, 4=보이스피싱, 5=불법도박, 6=유사수신, 7=기타"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "fraud_type": {
+                        "type": "integer",
+                        "description": "이상거래유형 코드 (1~7)",
+                        "enum": [1, 2, 3, 4, 5, 6, 7],
+                    },
+                    "bank_id": {
+                        "type": "integer",
+                        "description": "출금금융회사일련번호 필터 (선택). 지정 시 해당 금융회사의 거래만 조회.",
+                    },
+                },
+                "required": ["fraud_type"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "detect_aml_patterns",
             "description": (
                 "Memgraph 그래프 DB를 활용하여 AML(자금세탁방지) 패턴을 탐지한다. "
@@ -256,10 +303,12 @@ HOFINET(전자금융공동망) 이상거래탐지 데이터를 분석하여 자�
 사용 가능한 도구:
 1. get_statistics: 전체 거래 요약 통계 및 이상거래 유형별 분포 조회 (분석 시작 시 가장 먼저 사용)
 2. query_transactions: HOFINET DB에 SQL 쿼리를 실행하여 거래 통계, 패턴, 특정 계좌 거래 내역 등을 상세 조회
-3. analyze_network: 특정 계좌의 거래 네트워크를 분석하여 연결 계좌 수, 이상거래 관련 여부 파악 (N-hop 심층 탐색 지원)
-4. detect_aml_patterns: Memgraph 그래프 DB를 활용한 AML 패턴 탐지 (순환거래, 레이어링, 대포통장, 최단경로, 위험도 산출)
-5. predict_fraud: XGBoost 모델로 특정 거래의 이상거래 확률을 예측
-6. generate_str: 분석 결과를 의심거래보고서(STR) 양식으로 작성
+3. get_account_profile: 특정 계좌의 거래 통계 프로파일 조회 (건수/금액/이상거래비율/주요시간대/상위거래상대)
+4. get_fraud_type_summary: 이상거래유형별 현황 조회 (건수·금액 통계, 상위 금융회사). 코드: 1=자금세탁, 2=신규거래처, 3=대포통장, 4=보이스피싱, 5=불법도박, 6=유사수신, 7=기타
+5. analyze_network: 특정 계좌의 거래 네트워크를 분석하여 연결 계좌 수, 이상거래 관련 여부 파악 (N-hop 심층 탐색 지원)
+6. detect_aml_patterns: Memgraph 그래프 DB를 활용한 AML 패턴 탐지 (순환거래, 레이어링, 대포통장, 최단경로, 위험도 산출)
+7. predict_fraud: XGBoost 모델로 특정 거래의 이상거래 확률을 예측
+8. generate_str: 분석 결과를 의심거래보고서(STR) 양식으로 작성
 
 권장 분석 절차:
 1. get_statistics로 전체 현황 파악
@@ -357,12 +406,14 @@ _패턴_VI항목_MAP = {
 }
 
 _도구설명_MAP = {
-    "query_transactions": "HOFINET DB 거래 데이터 직접 조회",
-    "predict_fraud":      "XGBoost 이상거래 확률 모델 예측",
-    "analyze_network":    "계좌 거래 네트워크 분석",
-    "get_statistics":     "전체 통계 대시보드 조회",
-    "detect_aml_patterns": "Memgraph 그래프 DB AML 패턴 탐지",
-    "generate_str":       "STR 보고서 생성",
+    "query_transactions":    "HOFINET DB 거래 데이터 직접 조회",
+    "predict_fraud":         "XGBoost 이상거래 확률 모델 예측",
+    "analyze_network":       "계좌 거래 네트워크 분석",
+    "get_statistics":        "전체 통계 대시보드 조회",
+    "get_account_profile":   "계좌 거래 통계 프로파일 조회",
+    "get_fraud_type_summary": "이상거래유형별 현황 조회",
+    "detect_aml_patterns":   "Memgraph 그래프 DB AML 패턴 탐지",
+    "generate_str":          "STR 보고서 생성",
 }
 
 
@@ -521,6 +572,10 @@ def _execute_tool(name: str, arguments: dict) -> str:
             return _tool_analyze_network(arguments)
         elif name == "get_statistics":
             return _tool_get_statistics()
+        elif name == "get_account_profile":
+            return _tool_get_account_profile(arguments)
+        elif name == "get_fraud_type_summary":
+            return _tool_get_fraud_type_summary(arguments)
         elif name == "detect_aml_patterns":
             return _tool_detect_aml_patterns(arguments)
         else:
@@ -838,6 +893,234 @@ def _tool_get_statistics() -> str:
 
     return json.dumps(
         {"요약통계": summary_dict, "이상거래유형별분포": fraud_types},
+        ensure_ascii=False,
+    )
+
+
+def _tool_get_account_profile(arguments: dict) -> str:
+    account_id = arguments.get("account_id")
+    if account_id is None:
+        return json.dumps({"error": "account_id가 필요합니다."}, ensure_ascii=False)
+
+    try:
+        aid = int(account_id)
+    except (TypeError, ValueError):
+        return json.dumps({"error": "account_id는 정수여야 합니다."}, ensure_ascii=False)
+
+    try:
+        # 기본 집계: 출금 방향
+        out_df = query(
+            "SELECT COUNT(*) AS cnt, SUM(거래금액) AS total_amount, "
+            "SUM(이상거래여부) AS fraud_cnt "
+            "FROM hofinet WHERE 출금계좌일련번호 = $aid",
+            {"aid": aid},
+        )
+        # 입금 방향
+        in_df = query(
+            "SELECT COUNT(*) AS cnt, SUM(거래금액) AS total_amount, "
+            "SUM(이상거래여부) AS fraud_cnt "
+            "FROM hofinet WHERE 입금계좌일련번호 = $aid",
+            {"aid": aid},
+        )
+
+        out_row = out_df.iloc[0] if out_df is not None and not out_df.empty else None
+        in_row = in_df.iloc[0] if in_df is not None and not in_df.empty else None
+
+        total_count = int((out_row["cnt"] if out_row is not None else 0) +
+                          (in_row["cnt"] if in_row is not None else 0))
+        total_amount = int((out_row["total_amount"] if out_row is not None else 0) or 0) + \
+                       int((in_row["total_amount"] if in_row is not None else 0) or 0)
+        fraud_count = int((out_row["fraud_cnt"] if out_row is not None else 0) or 0) + \
+                      int((in_row["fraud_cnt"] if in_row is not None else 0) or 0)
+        fraud_ratio = round(fraud_count / total_count, 4) if total_count > 0 else 0.0
+
+        if total_count == 0:
+            return json.dumps(
+                {"account_id": aid, "안내": "해당 계좌의 거래 내역이 없습니다."},
+                ensure_ascii=False,
+            )
+
+        # 주요 거래 시간대 (출금 기준)
+        hour_df = query(
+            "SELECT 거래시간대, COUNT(*) AS cnt FROM hofinet "
+            "WHERE 출금계좌일련번호 = $aid "
+            "GROUP BY 거래시간대 ORDER BY cnt DESC LIMIT 3",
+            {"aid": aid},
+        )
+        top_hours = hour_df["거래시간대"].tolist() if hour_df is not None and not hour_df.empty else []
+
+        # 주 사용 매체 (출금 기준)
+        media_df = query(
+            "SELECT 매체구분, COUNT(*) AS cnt FROM hofinet "
+            "WHERE 출금계좌일련번호 = $aid "
+            "GROUP BY 매체구분 ORDER BY cnt DESC LIMIT 3",
+            {"aid": aid},
+        )
+        top_media_codes = media_df["매체구분"].tolist() if media_df is not None and not media_df.empty else []
+        top_media = [_매체구분_MAP.get(int(c), f"코드{c}") for c in top_media_codes]
+
+        # 상위 거래 상대 계좌 5개 (출금계좌 기준으로 입금계좌 상대)
+        cp_df = query(
+            "SELECT 입금계좌일련번호 AS counterpart_id, "
+            "COUNT(*) AS tx_count, SUM(거래금액) AS total_amount "
+            "FROM hofinet WHERE 출금계좌일련번호 = $aid "
+            "GROUP BY 입금계좌일련번호 ORDER BY tx_count DESC LIMIT 5",
+            {"aid": aid},
+        )
+        top_counterparts = []
+        if cp_df is not None and not cp_df.empty:
+            for _, row in cp_df.iterrows():
+                top_counterparts.append({
+                    "account_id": int(row["counterpart_id"]),
+                    "count": int(row["tx_count"]),
+                    "amount": int(row["total_amount"] or 0),
+                })
+
+    except Exception as exc:
+        return json.dumps(
+            {"error": f"계좌 프로파일 조회 오류: {str(exc)}"},
+            ensure_ascii=False,
+        )
+
+    return json.dumps(
+        {
+            "account_id": aid,
+            "total_count": total_count,
+            "total_amount": total_amount,
+            "fraud_count": fraud_count,
+            "fraud_ratio": fraud_ratio,
+            "top_hours": top_hours,
+            "top_media": top_media,
+            "top_counterparts": top_counterparts,
+        },
+        ensure_ascii=False,
+    )
+
+
+def _tool_get_fraud_type_summary(arguments: dict) -> str:
+    fraud_type = arguments.get("fraud_type")
+    if fraud_type is None:
+        return json.dumps({"error": "fraud_type이 필요합니다."}, ensure_ascii=False)
+
+    try:
+        ftype = int(fraud_type)
+    except (TypeError, ValueError):
+        return json.dumps({"error": "fraud_type은 1~7 사이의 정수여야 합니다."}, ensure_ascii=False)
+
+    if ftype not in range(1, 8):
+        return json.dumps(
+            {"error": f"fraud_type({ftype})은 1~7 범위여야 합니다."},
+            ensure_ascii=False,
+        )
+
+    bank_id_raw = arguments.get("bank_id")
+    bid = int(bank_id_raw) if bank_id_raw is not None else None
+
+    try:
+        # 기본 집계
+        if bid is not None:
+            agg_df = query(
+                "SELECT COUNT(*) AS total_count, SUM(거래금액) AS total_amount, "
+                "AVG(거래금액) AS avg_amount "
+                "FROM hofinet "
+                "WHERE 이상거래여부 = 1 AND 이상거래유형 = $ftype "
+                "AND 출금금융회사일련번호 = $bid",
+                {"ftype": ftype, "bid": bid},
+            )
+        else:
+            agg_df = query(
+                "SELECT COUNT(*) AS total_count, SUM(거래금액) AS total_amount, "
+                "AVG(거래금액) AS avg_amount "
+                "FROM hofinet WHERE 이상거래여부 = 1 AND 이상거래유형 = $ftype",
+                {"ftype": ftype},
+            )
+
+        if agg_df is None or agg_df.empty:
+            return json.dumps(
+                {
+                    "type_code": ftype,
+                    "type_name": _이상거래유형_MAP.get(ftype, "기타"),
+                    "안내": "해당 유형의 이상거래가 없습니다.",
+                },
+                ensure_ascii=False,
+            )
+
+        row = agg_df.iloc[0]
+        total_count = int(row["total_count"] or 0)
+        total_amount = int(row["total_amount"] or 0)
+        avg_amount = round(float(row["avg_amount"] or 0), 2)
+
+        if total_count == 0:
+            return json.dumps(
+                {
+                    "type_code": ftype,
+                    "type_name": _이상거래유형_MAP.get(ftype, "기타"),
+                    "안내": "해당 유형의 이상거래가 없습니다.",
+                },
+                ensure_ascii=False,
+            )
+
+        # 상위 금융회사
+        if bid is not None:
+            bank_df = query(
+                "SELECT 출금금융회사일련번호 AS bank_id, COUNT(*) AS cnt "
+                "FROM hofinet WHERE 이상거래여부 = 1 AND 이상거래유형 = $ftype "
+                "AND 출금금융회사일련번호 = $bid "
+                "GROUP BY 출금금융회사일련번호 ORDER BY cnt DESC LIMIT 5",
+                {"ftype": ftype, "bid": bid},
+            )
+        else:
+            bank_df = query(
+                "SELECT 출금금융회사일련번호 AS bank_id, COUNT(*) AS cnt "
+                "FROM hofinet WHERE 이상거래여부 = 1 AND 이상거래유형 = $ftype "
+                "GROUP BY 출금금융회사일련번호 ORDER BY cnt DESC LIMIT 5",
+                {"ftype": ftype},
+            )
+
+        top_banks = []
+        if bank_df is not None and not bank_df.empty:
+            for _, brow in bank_df.iterrows():
+                top_banks.append({
+                    "bank_id": int(brow["bank_id"]),
+                    "count": int(brow["cnt"]),
+                })
+
+        # 샘플 날짜 (최신 5개)
+        if bid is not None:
+            date_df = query(
+                "SELECT DISTINCT 거래일자 FROM hofinet "
+                "WHERE 이상거래여부 = 1 AND 이상거래유형 = $ftype "
+                "AND 출금금융회사일련번호 = $bid "
+                "ORDER BY 거래일자 DESC LIMIT 5",
+                {"ftype": ftype, "bid": bid},
+            )
+        else:
+            date_df = query(
+                "SELECT DISTINCT 거래일자 FROM hofinet "
+                "WHERE 이상거래여부 = 1 AND 이상거래유형 = $ftype "
+                "ORDER BY 거래일자 DESC LIMIT 5",
+                {"ftype": ftype},
+            )
+
+        sample_dates = date_df["거래일자"].tolist() if date_df is not None and not date_df.empty else []
+
+    except Exception as exc:
+        return json.dumps(
+            {"error": f"이상거래유형 조회 오류: {str(exc)}"},
+            ensure_ascii=False,
+        )
+
+    return json.dumps(
+        {
+            "type_code": ftype,
+            "type_name": _이상거래유형_MAP.get(ftype, "기타"),
+            "total_count": total_count,
+            "total_amount": total_amount,
+            "avg_amount": avg_amount,
+            "top_banks": top_banks,
+            "sample_dates": sample_dates,
+            "bank_filter": bid,
+        },
         ensure_ascii=False,
     )
 
