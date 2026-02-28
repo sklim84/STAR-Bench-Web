@@ -27,6 +27,29 @@ docker-compose up -d                                    # Memgraph 실행 (그�
 python -c "from src.data.graph_etl import run_etl; print(run_etl())"  # DuckDB → Memgraph ETL
 ```
 
+**벤치마크 (`_paper/benchmarks/`)**:
+```bash
+# mock 기반 (빠름, OPENAI_API_KEY 불필요)
+pytest _paper/benchmarks/ -v -m "not integration and not memgraph"
+
+# E2E (OPENAI_API_KEY 필요, 실제 API 호출)
+pytest _paper/benchmarks/ -v -m "integration"
+
+# 전체 리포트 생성 (강건성 + STR 품질)
+python _paper/benchmarks/run_benchmark.py --output _paper/results/benchmark_report.json
+
+# BFCL 스타일 행위능력 벤치마크 포함
+python _paper/benchmarks/run_benchmark.py --include-behavior --output _paper/results/benchmark_report.json
+```
+
+**환경 변수** (`.env` 파일 또는 환경에 설정):
+```
+OPENAI_API_KEY=...           # 기능4 에이전트, E2E 벤치마크에 필요
+ANTHROPIC_API_KEY=...        # 향후 Claude 모델 비교 시 필요
+MEMGRAPH_HOST=localhost      # 기본값, 변경 시 설정
+MEMGRAPH_PORT=7687           # 기본값
+```
+
 ## Architecture
 
 ### 레이어 구조
@@ -64,7 +87,7 @@ DuckDB(분석/집계)와 Memgraph(그래프 패턴 탐지)가 공존한다. Memg
 - **기능1 (Dashboard)**: 글로벌 필터(`filters=None` 파라미터) 패턴. 모든 쿼리 함수가 동일 필터 인터페이스 지원
 - **기능2 (Network)**: DuckDB+NetworkX 함수(중심성, 커뮤니티) + Memgraph Cypher 함수(순환거래, 레이어링, 대포통장, N-hop, 최단경로, 시간 윈도우, 위험도). UI 5개 탭 + AML 패턴 탐지 탭(6개 서브탭)
 - **기능3 (Detector)**: XGBoost 모델. 학습 피처: `["거래시간대", "출금금융회사일련번호", "입금금융회사일련번호", "자금구분", "매체구분", "거래금액"]`. 모델 저장: `_models/xgb_detector.joblib`
-- **기능4 (Agent)**: OpenAI `gpt-4o-mini` + function calling. 도구 6개(`query_transactions`, `predict_fraud`, `generate_str`, `analyze_network`, `get_statistics`, `detect_aml_patterns`). 최대 5라운드 tool calling. `generate_str`은 STR 공식 양식 I~VII 섹션 구조로 출력하며 `transactions`(거래 레코드), `fraud_probability`(확률 0~1→의심강도 1~5), `aml_patterns`(탐지 패턴) 파라미터를 통해 자동 추출
+- **기능4 (Agent)**: OpenAI `gpt-4o-mini` + function calling. 도구 11개, 최대 5라운드 tool calling. `TOOLS` 리스트가 `src/features/agent.py` 상단에 정의됨. `generate_str`은 STR 공식 양식 I~VII 섹션 구조로 출력하며 `transactions`(거래 레코드), `fraud_probability`(확률 0~1→의심강도 1~5), `aml_patterns`(탐지 패턴) 파라미터를 통해 자동 추출. 11개 도구: `get_statistics`, `query_transactions`, `get_account_profile`, `get_fraud_type_summary`, `compare_periods`, `get_institution_report`, `rank_risky_transactions`, `analyze_network`, `detect_aml_patterns`, `predict_fraud`, `generate_str`
 
 ### 새 기능 추가 패턴
 
@@ -132,3 +155,23 @@ def detect_something(...):
 - 테스트 네이밍: `Test<FunctionName>::test_<description>` 패턴 사용
 - Memgraph 의존 함수는 `unittest.mock.patch`로 `graph_db` 모킹하여 테스트
 - **DuckDB 격리**: `tests/conftest.py`의 `patch_db_connection` fixture(autouse, session scope)가 `src/data/db._conn`을 in-memory DuckDB로 교체한다. 파일 기반 DuckDB는 단일 프로세스만 write 모드로 열 수 있으므로 앱 실행 중 pytest를 돌리면 파일 잠금 충돌이 발생한다 — 앱을 종료한 뒤 테스트를 실행할 것
+- `agent.py`가 `from src.features.detector import load_model`로 import하므로, 테스트에서 load_model 모킹 시 `src.features.agent.load_model`을 패치해야 함 (`src.features.detector.load_model` 패치 무효)
+
+## Research (`_paper/`)
+
+논문 작성 목적의 별도 공간. 웹 서비스 코드(`src/`, `_pages/`)와 독립적으로 관리한다.
+
+```
+_paper/
+  DESIGN.md        — 연구 대전제: 5단계 파이프라인, 가설(H1~H5), 벤치마크 설계 근거
+  ref_notes.md     — 참조 자료 메모 (KA-008 구현 패턴, BFCL/OrchestrationBench 요약)
+  benchmarks/      — 에이전트 행위능력 벤치마크 (11개 도구, 4개 카테고리)
+    dataset/       — 케이스 JSON 파일 (도구별 cases_<tool>.json)
+    pytest.ini     — bench_*.py 수집 설정 (bench_* 함수는 run_benchmark.py에서 직접 호출)
+  references/      — 참조 논문 PDF (BFCL ICML 2025, OrchestrationBench ICLR 2026)
+  results/         — 벤치마크 실행 결과물
+```
+
+벤치마크 케이스 JSON 구조: `[{"question": "...", "expected_tool_call": {"name": "...", "arguments": {...}}}]`
+
+`_paper/benchmarks/conftest.py`가 `tests/conftest.py`와 동일한 DuckDB in-memory 패치를 독립 적용한다 (`pytest.ini` 위치 때문에 프로젝트 루트 conftest와 격리됨).
