@@ -37,8 +37,8 @@ init_database()
 # ------------------------------------------------------------------
 selected = option_menu(
     menu_title=None,
-    options=["홈", "대시보드", "네트워크", "탐지", "에이전트"],
-    icons=["house-fill", "bar-chart-fill", "diagram-3-fill", "robot", "chat-dots-fill"],
+    options=["홈", "대시보드", "네트워크", "탐지", "CTR", "위험평가", "모니터링", "에이전트"],
+    icons=["house-fill", "bar-chart-fill", "diagram-3-fill", "robot", "cash-coin", "shield-check", "bell-fill", "chat-dots-fill"],
     default_index=0,
     orientation="horizontal",
     styles={
@@ -144,6 +144,21 @@ if selected == "홈":
             <div class="f-desc">XGBoost 모델 기반 이상거래 확률 예측, 모델 학습·평가 및 특성 중요도 분석</div>
         </div>
         <div class="feature-card">
+            <span class="f-icon">💰</span>
+            <div class="f-name">CTR</div>
+            <div class="f-desc">고액현금거래보고(CTR) 대상 조회 및 분할거래(Structuring) 탐지</div>
+        </div>
+        <div class="feature-card">
+            <span class="f-icon">🛡️</span>
+            <div class="f-name">위험평가</div>
+            <div class="f-desc">5개 행위 지표 기반 계좌 위험도 산출 (0~100점) 및 고위험 계좌 랭킹</div>
+        </div>
+        <div class="feature-card">
+            <span class="f-icon">🔔</span>
+            <div class="f-name">모니터링</div>
+            <div class="f-desc">5개 규칙(심야대량·다건·정액·기관집중·패턴급변) 기반 의심거래 탐지</div>
+        </div>
+        <div class="feature-card">
             <span class="f-icon">💬</span>
             <div class="f-name">에이전트</div>
             <div class="f-desc">AI 에이전트와 대화로 거래 조회·분석하고 의심거래보고서(STR) 자동 작성</div>
@@ -161,6 +176,18 @@ elif selected == "네트워크":
 
 elif selected == "탐지":
     from _pages.detection_page import render
+    render()
+
+elif selected == "CTR":
+    from _pages.ctr_page import render
+    render()
+
+elif selected == "위험평가":
+    from _pages.risk_page import render
+    render()
+
+elif selected == "모니터링":
+    from _pages.monitoring_page import render
     render()
 
 elif selected == "에이전트":

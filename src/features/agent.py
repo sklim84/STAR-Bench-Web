@@ -25,6 +25,19 @@ from src.features.network import (
     find_shortest_path,
     compute_risk_score,
 )
+from src.features.ctr_monitor import (
+    get_ctr_candidates,
+    detect_structuring,
+)
+from src.features.risk_scorer import score_account as _score_account_risk
+from src.features.monitoring import (
+    detect_nighttime_bulk,
+    detect_rapid_fire,
+    detect_round_amounts,
+    detect_institution_concentration,
+    detect_pattern_change,
+    run_all_rules,
+)
 
 
 TOOLS = [
@@ -376,6 +389,107 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "detect_ctr_candidates",
+            "description": (
+                "CTR(고액현금거래보고) 대상 거래를 조회하거나 분할거래(structuring) 의심 패턴을 탐지한다. "
+                "mode=high_value: 1,000만원 이상 고액거래 조회. "
+                "mode=structuring: 동일 계좌가 동일일에 보고 기준 미만으로 쪼개서 거래한 분할거래 의심 건 탐지."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "description": "조회 모드: high_value(고액거래) 또는 structuring(분할거래 탐지)",
+                        "enum": ["high_value", "structuring"],
+                    },
+                    "date_from": {
+                        "type": "integer",
+                        "description": "시작일 (YYYYMMDD 정수, 예: 20240101)",
+                    },
+                    "date_to": {
+                        "type": "integer",
+                        "description": "종료일 (YYYYMMDD 정수, 예: 20240331)",
+                    },
+                    "threshold": {
+                        "type": "integer",
+                        "description": "CTR 보고 기준 금액 (기본 10,000,000원)",
+                        "default": 10000000,
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "최대 결과 수 (기본 20)",
+                        "default": 20,
+                    },
+                },
+                "required": ["mode"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "score_account_risk",
+            "description": (
+                "특정 계좌의 위험도를 5개 행위 지표(심야거래비율, 금액이상도, 거래상대다양성, "
+                "거래속도변화, 이상거래이력) 기반으로 0~100점으로 평가한다. "
+                "위험등급(높음/중간/낮음)과 각 컴포넌트 점수를 반환한다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "account_id": {
+                        "type": "integer",
+                        "description": "위험도를 평가할 계좌 번호 (출금계좌일련번호)",
+                    },
+                },
+                "required": ["account_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "detect_monitoring_alerts",
+            "description": (
+                "규칙 기반 거래 모니터링 알림을 탐지한다. "
+                "R001=심야대량거래, R002=동일일다건거래, R003=정액거래패턴, "
+                "R004=기관집중거래, R005=거래패턴급변. "
+                "rule_id=all이면 전체 규칙을 실행한다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "rule_id": {
+                        "type": "string",
+                        "description": "실행할 규칙 ID",
+                        "enum": ["all", "R001", "R002", "R003", "R004", "R005"],
+                    },
+                    "date_from": {
+                        "type": "integer",
+                        "description": "시작일 (YYYYMMDD 정수, 예: 20240101)",
+                    },
+                    "date_to": {
+                        "type": "integer",
+                        "description": "종료일 (YYYYMMDD 정수, 예: 20240331)",
+                    },
+                    "account_id": {
+                        "type": "integer",
+                        "description": "특정 계좌로 한정 (선택)",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "최대 결과 수 (기본 20)",
+                        "default": 20,
+                    },
+                },
+                "required": ["rule_id"],
+            },
+        },
+    },
 ]
 
 SYSTEM_PROMPT = """당신은 자금세탁방지(AML) 전문 분석가입니다.
@@ -393,14 +507,20 @@ HOFINET(전자금융공동망) 이상거래탐지 데이터를 분석하여 자�
 9. detect_aml_patterns: Memgraph 그래프 DB를 활용한 AML 패턴 탐지 (순환거래, 레이어링, 대포통장, 최단경로, 위험도 산출)
 10. predict_fraud: XGBoost 모델로 특정 거래의 이상거래 확률을 예측
 11. generate_str: 분석 결과를 의심거래보고서(STR) 양식으로 작성
+12. detect_ctr_candidates: CTR(고액현금거래보고) 대상 고액거래 조회 또는 분할거래(structuring) 탐지. mode=high_value(1천만원 이상 고액거래), mode=structuring(동일계좌 동일일 분할거래 의심)
+13. score_account_risk: 계좌의 위험도를 5개 행위 지표(심야거래비율, 금액이상도, 거래상대다양성, 거래속도변화, 이상거래이력) 기반 0~100점으로 평가
+14. detect_monitoring_alerts: 규칙 기반 거래 모니터링 알림 탐지 (R001 심야대량, R002 다건, R003 정액, R004 기관집중, R005 패턴급변, all=전체)
 
 권장 분석 절차:
 1. get_statistics로 전체 현황 파악
 2. query_transactions으로 의심 거래 상세 조회
-3. analyze_network으로 계좌 네트워크 분석 (N-hop 심층 탐색 지원)
-4. detect_aml_patterns으로 순환거래/레이어링/대포통장 패턴 탐지
-5. predict_fraud로 이상거래 확률 예측
-6. 충분한 근거가 확보된 경우에만 generate_str로 STR 작성
+3. detect_ctr_candidates로 CTR 대상 고액거래 또는 분할거래 탐지
+4. score_account_risk로 계좌 위험도 평가
+5. detect_monitoring_alerts로 규칙 기반 모니터링 알림 탐지
+6. analyze_network으로 계좌 네트워크 분석 (N-hop 심층 탐색 지원)
+7. detect_aml_patterns으로 순환거래/레이어링/대포통장 패턴 탐지
+8. predict_fraud로 이상거래 확률 예측
+9. 충분한 근거가 확보된 경우에만 generate_str로 STR 작성
 
 STR 작성 시 주의사항:
 - 반드시 query_transactions로 근거 데이터를 먼저 조회한 후 STR을 작성하세요
@@ -501,6 +621,9 @@ _도구설명_MAP = {
     "get_institution_report": "금융회사 종합 현황 보고",
     "rank_risky_transactions": "XGBoost 모델 배치 예측 위험도 랭킹",
     "generate_str":          "STR 보고서 생성",
+    "detect_ctr_candidates": "CTR 고액거래/분할거래 탐지",
+    "score_account_risk":    "계좌 위험도 평가 (5개 행위 지표)",
+    "detect_monitoring_alerts": "규칙 기반 거래 모니터링 알림 탐지",
 }
 
 
@@ -671,6 +794,12 @@ def _execute_tool(name: str, arguments: dict) -> str:
             return _tool_rank_risky_transactions(arguments)
         elif name == "detect_aml_patterns":
             return _tool_detect_aml_patterns(arguments)
+        elif name == "detect_ctr_candidates":
+            return _tool_detect_ctr_candidates(arguments)
+        elif name == "score_account_risk":
+            return _tool_score_account_risk(arguments)
+        elif name == "detect_monitoring_alerts":
+            return _tool_detect_monitoring_alerts(arguments)
         else:
             return json.dumps({"error": f"알 수 없는 도구: {name}"}, ensure_ascii=False)
     except Exception as exc:
@@ -1424,6 +1553,162 @@ def _tool_rank_risky_transactions(arguments: dict) -> str:
         },
         ensure_ascii=False,
     )
+
+
+# ---------------------------------------------------------------------------
+# Tool 12: detect_ctr_candidates
+# ---------------------------------------------------------------------------
+
+
+def _tool_detect_ctr_candidates(arguments: dict) -> str:
+    mode = arguments.get("mode", "")
+    date_from = arguments.get("date_from")
+    date_to = arguments.get("date_to")
+    threshold = int(arguments.get("threshold", 10_000_000))
+    limit = min(int(arguments.get("limit", 20)), 100)
+
+    if mode not in ("high_value", "structuring"):
+        return json.dumps(
+            {"error": "mode는 'high_value' 또는 'structuring'이어야 합니다."},
+            ensure_ascii=False,
+        )
+
+    try:
+        if mode == "high_value":
+            df = get_ctr_candidates(
+                date_from=date_from, date_to=date_to, limit=limit,
+            )
+            if df.empty:
+                return json.dumps(
+                    {"mode": "high_value", "안내": "조건에 맞는 고액거래가 없습니다.", "결과": []},
+                    ensure_ascii=False,
+                )
+            records = json.loads(df.to_json(orient="records", force_ascii=False))
+            return json.dumps(
+                {"mode": "high_value", "건수": len(records), "결과": records},
+                ensure_ascii=False,
+            )
+        else:  # structuring
+            df = detect_structuring(
+                date_from=date_from, date_to=date_to,
+                threshold=threshold, limit=limit,
+            )
+            if df.empty:
+                return json.dumps(
+                    {"mode": "structuring", "안내": "분할거래 의심 건이 없습니다.", "결과": []},
+                    ensure_ascii=False,
+                )
+            records = json.loads(df.to_json(orient="records", force_ascii=False))
+            return json.dumps(
+                {
+                    "mode": "structuring",
+                    "threshold": threshold,
+                    "건수": len(records),
+                    "결과": records,
+                },
+                ensure_ascii=False,
+            )
+    except Exception as exc:
+        return json.dumps(
+            {"error": f"CTR 탐지 오류: {str(exc)}"},
+            ensure_ascii=False,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tool 13: score_account_risk
+# ---------------------------------------------------------------------------
+
+
+def _tool_score_account_risk(arguments: dict) -> str:
+    account_id = arguments.get("account_id")
+    if account_id is None:
+        return json.dumps({"error": "account_id가 필요합니다."}, ensure_ascii=False)
+
+    try:
+        aid = int(account_id)
+    except (TypeError, ValueError):
+        return json.dumps({"error": "account_id는 정수여야 합니다."}, ensure_ascii=False)
+
+    try:
+        result = _score_account_risk(aid)
+    except Exception as exc:
+        return json.dumps(
+            {"error": f"위험도 평가 오류: {str(exc)}"},
+            ensure_ascii=False,
+        )
+
+    return json.dumps(result, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# Tool 14: detect_monitoring_alerts
+# ---------------------------------------------------------------------------
+
+
+def _tool_detect_monitoring_alerts(arguments: dict) -> str:
+    rule_id = arguments.get("rule_id", "")
+    date_from = arguments.get("date_from")
+    date_to = arguments.get("date_to")
+    limit = min(int(arguments.get("limit", 20)), 100)
+
+    valid_rules = {"all", "R001", "R002", "R003", "R004", "R005"}
+    if rule_id not in valid_rules:
+        return json.dumps(
+            {"error": f"rule_id는 {sorted(valid_rules)} 중 하나여야 합니다."},
+            ensure_ascii=False,
+        )
+
+    try:
+        if rule_id == "all":
+            result = run_all_rules(date_from=date_from, date_to=date_to)
+            return json.dumps({"rule_id": "all", "결과": result}, ensure_ascii=False)
+
+        if rule_id == "R001":
+            df = detect_nighttime_bulk(date_from=date_from, date_to=date_to, limit=limit)
+            label = "심야대량거래"
+        elif rule_id == "R002":
+            df = detect_rapid_fire(date_from=date_from, date_to=date_to, limit=limit)
+            label = "동일일다건거래"
+        elif rule_id == "R003":
+            df = detect_round_amounts(date_from=date_from, date_to=date_to, limit=limit)
+            label = "정액거래패턴"
+        elif rule_id == "R004":
+            df = detect_institution_concentration(limit=limit)
+            label = "기관집중거래"
+        elif rule_id == "R005":
+            if not date_from or not date_to:
+                return json.dumps(
+                    {"error": "R005(거래패턴급변)에는 date_from, date_to가 필요합니다."},
+                    ensure_ascii=False,
+                )
+            span = int(date_to) - int(date_from)
+            base_end = int(date_from) - 1
+            base_start = base_end - span
+            df = detect_pattern_change(
+                base_start=base_start, base_end=base_end,
+                compare_start=int(date_from), compare_end=int(date_to),
+                limit=limit,
+            )
+            label = "거래패턴급변"
+
+        if df.empty:
+            return json.dumps(
+                {"rule_id": rule_id, "규칙명": label, "안내": "탐지된 알림이 없습니다.", "결과": []},
+                ensure_ascii=False,
+            )
+
+        records = json.loads(df.to_json(orient="records", force_ascii=False))
+        return json.dumps(
+            {"rule_id": rule_id, "규칙명": label, "건수": len(records), "결과": records},
+            ensure_ascii=False,
+        )
+
+    except Exception as exc:
+        return json.dumps(
+            {"error": f"모니터링 규칙 실행 오류: {str(exc)}"},
+            ensure_ascii=False,
+        )
 
 
 # ---------------------------------------------------------------------------
