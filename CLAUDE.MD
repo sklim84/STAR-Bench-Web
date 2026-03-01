@@ -29,23 +29,25 @@ python -c "from src.data.graph_etl import run_etl; print(run_etl())"  # DuckDB �
 
 **벤치마크 (`_paper/benchmarks/`)**:
 ```bash
-# mock 기반 (빠름, OPENAI_API_KEY 불필요)
+# mock 기반 (빠름, API 키 불필요)
 pytest _paper/benchmarks/ -v -m "not integration and not memgraph"
 
 # E2E (OPENAI_API_KEY 필요, 실제 API 호출)
 pytest _paper/benchmarks/ -v -m "integration"
 
-# 전체 리포트 생성 (강건성 + STR 품질)
-python _paper/benchmarks/run_benchmark.py --output _paper/results/benchmark_report.json
-
-# BFCL 스타일 행위능력 벤치마크 포함
+# 단일 모델 리포트 (강건성 + STR 품질 + 행위능력)
 python _paper/benchmarks/run_benchmark.py --include-behavior --output _paper/results/benchmark_report.json
+
+# 다중 모델 비교 벤치마크 (권장)
+python _paper/benchmarks/run_multi_model.py --models gpt-4o-mini --output _paper/results/
+python _paper/benchmarks/run_multi_model.py --models claude-haiku-4-5-20251001 --output _paper/results/
+python _paper/benchmarks/run_multi_model.py --comparison-only --output _paper/results/  # 기존 결과로 비교 리포트만
 ```
 
 **환경 변수** (`.env` 파일 또는 환경에 설정):
 ```
-OPENAI_API_KEY=...           # 기능4 에이전트, E2E 벤치마크에 필요
-ANTHROPIC_API_KEY=...        # 향후 Claude 모델 비교 시 필요
+OPENAI_API_KEY=...           # 기능4 에이전트, OpenAI 벤치마크에 필요
+ANTHROPIC_API_KEY=...        # Anthropic 모델 벤치마크에 필요
 MEMGRAPH_HOST=localhost      # 기본값, 변경 시 설정
 MEMGRAPH_PORT=7687           # 기본값
 ```
@@ -164,13 +166,32 @@ def detect_something(...):
 ```
 _paper/
   DESIGN.md        — 연구 대전제: 5단계 파이프라인, 가설(H1~H5), 벤치마크 설계 근거
-  ref_notes.md     — 참조 자료 메모 (KA-008 구현 패턴, BFCL/OrchestrationBench 요약)
-  benchmarks/      — 에이전트 행위능력 벤치마크 (11개 도구, 4개 카테고리)
+  AGENTS.md        — 논문 작성 에이전트 역할 정의 (저자 3 + 심사위원 3)
+  benchmarks/      — 에이전트 행위능력 벤치마크 (11개 도구 × 30건 = 330건)
     dataset/       — 케이스 JSON 파일 (도구별 cases_<tool>.json)
+    run_multi_model.py — 다중 모델 비교 벤치마크 (OpenAI/Anthropic/Ollama 3개 프로바이더)
     pytest.ini     — bench_*.py 수집 설정 (bench_* 함수는 run_benchmark.py에서 직접 호출)
   references/      — 참조 논문 PDF (BFCL ICML 2025, OrchestrationBench ICLR 2026)
-  results/         — 벤치마크 실행 결과물
+  results/         — 벤치마크 실행 결과물 (eval_<model>_*.json, comparison_*.xlsx)
 ```
+
+### 다중 모델 벤치마크 (`run_multi_model.py`)
+
+3개 프로바이더, 7개 모델 레지스트리. 프로바이더별 주의사항:
+- **OpenAI**: gpt-4o-mini, gpt-5-mini. 추론 모델(gpt-5, o1, o3, o4)은 `temperature=0` 미지원 → 자동 스킵. `max_completion_tokens` 사용 (not `max_tokens`)
+- **Anthropic**: claude-haiku-4-5, claude-sonnet-4-5. 도구 스키마의 한글 프로퍼티 키를 영문으로 변환 필요 (`_KO_EN_KEY_MAP`). 응답의 영문 키는 한글로 역변환 (`_EN_KO_KEY_MAP`)
+- **Ollama**: qwen 시리즈. 3단계 폴백 파싱 (json 블록 → 중괄호 매칭 → 직접 JSON 추출)
+
+### 논문 작성 에이전트 (`.claude/agents/paper-*.md`)
+
+| 에이전트 | 역할 | 주요 담당 |
+|---------|------|----------|
+| `paper-author1` | 제1저자 | 실험·구현, Methodology/Results 작성 |
+| `paper-author2` | 제2저자 | 문헌·이론, Related Work/Introduction 작성 |
+| `paper-corresponding` | 교신저자 | 총괄·감수, Abstract/Conclusion 작성 |
+| `paper-reviewer1` | 심사위원1 | 기술 검증 (방법론, 통계, 재현성) |
+| `paper-reviewer2` | 심사위원2 | AML 도메인 (규제, 실무, 윤리) |
+| `paper-reviewer3` | 심사위원3 | NLP/LLM (메트릭, 모델 비교, 기여도) |
 
 벤치마크 케이스 JSON 구조: `[{"question": "...", "expected_tool_call": {"name": "...", "arguments": {...}}}]`
 
