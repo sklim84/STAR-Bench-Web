@@ -175,7 +175,6 @@ def detect_something(...):
 ```
 _paper/
   DESIGN.md        — 연구 대전제: 5단계 파이프라인, 가설(H1~H5), 벤치마크 설계 근거
-  AGENTS.md        — 논문 작성 에이전트 역할 정의 (저자 3 + 심사위원 3)
   benchmarks/      — 에이전트 행위능력 벤치마크 (23개 도구, 24개 카테고리, 총 1,258건)
     dataset/       — 케이스 JSON 파일 (도구별 cases_<tool>.json)
     run_multi_model.py — 다중 모델 비교 벤치마크 (OpenAI/Anthropic/Ollama 3개 프로바이더)
