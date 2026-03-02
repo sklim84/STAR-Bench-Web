@@ -211,13 +211,21 @@ def render():
     except Exception:
         pass
 
-    # ── 세부 분석 탭 ──
-    tab1, tab2, tab3, tab4 = st.tabs(["📈 추이 분석", "🔍 거래 분석", "⚠️ 이상거래 유형", "🏦 금융회사"])
+    # ── 세부 분석 탭 (선택된 탭만 쿼리 실행하여 지연 로딩) ──
+    tab_names = ["📈 추이 분석", "🔍 거래 분석", "⚠️ 이상거래 유형", "🏦 금융회사"]
+    selected_tab = st.radio(
+        "세부 분석",
+        tab_names,
+        horizontal=True,
+        key="dashboard_tab",
+        label_visibility="collapsed",
+    )
+    st.markdown("<br>", unsafe_allow_html=True)
 
     # ─────────────────────────────────────────────
     # 탭1: 추이 분석 – 월별 거래 추이
     # ─────────────────────────────────────────────
-    with tab1:
+    if selected_tab == tab_names[0]:
         st.markdown('<p class="section-header">월별 거래 추이</p>', unsafe_allow_html=True)
         try:
             monthly = get_monthly_trend(filters)
@@ -257,7 +265,7 @@ def render():
     # ─────────────────────────────────────────────
     # 탭2: 거래 분석 – 시간대 / 금액구간 / 매체 / 자금
     # ─────────────────────────────────────────────
-    with tab2:
+    elif selected_tab == tab_names[1]:
         col_left, col_right = st.columns(2)
 
         with col_left:
@@ -402,13 +410,18 @@ def render():
     # ─────────────────────────────────────────────
     # 탭3: 이상거래 유형 – 분포 / 금액 / 히트맵 / 월별추이
     # ─────────────────────────────────────────────
-    with tab3:
+    elif selected_tab == tab_names[2]:
+        fraud_type = get_fraud_type_distribution(filters)
+        type_map = {
+            int(r["이상거래유형"]): f"{int(r['이상거래유형'])}. {r['이상거래설명']}"
+            for _, r in fraud_type.iterrows()
+        } if not fraud_type.empty else {}
+
         col_left3, col_right3 = st.columns(2)
 
         with col_left3:
             st.markdown('<p class="section-header">이상거래 유형별 분포</p>', unsafe_allow_html=True)
             try:
-                fraud_type = get_fraud_type_distribution(filters)
                 if fraud_type.empty:
                     st.info("선택한 조건에 해당하는 이상거래 유형 데이터가 없습니다.")
                 else:
@@ -479,15 +492,6 @@ def render():
                 pivot = heatmap_data.pivot_table(
                     index="이상거래유형", columns="거래시간대", values="건수", fill_value=0
                 )
-                try:
-                    type_desc = get_fraud_type_distribution(filters)
-                    type_map = {
-                        int(r["이상거래유형"]): f"{int(r['이상거래유형'])}. {r['이상거래설명']}"
-                        for _, r in type_desc.iterrows()
-                    }
-                except Exception:
-                    type_map = {}
-
                 y_labels = [type_map.get(int(t), f"유형 {int(t)}") for t in pivot.index]
                 x_labels = [f"{int(h):02d}~{int(h)+3:02d}시" for h in pivot.columns]
 
@@ -579,7 +583,7 @@ def render():
     # ─────────────────────────────────────────────
     # 탭4: 금융회사 – 출금/입금 상위 20
     # ─────────────────────────────────────────────
-    with tab4:
+    elif selected_tab == tab_names[3]:
         st.markdown('<p class="section-header">금융회사별 이상거래 현황 (상위 20)</p>', unsafe_allow_html=True)
         try:
             banks = get_top_banks(filters)

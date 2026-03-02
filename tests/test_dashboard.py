@@ -24,6 +24,9 @@ from src.features.dashboard import (
     get_fraud_amount_by_type,
     get_hourly_fraud_type_heatmap,
     get_fraud_type_monthly_trend,
+    get_trend_analysis,
+    analyze_channel_risk,
+    get_receiving_account_profile,
     _build_filter_conditions,
     _apply_filters,
 )
@@ -801,3 +804,112 @@ class TestFilterHelpers:
         for ym in result["연월"]:
             ym_int = int(ym)
             assert 202301 <= ym_int <= 202312, f"필터 범위를 벗어난 연월: {ym_int}"
+
+
+# ──────────────────────────────────────────────
+# get_trend_analysis (에이전트 도구)
+# ──────────────────────────────────────────────
+class TestGetTrendAnalysis:
+    """get_trend_analysis() 단위 테스트."""
+
+    def test_returns_dataframe_monthly(self):
+        result = get_trend_analysis(unit="monthly")
+        assert isinstance(result, pd.DataFrame)
+
+    def test_returns_dataframe_quarterly(self):
+        result = get_trend_analysis(unit="quarterly")
+        assert isinstance(result, pd.DataFrame)
+
+    def test_expected_columns(self):
+        result = get_trend_analysis(unit="monthly")
+        expected = {"기간", "거래건수", "이상거래건수", "이상거래비율", "총거래금액"}
+        assert expected.issubset(set(result.columns))
+
+    def test_monthly_period_count(self):
+        """월별 분석이 12개월 이상의 기간을 반환하는지 확인."""
+        result = get_trend_analysis(unit="monthly")
+        assert len(result) >= 12
+
+    def test_quarterly_period_count(self):
+        """분기별 분석이 4분기 이상의 기간을 반환하는지 확인."""
+        result = get_trend_analysis(unit="quarterly")
+        assert len(result) >= 4
+
+    def test_date_filter(self):
+        result = get_trend_analysis(
+            unit="monthly", date_from=20240101, date_to=20240630,
+        )
+        assert isinstance(result, pd.DataFrame)
+        assert len(result) <= 12
+
+    def test_total_matches_overall(self):
+        """모든 기간의 거래건수 합이 전체 건수와 일치하는지 확인."""
+        result = get_trend_analysis(unit="monthly")
+        total = int(result["거래건수"].sum())
+        assert total == 4_732_130
+
+
+# ──────────────────────────────────────────────
+# analyze_channel_risk (에이전트 도구)
+# ──────────────────────────────────────────────
+class TestAnalyzeChannelRisk:
+    """analyze_channel_risk() 단위 테스트."""
+
+    def test_returns_dict(self):
+        result = analyze_channel_risk()
+        assert isinstance(result, dict)
+
+    def test_required_keys(self):
+        result = analyze_channel_risk()
+        assert "channel_stats" in result
+        assert "channel_time_cross" in result
+
+    def test_channel_stats_not_empty(self):
+        result = analyze_channel_risk()
+        assert len(result["channel_stats"]) > 0
+
+    def test_channel_stats_keys(self):
+        result = analyze_channel_risk()
+        for item in result["channel_stats"]:
+            assert "매체구분" in item
+            assert "총거래건수" in item
+            assert "이상거래비율" in item
+
+    def test_cross_analysis_not_empty(self):
+        result = analyze_channel_risk()
+        assert len(result["channel_time_cross"]) > 0
+
+    def test_date_filter(self):
+        result = analyze_channel_risk(date_from=20240101, date_to=20240630)
+        assert isinstance(result, dict)
+        assert len(result["channel_stats"]) > 0
+
+
+# ──────────────────────────────────────────────
+# get_receiving_account_profile (에이전트 도구)
+# ──────────────────────────────────────────────
+class TestGetReceivingAccountProfile:
+    """get_receiving_account_profile() 단위 테스트."""
+
+    def test_returns_dict(self):
+        result = get_receiving_account_profile(1234567890)
+        assert isinstance(result, dict)
+
+    def test_required_keys_with_data(self):
+        """데이터가 있는 계좌의 필수 키 확인."""
+        # 먼저 실제 존재하는 입금계좌를 찾는다
+        from src.data.db import query
+        sample = query(
+            "SELECT DISTINCT 입금계좌일련번호 FROM hofinet LIMIT 1"
+        )
+        if not sample.empty:
+            aid = int(sample.iloc[0]["입금계좌일련번호"])
+            result = get_receiving_account_profile(aid)
+            assert result["총거래건수"] > 0
+            assert "상위출금계좌" in result
+            assert "상위출금기관" in result
+
+    def test_nonexistent_account(self):
+        """존재하지 않는 계좌에 대해 안내 메시지를 반환하는지 확인."""
+        result = get_receiving_account_profile(9999999999999)
+        assert result["총거래건수"] == 0

@@ -15,6 +15,8 @@ AML Assistant Platform - 에이전트를 활용하여 자금세탁의심거래�
 | 기능5: CTR 모니터링 (고액현금거래보고) | `_pages/ctr_page.py` | `src/features/ctr_monitor.py` | 완성 |
 | 기능6: 계좌 위험도 평가 (Risk Scoring) | `_pages/risk_page.py` | `src/features/risk_scorer.py` | 완성 |
 | 기능7: 거래 모니터링 규칙 탐지 | `_pages/monitoring_page.py` | `src/features/monitoring.py` | 완성 |
+| 기능8: 자금 흐름 분석 (스머핑/기관간) | — | `src/features/flow_analyzer.py` | 완성 |
+| 기능9: AML 참조 자료 | `_pages/aml_reference_page.py` | `src/features/aml_reference.py` | 완성 |
 
 ## Commands
 
@@ -92,10 +94,11 @@ DuckDB(분석/집계)와 Memgraph(그래프 패턴 탐지)가 공존한다. Memg
 - **기능1 (Dashboard)**: 글로벌 필터(`filters=None` 파라미터) 패턴. 모든 쿼리 함수가 동일 필터 인터페이스 지원
 - **기능2 (Network)**: DuckDB+NetworkX 함수(중심성, 커뮤니티) + Memgraph Cypher 함수(순환거래, 레이어링, 대포통장, N-hop, 최단경로, 시간 윈도우, 위험도). UI 5개 탭 + AML 패턴 탐지 탭(6개 서브탭)
 - **기능3 (Detector)**: XGBoost 모델. 학습 피처: `["거래시간대", "출금금융회사일련번호", "입금금융회사일련번호", "자금구분", "매체구분", "거래금액"]`. 모델 저장: `_models/xgb_detector.joblib`
-- **기능4 (Agent)**: OpenAI `gpt-4o-mini` + function calling. 도구 14개, 최대 5라운드 tool calling. `TOOLS` 리스트가 `src/features/agent.py` 상단에 정의됨. `generate_str`은 STR 공식 양식 I~VII 섹션 구조로 출력하며 `transactions`(거래 레코드), `fraud_probability`(확률 0~1→의심강도 1~5), `aml_patterns`(탐지 패턴) 파라미터를 통해 자동 추출. 14개 도구: `get_statistics`, `query_transactions`, `get_account_profile`, `get_fraud_type_summary`, `compare_periods`, `get_institution_report`, `rank_risky_transactions`, `analyze_network`, `detect_aml_patterns`, `predict_fraud`, `generate_str`, `detect_ctr_candidates`, `score_account_risk`, `detect_monitoring_alerts`
+- **기능4 (Agent)**: OpenAI `gpt-4o-mini` + function calling. 도구 23개, 최대 5라운드 tool calling. `TOOLS` 리스트가 `src/features/agent.py` 상단에 정의됨. `generate_str`은 STR 공식 양식 I~VII 섹션 구조로 출력하며 `transactions`(거래 레코드), `fraud_probability`(확률 0~1→의심강도 1~5), `aml_patterns`(탐지 패턴) 파라미터를 통해 자동 추출. 23개 도구: `get_statistics`, `query_transactions`, `get_account_profile`, `get_fraud_type_summary`, `compare_periods`, `get_institution_report`, `rank_risky_transactions`, `analyze_network`, `detect_aml_patterns`, `predict_fraud`, `generate_str`, `detect_ctr_candidates`, `score_account_risk`, `detect_monitoring_alerts`, `detect_dormant_reactivation`, `detect_smurfing_network`, `get_trend_analysis`, `analyze_channel_risk`, `get_receiving_account_profile`, `analyze_cross_institution_flow`, `lookup_fiu_reference_types`, `validate_str_fields`, `get_aml_glossary`
 - **기능5 (CTR)**: 고액현금거래(1,000만원 이상) 조회 + 분할거래(structuring) 탐지. 동일계좌 동일일 합산액이 기준금액 이상이면서 단건이 기준 미만인 패턴을 탐지
 - **기능6 (Risk)**: 5개 행위 지표 기반 0~100점 위험도 산출. 심야거래비율(0.15), 금액이상도(0.25), 거래상대다양성(0.15), 거래속도변화(0.25), 이상거래이력(0.20). DuckDB만으로 동작
-- **기능7 (Monitoring)**: 5개 규칙 기반 모니터링. R001 심야대량거래, R002 동일일다건거래, R003 정액거래패턴, R004 기관집중거래, R005 거래패턴급변
+- **기능7 (Monitoring)**: 6개 규칙 기반 모니터링. R001 심야대량거래, R002 동일일다건거래, R003 정액거래패턴, R004 기관집중거래, R005 거래패턴급변, R006 휴면계좌재활성화
+- **기능8 (Flow)**: 스머핑 네트워크(자금 수집/분산 패턴) + 기관간 자금 흐름 분석. DuckDB만으로 동작
 
 ### 새 기능 추가 패턴
 
@@ -173,7 +176,7 @@ def detect_something(...):
 _paper/
   DESIGN.md        — 연구 대전제: 5단계 파이프라인, 가설(H1~H5), 벤치마크 설계 근거
   AGENTS.md        — 논문 작성 에이전트 역할 정의 (저자 3 + 심사위원 3)
-  benchmarks/      — 에이전트 행위능력 벤치마크 (14개 도구 × 30건 = 420건)
+  benchmarks/      — 에이전트 행위능력 벤치마크 (23개 도구, 24개 카테고리, 총 1,258건)
     dataset/       — 케이스 JSON 파일 (도구별 cases_<tool>.json)
     run_multi_model.py — 다중 모델 비교 벤치마크 (OpenAI/Anthropic/Ollama 3개 프로바이더)
     pytest.ini     — bench_*.py 수집 설정 (bench_* 함수는 run_benchmark.py에서 직접 호출)

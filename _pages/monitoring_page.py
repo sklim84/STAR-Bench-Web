@@ -36,7 +36,8 @@ def render():
     )
 
     # --- 종합 통계 ---
-    summary = get_monitoring_summary()
+    with st.spinner("데이터 불러오는 중..."):
+        summary = get_monitoring_summary()
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         _metric_card("총 거래 건수", f"{summary['총거래건수']:,}")
@@ -75,12 +76,12 @@ def render():
             )
             fig.update_layout(title="규칙별 탐지 건수")
             _apply_dark(fig)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
             for rule_name, data in results.items():
                 with st.expander(f"{rule_name} ({data['건수']}건)"):
                     if data["상위"]:
-                        st.dataframe(pd.DataFrame(data["상위"]), use_container_width=True)
+                        st.dataframe(pd.DataFrame(data["상위"]), width='stretch')
                     else:
                         st.info("탐지된 건이 없습니다.")
 
@@ -106,8 +107,8 @@ def render():
                 fig = px.histogram(df, x="거래금액", nbins=30, color_discrete_sequence=[LINE_COLOR])
                 fig.update_layout(title="심야 대량거래 금액 분포")
                 _apply_dark(fig)
-                st.plotly_chart(fig, use_container_width=True)
-                st.dataframe(df, use_container_width=True, height=400)
+                st.plotly_chart(fig, width='stretch')
+                st.dataframe(df, width='stretch', height=400)
 
     # ------------------------------------------------------------------
     # 탭2: R002 동일일 다건거래
@@ -135,8 +136,8 @@ def render():
                 )
                 fig.update_layout(title="다건거래: 건수 vs 합산금액")
                 _apply_dark(fig)
-                st.plotly_chart(fig, use_container_width=True)
-                st.dataframe(df, use_container_width=True, height=400)
+                st.plotly_chart(fig, width='stretch')
+                st.dataframe(df, width='stretch', height=400)
 
     # ------------------------------------------------------------------
     # 탭3: R003 정액거래 패턴
@@ -160,7 +161,7 @@ def render():
                 st.info("탐지된 건이 없습니다.")
             else:
                 st.markdown(f"탐지 결과: **{len(df):,}건**")
-                st.dataframe(df, use_container_width=True, height=400)
+                st.dataframe(df, width='stretch', height=400)
 
     # ------------------------------------------------------------------
     # 탭4: R004 기관집중거래
@@ -188,8 +189,8 @@ def render():
                 fig.update_layout(title="기관 집중 비율")
                 fig.update_xaxes(type="category")
                 _apply_dark(fig)
-                st.plotly_chart(fig, use_container_width=True)
-                st.dataframe(df, use_container_width=True, height=400)
+                st.plotly_chart(fig, width='stretch')
+                st.dataframe(df, width='stretch', height=400)
 
     # ------------------------------------------------------------------
     # 탭5: R005 거래패턴 급변
@@ -226,5 +227,5 @@ def render():
                 )
                 fig.update_layout(title="거래 패턴 변화: 기준 vs 비교 기간")
                 _apply_dark(fig, height=420)
-                st.plotly_chart(fig, use_container_width=True)
-                st.dataframe(df, use_container_width=True, height=400)
+                st.plotly_chart(fig, width='stretch')
+                st.dataframe(df, width='stretch', height=400)

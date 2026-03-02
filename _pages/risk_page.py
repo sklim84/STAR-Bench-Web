@@ -99,7 +99,7 @@ def render():
                     ),
                 )
                 _apply_dark(fig, height=400)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
 
                 # 가중치별 기여도 바 차트
                 contrib_data = {
@@ -118,7 +118,7 @@ def render():
                 )
                 fig2.update_layout(title="위험 요소별 기여도 (가중 점수)")
                 _apply_dark(fig2)
-                st.plotly_chart(fig2, use_container_width=True)
+                st.plotly_chart(fig2, width='stretch')
 
     # ------------------------------------------------------------------
     # 탭2: 고위험 계좌 랭킹
@@ -155,6 +155,6 @@ def render():
                 fig.update_layout(title="고위험 계좌 랭킹")
                 fig.update_xaxes(type="category")
                 _apply_dark(fig, height=420)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
 
-                st.dataframe(df, use_container_width=True, height=400)
+                st.dataframe(df, width='stretch', height=400)

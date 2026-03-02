@@ -164,17 +164,18 @@ def _render_dark_table(df, max_rows=20):
 
 def _render_tab_bank_network():
     """금융회사 네트워크 탭을 렌더링한다."""
-    stats = get_bank_network_stats()
-    if stats.empty:
-        st.warning("금융회사 네트워크 통계를 조회할 수 없습니다.")
-        return
-    row = stats.iloc[0]
+    with st.spinner("데이터 불러오는 중..."):
+        stats = get_bank_network_stats()
+        if stats.empty:
+            st.warning("금융회사 네트워크 통계를 조회할 수 없습니다.")
+            return
+        row = stats.iloc[0]
 
-    bank_df = get_bank_network()
-    bank_G = build_bank_graph(bank_df)
+        bank_df = get_bank_network()
+        bank_G = build_bank_graph(bank_df)
 
-    # 확장 네트워크 통계
-    ext_stats = get_extended_network_stats(bank_G)
+        # 확장 네트워크 통계
+        ext_stats = get_extended_network_stats(bank_G)
 
     # 메트릭 카드 (HTML .metric-card)
     st.markdown('<p class="section-header">네트워크 요약</p>', unsafe_allow_html=True)
@@ -282,7 +283,8 @@ def _render_tab_bank_network():
 def _render_tab_fraud_account_network():
     """이상거래 계좌 네트워크 탭을 렌더링한다."""
     limit = st.slider("표시할 이상거래 연결 수", 100, 1000, 300, 50, key="fraud_limit")
-    fraud_df = get_fraud_account_network(limit=limit)
+    with st.spinner("이상거래 네트워크 조회 중..."):
+        fraud_df = get_fraud_account_network(limit=limit)
 
     if len(fraud_df) == 0:
         st.info("이상거래 네트워크 데이터가 없습니다.")
@@ -379,8 +381,9 @@ def _render_tab_account_explorer():
     """특정 계좌 탐색 탭을 렌더링한다."""
     st.markdown("특정 계좌의 거래 네트워크를 탐색합니다.")
 
-    fraud_accounts = get_fraud_accounts()
-    account_list = fraud_accounts["계좌"].tolist()
+    with st.spinner("계좌 목록 불러오는 중..."):
+        fraud_accounts = get_fraud_accounts()
+        account_list = fraud_accounts["계좌"].tolist()
 
     selected = st.selectbox(
         "이상거래 관련 계좌 선택",
@@ -1160,26 +1163,30 @@ def render():
     st.markdown('<p class="page-title">네트워크 분석 대시보드</p>', unsafe_allow_html=True)
     st.markdown('<p class="page-subtitle">금융회사·계좌 간 거래 그래프 분석 및 AML 패턴 탐지</p>', unsafe_allow_html=True)
 
-    # 5개 탭 구성
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    # 5개 탭 구성 (선택된 탭만 쿼리 실행하여 지연 로딩)
+    tab_names = [
         "금융회사 네트워크",
         "이상거래 계좌 네트워크",
         "계좌 탐색",
         "이상거래 흐름",
         "AML 패턴 탐지",
-    ])
+    ]
+    selected_tab = st.radio(
+        "분석 유형",
+        tab_names,
+        horizontal=True,
+        key="network_tab",
+        label_visibility="collapsed",
+    )
+    st.markdown("<br>", unsafe_allow_html=True)
 
-    with tab1:
+    if selected_tab == tab_names[0]:
         _render_tab_bank_network()
-
-    with tab2:
+    elif selected_tab == tab_names[1]:
         _render_tab_fraud_account_network()
-
-    with tab3:
+    elif selected_tab == tab_names[2]:
         _render_tab_account_explorer()
-
-    with tab4:
+    elif selected_tab == tab_names[3]:
         _render_tab_fraud_flow()
-
-    with tab5:
+    elif selected_tab == tab_names[4]:
         _render_tab_aml_patterns()

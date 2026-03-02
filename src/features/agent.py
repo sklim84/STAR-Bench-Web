@@ -37,6 +37,21 @@ from src.features.monitoring import (
     detect_institution_concentration,
     detect_pattern_change,
     run_all_rules,
+    detect_dormant_reactivation,
+)
+from src.features.dashboard import (
+    get_trend_analysis as _get_trend_analysis,
+    analyze_channel_risk as _analyze_channel_risk,
+    get_receiving_account_profile as _get_receiving_account_profile,
+)
+from src.features.flow_analyzer import (
+    detect_smurfing_network as _detect_smurfing_network,
+    analyze_cross_institution_flow as _analyze_cross_institution_flow,
+)
+from src.features.aml_reference import (
+    lookup_fiu_reference_types,
+    validate_str_fields,
+    get_aml_glossary,
 )
 
 
@@ -490,6 +505,263 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "detect_dormant_reactivation",
+            "description": (
+                "장기간 휴면 후 재활성화된 계좌를 탐지한다. "
+                "일정 기간(기본 180일) 이상 거래가 없다가 대량 거래가 발생한 계좌를 찾아낸다. "
+                "대포통장 활용, 자금세탁 은닉 후 인출 등 의심 패턴에 활용한다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "dormant_days": {
+                        "type": "integer",
+                        "description": "휴면 기준 일수 (기본 180일)",
+                        "default": 180,
+                    },
+                    "min_reactivation_amount": {
+                        "type": "integer",
+                        "description": "재활성화 최소 거래금액 (기본 5,000,000원)",
+                        "default": 5000000,
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "최대 결과 수 (기본 20)",
+                        "default": 20,
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "detect_smurfing_network",
+            "description": (
+                "자금 수집(다수→1계좌) 또는 자금 분산(1계좌→다수) 패턴을 탐지한다. "
+                "direction=inbound: 다수 계좌에서 하나의 계좌로 자금이 집중되는 수집 패턴. "
+                "direction=outbound: 하나의 계좌에서 다수 계좌로 자금이 분산되는 패턴. "
+                "대포통장, 자금세탁 배치(placement), 스머핑(smurfing) 탐지에 활용한다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "account_id": {
+                        "type": "integer",
+                        "description": "특정 계좌로 한정 (선택). 지정하지 않으면 전체 스캔.",
+                    },
+                    "direction": {
+                        "type": "string",
+                        "description": "분석 방향: inbound(자금 수집) 또는 outbound(자금 분산)",
+                        "enum": ["inbound", "outbound"],
+                    },
+                    "min_counterparts": {
+                        "type": "integer",
+                        "description": "최소 거래 상대 계좌 수 (기본 5)",
+                        "default": 5,
+                    },
+                    "date_from": {
+                        "type": "integer",
+                        "description": "시작일 (YYYYMMDD 정수)",
+                    },
+                    "date_to": {
+                        "type": "integer",
+                        "description": "종료일 (YYYYMMDD 정수)",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "최대 결과 수 (기본 20)",
+                        "default": 20,
+                    },
+                },
+                "required": ["direction"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_trend_analysis",
+            "description": (
+                "월별 또는 분기별 시계열 트렌드를 분석한다. "
+                "거래건수, 이상거래비율, 거래금액의 시간에 따른 변화 추세를 파악한다. "
+                "기간을 지정하면 해당 기간만, 지정하지 않으면 전체 데이터 기간의 트렌드를 반환한다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "unit": {
+                        "type": "string",
+                        "description": "집계 단위: monthly(월별) 또는 quarterly(분기별)",
+                        "enum": ["monthly", "quarterly"],
+                        "default": "monthly",
+                    },
+                    "date_from": {
+                        "type": "integer",
+                        "description": "시작일 (YYYYMMDD 정수)",
+                    },
+                    "date_to": {
+                        "type": "integer",
+                        "description": "종료일 (YYYYMMDD 정수)",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_channel_risk",
+            "description": (
+                "거래 채널(매체구분)별 위험도를 분석한다. "
+                "ATM, 인터넷뱅킹, 창구 등 각 채널의 이상거래 비율과 "
+                "채널×시간대 교차분석 결과를 반환한다. "
+                "특정 채널에서 이상거래가 집중되는 패턴을 파악하는 데 활용한다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "date_from": {
+                        "type": "integer",
+                        "description": "시작일 (YYYYMMDD 정수)",
+                    },
+                    "date_to": {
+                        "type": "integer",
+                        "description": "종료일 (YYYYMMDD 정수)",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_receiving_account_profile",
+            "description": (
+                "입금(수취) 관점에서 계좌를 프로파일링한다. "
+                "get_account_profile이 출금계좌 기준인 것과 달리, "
+                "이 도구는 입금계좌일련번호 기준으로 자금 유입 패턴을 분석한다. "
+                "누가 이 계좌에 돈을 보내는지, 얼마나 다양한 곳에서 오는지 파악한다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "account_id": {
+                        "type": "integer",
+                        "description": "조회할 계좌 번호 (입금계좌일련번호 기준)",
+                    },
+                },
+                "required": ["account_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_cross_institution_flow",
+            "description": (
+                "금융기관 쌍(출금기관→입금기관) 간 자금 흐름을 분석한다. "
+                "기관 간 거래 집중도, 이상거래 비율, 거래 규모를 파악한다. "
+                "특정 기관 간 이상거래가 집중되는 패턴을 탐지하는 데 활용한다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "date_from": {
+                        "type": "integer",
+                        "description": "시작일 (YYYYMMDD 정수)",
+                    },
+                    "date_to": {
+                        "type": "integer",
+                        "description": "종료일 (YYYYMMDD 정수)",
+                    },
+                    "min_transactions": {
+                        "type": "integer",
+                        "description": "최소 거래 건수 (기본 10)",
+                        "default": 10,
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "최대 결과 수 (기본 20)",
+                        "default": 20,
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_fiu_reference_types",
+            "description": (
+                "FIU 업권별 의심거래 참고유형을 검색한다. "
+                "거래 패턴이 FIU 참고유형에 해당하는지 확인할 때 사용. "
+                "검색어 예: 분할거래, 심야, 비대면, 가상자산, 타인명의, 휴면."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "keyword": {
+                        "type": "string",
+                        "description": "검색어 (예: 분할거래, 심야, 비대면, 가상자산)",
+                    },
+                    "industry": {
+                        "type": "string",
+                        "description": "업권 필터: banking(은행업), securities(증권업), 또는 생략(전체)",
+                        "enum": ["banking", "securities"],
+                    },
+                },
+                "required": ["keyword"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "validate_str_fields",
+            "description": (
+                "STR(의심거래보고서) 초안의 필수 필드 점검을 수행한다. "
+                "표제부, 보고기관, 거래자, 거래내역 등 필수 항목 누락 여부를 검증한다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "str_draft": {
+                        "type": "object",
+                        "description": "STR 초안 dict. 섹션별로 중첩 가능 (예: I_보고기관, II_거래자_공통, III_거래내역)",
+                    },
+                },
+                "required": ["str_draft"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_aml_glossary",
+            "description": (
+                "AML 용어의 정의를 반환한다. "
+                "CDD, EDD, STR, CTR, RBA, PEP, MLRO, FATF, FIU, KYE, 구조화, 레이어링 등."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "term": {
+                        "type": "string",
+                        "description": "조회할 용어 (예: CDD, STR, CTR, RBA, PEP)",
+                    },
+                },
+                "required": ["term"],
+            },
+        },
+    },
 ]
 
 SYSTEM_PROMPT = """당신은 자금세탁방지(AML) 전문 분석가입니다.
@@ -510,17 +782,32 @@ HOFINET(전자금융공동망) 이상거래탐지 데이터를 분석하여 자�
 12. detect_ctr_candidates: CTR(고액현금거래보고) 대상 고액거래 조회 또는 분할거래(structuring) 탐지. mode=high_value(1천만원 이상 고액거래), mode=structuring(동일계좌 동일일 분할거래 의심)
 13. score_account_risk: 계좌의 위험도를 5개 행위 지표(심야거래비율, 금액이상도, 거래상대다양성, 거래속도변화, 이상거래이력) 기반 0~100점으로 평가
 14. detect_monitoring_alerts: 규칙 기반 거래 모니터링 알림 탐지 (R001 심야대량, R002 다건, R003 정액, R004 기관집중, R005 패턴급변, all=전체)
+15. detect_dormant_reactivation: 장기 휴면(기본 180일) 후 재활성화된 계좌 탐지. 대포통장/은닉자금 인출 패턴 탐지
+16. detect_smurfing_network: 자금 수집(inbound: 다수→1) 또는 분산(outbound: 1→다수) 패턴 탐지. 스머핑/대포통장 네트워크
+17. get_trend_analysis: 월별/분기별 시계열 트렌드 분석 (거래건수, 이상거래비율, 거래금액 추이)
+18. analyze_channel_risk: 채널(매체구분)별 위험도 분석. 채널×시간대 교차분석 포함
+19. get_receiving_account_profile: 입금(수취) 관점 계좌 프로파일링 (자금 유입 패턴, 출금 원천 분석)
+20. analyze_cross_institution_flow: 기관 쌍(출금기관→입금기관) 간 자금 흐름 분석
+21. lookup_fiu_reference_types: FIU 업권별 의심거래 참고유형 검색 (분할거래, 심야, 비대면, 가상자산 등)
+22. validate_str_fields: STR 초안의 필수 필드 점검 (표제부, 보고기관, 거래자, 거래내역)
+23. get_aml_glossary: AML 용어 정의 조회 (CDD, EDD, STR, CTR, RBA, PEP, MLRO, FATF, FIU 등)
 
 권장 분석 절차:
 1. get_statistics로 전체 현황 파악
-2. query_transactions으로 의심 거래 상세 조회
-3. detect_ctr_candidates로 CTR 대상 고액거래 또는 분할거래 탐지
-4. score_account_risk로 계좌 위험도 평가
-5. detect_monitoring_alerts로 규칙 기반 모니터링 알림 탐지
-6. analyze_network으로 계좌 네트워크 분석 (N-hop 심층 탐색 지원)
-7. detect_aml_patterns으로 순환거래/레이어링/대포통장 패턴 탐지
-8. predict_fraud로 이상거래 확률 예측
-9. 충분한 근거가 확보된 경우에만 generate_str로 STR 작성
+2. get_trend_analysis로 시계열 추이 분석
+3. query_transactions으로 의심 거래 상세 조회
+4. detect_ctr_candidates로 CTR 대상 고액거래 또는 분할거래 탐지
+5. score_account_risk로 계좌 위험도 평가
+6. detect_monitoring_alerts로 규칙 기반 모니터링 알림 탐지
+7. detect_dormant_reactivation으로 휴면 계좌 재활성화 탐지
+8. detect_smurfing_network으로 자금 수집/분산 패턴 탐지
+9. analyze_channel_risk로 채널별 위험도 분석
+10. get_receiving_account_profile로 입금계좌 자금 유입 패턴 분석
+11. analyze_cross_institution_flow로 기관 간 자금 흐름 분석
+12. analyze_network으로 계좌 네트워크 분석 (N-hop 심층 탐색 지원)
+13. detect_aml_patterns으로 순환거래/레이어링/대포통장 패턴 탐지
+14. predict_fraud로 이상거래 확률 예측
+15. 충분한 근거가 확보된 경우에만 generate_str로 STR 작성
 
 STR 작성 시 주의사항:
 - 반드시 query_transactions로 근거 데이터를 먼저 조회한 후 STR을 작성하세요
@@ -624,6 +911,12 @@ _도구설명_MAP = {
     "detect_ctr_candidates": "CTR 고액거래/분할거래 탐지",
     "score_account_risk":    "계좌 위험도 평가 (5개 행위 지표)",
     "detect_monitoring_alerts": "규칙 기반 거래 모니터링 알림 탐지",
+    "detect_dormant_reactivation": "장기 휴면 계좌 재활성화 탐지",
+    "detect_smurfing_network": "자금 수집/분산 패턴 탐지",
+    "get_trend_analysis":    "시계열 트렌드 분석",
+    "analyze_channel_risk":  "채널별 위험도 분석",
+    "get_receiving_account_profile": "입금계좌 프로파일링",
+    "analyze_cross_institution_flow": "기관 간 자금 흐름 분석",
 }
 
 
@@ -800,6 +1093,24 @@ def _execute_tool(name: str, arguments: dict) -> str:
             return _tool_score_account_risk(arguments)
         elif name == "detect_monitoring_alerts":
             return _tool_detect_monitoring_alerts(arguments)
+        elif name == "detect_dormant_reactivation":
+            return _tool_detect_dormant_reactivation(arguments)
+        elif name == "detect_smurfing_network":
+            return _tool_detect_smurfing_network(arguments)
+        elif name == "get_trend_analysis":
+            return _tool_get_trend_analysis(arguments)
+        elif name == "analyze_channel_risk":
+            return _tool_analyze_channel_risk(arguments)
+        elif name == "get_receiving_account_profile":
+            return _tool_get_receiving_account_profile(arguments)
+        elif name == "analyze_cross_institution_flow":
+            return _tool_analyze_cross_institution_flow(arguments)
+        elif name == "lookup_fiu_reference_types":
+            return _tool_lookup_fiu_reference_types(arguments)
+        elif name == "validate_str_fields":
+            return _tool_validate_str_fields(arguments)
+        elif name == "get_aml_glossary":
+            return _tool_get_aml_glossary(arguments)
         else:
             return json.dumps({"error": f"알 수 없는 도구: {name}"}, ensure_ascii=False)
     except Exception as exc:
@@ -1709,6 +2020,266 @@ def _tool_detect_monitoring_alerts(arguments: dict) -> str:
             {"error": f"모니터링 규칙 실행 오류: {str(exc)}"},
             ensure_ascii=False,
         )
+
+
+# ---------------------------------------------------------------------------
+# Tool 15: detect_dormant_reactivation
+# ---------------------------------------------------------------------------
+
+
+def _tool_detect_dormant_reactivation(arguments: dict) -> str:
+    dormant_days = int(arguments.get("dormant_days", 180))
+    min_amount = int(arguments.get("min_reactivation_amount", 5_000_000))
+    limit = min(int(arguments.get("limit", 20)), 100)
+
+    try:
+        df = detect_dormant_reactivation(
+            dormant_days=dormant_days,
+            min_reactivation_amount=min_amount,
+            limit=limit,
+        )
+    except Exception as exc:
+        return json.dumps(
+            {"error": f"휴면 계좌 재활성화 탐지 오류: {str(exc)}"},
+            ensure_ascii=False,
+        )
+
+    if df.empty:
+        return json.dumps(
+            {"안내": "조건에 맞는 휴면 재활성화 계좌가 없습니다.", "결과": []},
+            ensure_ascii=False,
+        )
+
+    records = json.loads(df.to_json(orient="records", force_ascii=False))
+    return json.dumps(
+        {
+            "기준": {"휴면일수": dormant_days, "최소재활성화금액": min_amount},
+            "건수": len(records),
+            "결과": records,
+        },
+        ensure_ascii=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tool 16: detect_smurfing_network
+# ---------------------------------------------------------------------------
+
+
+def _tool_detect_smurfing_network(arguments: dict) -> str:
+    direction = arguments.get("direction", "")
+    if direction not in ("inbound", "outbound"):
+        return json.dumps(
+            {"error": "direction은 'inbound' 또는 'outbound'이어야 합니다."},
+            ensure_ascii=False,
+        )
+
+    account_id = arguments.get("account_id")
+    min_counterparts = int(arguments.get("min_counterparts", 5))
+    date_from = arguments.get("date_from")
+    date_to = arguments.get("date_to")
+    limit = min(int(arguments.get("limit", 20)), 100)
+
+    try:
+        df = _detect_smurfing_network(
+            account_id=int(account_id) if account_id is not None else None,
+            direction=direction,
+            min_counterparts=min_counterparts,
+            date_from=date_from,
+            date_to=date_to,
+            limit=limit,
+        )
+    except Exception as exc:
+        return json.dumps(
+            {"error": f"자금 수집/분산 패턴 탐지 오류: {str(exc)}"},
+            ensure_ascii=False,
+        )
+
+    if df.empty:
+        label = "자금 수집" if direction == "inbound" else "자금 분산"
+        return json.dumps(
+            {"direction": direction, "안내": f"{label} 패턴이 탐지되지 않았습니다.", "결과": []},
+            ensure_ascii=False,
+        )
+
+    records = json.loads(df.to_json(orient="records", force_ascii=False))
+    return json.dumps(
+        {
+            "direction": direction,
+            "min_counterparts": min_counterparts,
+            "건수": len(records),
+            "결과": records,
+        },
+        ensure_ascii=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tool 17: get_trend_analysis
+# ---------------------------------------------------------------------------
+
+
+def _tool_get_trend_analysis(arguments: dict) -> str:
+    unit = arguments.get("unit", "monthly")
+    if unit not in ("monthly", "quarterly"):
+        unit = "monthly"
+
+    date_from = arguments.get("date_from")
+    date_to = arguments.get("date_to")
+
+    try:
+        df = _get_trend_analysis(
+            unit=unit, date_from=date_from, date_to=date_to,
+        )
+    except Exception as exc:
+        return json.dumps(
+            {"error": f"트렌드 분석 오류: {str(exc)}"},
+            ensure_ascii=False,
+        )
+
+    if df.empty:
+        return json.dumps(
+            {"unit": unit, "안내": "해당 기간의 데이터가 없습니다.", "결과": []},
+            ensure_ascii=False,
+        )
+
+    records = json.loads(df.to_json(orient="records", force_ascii=False))
+    return json.dumps(
+        {"unit": unit, "기간수": len(records), "결과": records},
+        ensure_ascii=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tool 18: analyze_channel_risk
+# ---------------------------------------------------------------------------
+
+
+def _tool_analyze_channel_risk(arguments: dict) -> str:
+    date_from = arguments.get("date_from")
+    date_to = arguments.get("date_to")
+
+    try:
+        result = _analyze_channel_risk(date_from=date_from, date_to=date_to)
+    except Exception as exc:
+        return json.dumps(
+            {"error": f"채널 위험도 분석 오류: {str(exc)}"},
+            ensure_ascii=False,
+        )
+
+    # 매체구분 코드를 한글 라벨로 변환
+    for item in result.get("channel_stats", []):
+        code = item.get("매체구분")
+        item["채널명"] = _매체구분_MAP.get(int(code) if code is not None else 0, f"코드{code}")
+
+    return json.dumps(result, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# Tool 19: get_receiving_account_profile
+# ---------------------------------------------------------------------------
+
+
+def _tool_get_receiving_account_profile(arguments: dict) -> str:
+    account_id = arguments.get("account_id")
+    if account_id is None:
+        return json.dumps({"error": "account_id가 필요합니다."}, ensure_ascii=False)
+
+    try:
+        aid = int(account_id)
+    except (TypeError, ValueError):
+        return json.dumps({"error": "account_id는 정수여야 합니다."}, ensure_ascii=False)
+
+    try:
+        result = _get_receiving_account_profile(aid)
+    except Exception as exc:
+        return json.dumps(
+            {"error": f"입금계좌 프로파일 조회 오류: {str(exc)}"},
+            ensure_ascii=False,
+        )
+
+    return json.dumps(result, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# Tool 20: analyze_cross_institution_flow
+# ---------------------------------------------------------------------------
+
+
+def _tool_analyze_cross_institution_flow(arguments: dict) -> str:
+    date_from = arguments.get("date_from")
+    date_to = arguments.get("date_to")
+    min_transactions = int(arguments.get("min_transactions", 10))
+    limit = min(int(arguments.get("limit", 20)), 100)
+
+    try:
+        df = _analyze_cross_institution_flow(
+            date_from=date_from, date_to=date_to,
+            min_transactions=min_transactions, limit=limit,
+        )
+    except Exception as exc:
+        return json.dumps(
+            {"error": f"기관 간 자금 흐름 분석 오류: {str(exc)}"},
+            ensure_ascii=False,
+        )
+
+    if df.empty:
+        return json.dumps(
+            {"안내": "조건에 맞는 기관 간 흐름이 없습니다.", "결과": []},
+            ensure_ascii=False,
+        )
+
+    records = json.loads(df.to_json(orient="records", force_ascii=False))
+    return json.dumps(
+        {"min_transactions": min_transactions, "건수": len(records), "결과": records},
+        ensure_ascii=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tool 21: lookup_fiu_reference_types
+# ---------------------------------------------------------------------------
+
+
+def _tool_lookup_fiu_reference_types(arguments: dict) -> str:
+    keyword = arguments.get("keyword") or ""
+    industry = arguments.get("industry")
+
+    results = lookup_fiu_reference_types(keyword, industry)
+    return json.dumps(
+        {"keyword": keyword, "건수": len(results), "결과": results},
+        ensure_ascii=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tool 22: validate_str_fields
+# ---------------------------------------------------------------------------
+
+
+def _tool_validate_str_fields(arguments: dict) -> str:
+    str_draft = arguments.get("str_draft")
+    if str_draft is None:
+        return json.dumps({"error": "str_draft가 필요합니다."}, ensure_ascii=False)
+
+    result = validate_str_fields(str_draft)
+    return json.dumps(result, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# Tool 23: get_aml_glossary
+# ---------------------------------------------------------------------------
+
+
+def _tool_get_aml_glossary(arguments: dict) -> str:
+    term = arguments.get("term") or ""
+    result = get_aml_glossary(term)
+    if result is None:
+        return json.dumps(
+            {"error": f"용어 '{term}'를 찾을 수 없습니다.", "안내": "CDD, EDD, STR, CTR, RBA, PEP, MLRO, FATF, FIU, KYE, 구조화, 레이어링 등을 시도해보세요."},
+            ensure_ascii=False,
+        )
+    return json.dumps(result, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------

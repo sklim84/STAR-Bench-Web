@@ -4,10 +4,17 @@
 근거: 특정금융정보법 — 고액현금거래보고(CTR) 의무.
 """
 
+import json
 import math
 
 import pandas as pd
+import streamlit as st
+
 from src.data.db import query
+
+_CACHE_HASH_FUNCS = {
+    dict: lambda d: json.dumps(d, sort_keys=True, default=str) if d else "none",
+}
 
 
 def _safe_int(val, default=0):
@@ -21,6 +28,7 @@ def _safe_int(val, default=0):
 # 고액거래 조회
 # ------------------------------------------------------------------
 
+@st.cache_data(ttl=300, show_spinner=False)
 def get_ctr_candidates(date_from: int | None = None,
                        date_to: int | None = None,
                        limit: int = 100) -> pd.DataFrame:
@@ -47,6 +55,7 @@ def get_ctr_candidates(date_from: int | None = None,
 # 분할거래(Structuring) 탐지
 # ------------------------------------------------------------------
 
+@st.cache_data(ttl=300, show_spinner=False)
 def detect_structuring(date_from: int | None = None,
                        date_to: int | None = None,
                        threshold: int = 10_000_000,
@@ -125,6 +134,7 @@ def assess_account_structuring(account_id: int,
 # CTR 종합 통계
 # ------------------------------------------------------------------
 
+@st.cache_data(ttl=300, hash_funcs=_CACHE_HASH_FUNCS, show_spinner=False)
 def get_ctr_summary(filters=None) -> dict:
     """CTR 모니터링 종합 통계를 반환한다."""
     conditions = []

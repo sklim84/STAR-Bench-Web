@@ -5,6 +5,7 @@ Training/Test/Validation 분할을 활용하여 학습하고,
 """
 
 import joblib
+import streamlit as st
 import numpy as np
 import pandas as pd
 from xgboost import XGBClassifier
@@ -49,6 +50,7 @@ def _load_split(split_name):
     return pd.concat(dfs, ignore_index=True)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def get_training_data():
     """학습/테스트/검증 데이터를 반환한다."""
     train = _load_split("Training")
@@ -108,11 +110,13 @@ def train_model(X_train, y_train, X_val, y_val, params=None):
 
     config.MODELS_DIR.mkdir(exist_ok=True)
     joblib.dump(model, MODEL_PATH)
+    load_model.clear()  # 새 모델 저장 시 캐시 무효화
     return model
 
 
+@st.cache_resource
 def load_model():
-    """저장된 모델을 로드한다. 없으면 None."""
+    """저장된 모델을 로드한다. 없으면 None. 앱 생명주기 동안 1회만 디스크에서 로드."""
     if MODEL_PATH.exists():
         return joblib.load(MODEL_PATH)
     return None

@@ -42,8 +42,8 @@ class TestToolsDefinition:
         assert isinstance(TOOLS, list)
 
     def test_tools_count(self):
-        """도구가 정확히 14개이어야 한다 (detect_ctr_candidates, score_account_risk, detect_monitoring_alerts 추가)."""
-        assert len(TOOLS) == 14
+        """도구가 정확히 20개이어야 한다."""
+        assert len(TOOLS) == 20
 
     def test_tools_have_required_structure(self):
         """각 도구가 type과 function 키를 가져야 한다."""
@@ -70,6 +70,12 @@ class TestToolsDefinition:
             "detect_ctr_candidates",
             "score_account_risk",
             "detect_monitoring_alerts",
+            "detect_dormant_reactivation",
+            "detect_smurfing_network",
+            "get_trend_analysis",
+            "analyze_channel_risk",
+            "get_receiving_account_profile",
+            "analyze_cross_institution_flow",
         }
         assert names == expected
 

@@ -14,9 +14,15 @@ st.set_page_config(
 # ------------------------------------------------------------------
 # 글래스모피즘 테마 CSS (assets/style.css)
 # ------------------------------------------------------------------
+@st.cache_data(ttl=3600, show_spinner=False)
+def _load_css_content() -> str:
+    return pathlib.Path("assets/style.css").read_text(encoding="utf-8")
+
+
 def _load_css() -> None:
-    css = pathlib.Path("assets/style.css").read_text(encoding="utf-8")
+    css = _load_css_content()
     st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
+
 
 _load_css()
 
@@ -37,19 +43,30 @@ init_database()
 # ------------------------------------------------------------------
 selected = option_menu(
     menu_title=None,
-    options=["홈", "대시보드", "네트워크", "탐지", "CTR", "위험평가", "모니터링", "에이전트"],
-    icons=["house-fill", "bar-chart-fill", "diagram-3-fill", "robot", "cash-coin", "shield-check", "bell-fill", "chat-dots-fill"],
+    options=["홈", "대시보드", "네트워크", "탐지", "CTR", "위험평가", "모니터링", "참조자료", "에이전트"],
+    icons=["house-fill", "bar-chart-fill", "diagram-3-fill", "robot", "cash-coin", "shield-check", "bell-fill", "journal-bookmark-fill", "chat-dots-fill"],
     default_index=0,
     orientation="horizontal",
     styles={
         "container": {
-            "padding": "4px",
+            "padding": "8px 16px",
             "background": "rgba(255, 255, 255, 0.04)",
             "backdrop-filter": "blur(16px)",
-            "border-radius": "14px",
-            "border": "1px solid rgba(255, 255, 255, 0.09)",
+            "border-radius": "0",
+            "border": "none",
+            "border-bottom": "1px solid rgba(255, 255, 255, 0.09)",
             "margin-bottom": "20px",
-            "box-shadow": "0 4px 24px rgba(0, 0, 0, 0.35)",
+            "box-shadow": "0 2px 12px rgba(0, 0, 0, 0.25)",
+            "width": "100%",
+            "max-width": "none",
+        },
+        "nav": {
+            "flex": "1",
+            "width": "100%",
+        },
+        "nav-item": {
+            "flex": "1 1 0%",
+            "min-width": "0",
         },
         "icon": {
             "color": "#9EA3B8",
@@ -57,6 +74,7 @@ selected = option_menu(
         },
         "nav-link": {
             "flex": "1",
+            "width": "100%",
             "font-size": "14px",
             "font-weight": "500",
             "text-align": "center",
@@ -87,7 +105,8 @@ if selected == "홈":
 
     # 요약 메트릭 카드 (dashboard.get_summary() 활용)
     from src.features.dashboard import get_summary
-    summary = get_summary()
+    with st.spinner("데이터 불러오는 중..."):
+        summary = get_summary()
     if summary.empty:
         st.error("데이터를 불러올 수 없습니다. 데이터 로딩 상태를 확인하세요.")
         st.stop()
@@ -159,6 +178,11 @@ if selected == "홈":
             <div class="f-desc">5개 규칙(심야대량·다건·정액·기관집중·패턴급변) 기반 의심거래 탐지</div>
         </div>
         <div class="feature-card">
+            <span class="f-icon">📚</span>
+            <div class="f-name">참조자료</div>
+            <div class="f-desc">FIU 의심거래 참고유형 검색, STR 필드 점검, AML 용어집 (CDD, STR, CTR, RBA 등)</div>
+        </div>
+        <div class="feature-card">
             <span class="f-icon">💬</span>
             <div class="f-name">에이전트</div>
             <div class="f-desc">AI 에이전트와 대화로 거래 조회·분석하고 의심거래보고서(STR) 자동 작성</div>
@@ -188,6 +212,10 @@ elif selected == "위험평가":
 
 elif selected == "모니터링":
     from _pages.monitoring_page import render
+    render()
+
+elif selected == "참조자료":
+    from _pages.aml_reference_page import render
     render()
 
 elif selected == "에이전트":

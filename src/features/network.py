@@ -4,12 +4,15 @@ import logging
 
 import networkx as nx
 import pandas as pd
+import streamlit as st
+
 from src.data.db import query
 from src.data import graph_db
 
 logger = logging.getLogger(__name__)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def get_bank_network():
     """금융회사 간 거래 네트워크 데이터를 반환한다."""
     return query("""
@@ -25,6 +28,7 @@ def get_bank_network():
     """)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def get_fraud_account_network(limit=500):
     """이상거래 관련 계좌 간 네트워크 데이터를 반환한다."""
     # limit은 외부 입력이므로 int 형변환으로 안전하게 처리 (DuckDB는 LIMIT 파라미터 바인딩 미지원)
@@ -91,6 +95,7 @@ def get_account_ego_network(account_id, hops=1):
     """)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def get_fraud_accounts():
     """이상거래에 관련된 출금 계좌 목록을 반환한다."""
     return query("""
@@ -101,6 +106,7 @@ def get_fraud_accounts():
     """)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def get_bank_network_stats():
     """금융회사 네트워크 요약 통계를 반환한다."""
     return query("""
@@ -222,6 +228,7 @@ def detect_communities(G):
 # 강화 기능: 금융회사 간 이상거래 흐름 매트릭스
 # ------------------------------------------------------------------
 
+@st.cache_data(ttl=300, show_spinner=False)
 def get_fraud_flow_matrix():
     """금융회사 간 이상거래 흐름 매트릭스 데이터를 반환한다.
 
@@ -302,6 +309,7 @@ def get_extended_network_stats(G):
 # ------------------------------------------------------------------
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def detect_ring_transactions(min_len=3, max_len=6, min_amount=0, limit=100):
     """순환거래(ring) 사이클을 탐지한다.
 
@@ -366,6 +374,7 @@ def detect_ring_transactions(min_len=3, max_len=6, min_amount=0, limit=100):
     return pd.DataFrame(rows)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def detect_layering_patterns(min_layers=3, limit=100):
     """다단계 레이어링 패턴을 탐지한다.
 
@@ -432,6 +441,7 @@ def detect_layering_patterns(min_layers=3, limit=100):
     return pd.DataFrame(rows)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
 def detect_funnel_accounts(min_inflow=10, max_outflow=3, limit=100):
     """대포통장(funnel) 패턴을 탐지한다.
 

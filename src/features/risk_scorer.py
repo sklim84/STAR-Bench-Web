@@ -7,6 +7,8 @@
 import math
 
 import pandas as pd
+import streamlit as st
+
 from src.data.db import query
 
 
@@ -203,6 +205,7 @@ def score_account(account_id: int) -> dict:
 # 고위험 계좌 랭킹 (일괄 SQL)
 # ------------------------------------------------------------------
 
+@st.cache_data(ttl=300, show_spinner=False)
 def rank_risky_accounts(top_k: int = 20,
                         min_transactions: int = 10) -> pd.DataFrame:
     """고위험 계좌 TOP-K를 일괄 SQL로 반환한다."""

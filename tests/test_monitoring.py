@@ -11,6 +11,7 @@ from src.features.monitoring import (
     detect_pattern_change,
     run_all_rules,
     get_monitoring_summary,
+    detect_dormant_reactivation,
 )
 
 
@@ -147,3 +148,29 @@ class TestGetMonitoringSummary:
         assert result["총거래건수"] >= 0
         assert result["심야거래건수"] >= 0
         assert result["심야거래비율"] >= 0
+
+
+class TestDetectDormantReactivation:
+    """R006: detect_dormant_reactivation() 단위 테스트."""
+
+    def test_returns_dataframe(self):
+        result = detect_dormant_reactivation(limit=10)
+        assert isinstance(result, pd.DataFrame)
+
+    def test_expected_columns(self):
+        result = detect_dormant_reactivation(limit=5)
+        if not result.empty:
+            expected = {"출금계좌일련번호", "마지막활동일", "재활성화일", "휴면일수", "재활성화금액"}
+            assert expected.issubset(set(result.columns))
+
+    def test_dormant_days_filter(self):
+        result = detect_dormant_reactivation(dormant_days=365, limit=10)
+        if not result.empty:
+            assert (result["휴면일수"] >= 365).all()
+
+    def test_min_amount_filter(self):
+        result = detect_dormant_reactivation(
+            min_reactivation_amount=10_000_000, limit=10
+        )
+        if not result.empty:
+            assert (result["재활성화금액"] >= 10_000_000).all()

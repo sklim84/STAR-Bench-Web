@@ -4,14 +4,23 @@
 근거: 실무5편 — 규칙 기반 모니터링, 의심거래 지표.
 """
 
+import json
+
 import pandas as pd
+import streamlit as st
+
 from src.data.db import query
+
+_CACHE_HASH_FUNCS = {
+    dict: lambda d: json.dumps(d, sort_keys=True, default=str) if d else "none",
+}
 
 
 # ------------------------------------------------------------------
 # R001: 심야 대량 거래
 # ------------------------------------------------------------------
 
+@st.cache_data(ttl=300, show_spinner=False)
 def detect_nighttime_bulk(date_from: int | None = None,
                           date_to: int | None = None,
                           min_amount: int = 10_000_000,
@@ -40,6 +49,7 @@ def detect_nighttime_bulk(date_from: int | None = None,
 # R002: 동일일 다건 거래 (Rapid-fire)
 # ------------------------------------------------------------------
 
+@st.cache_data(ttl=300, show_spinner=False)
 def detect_rapid_fire(date_from: int | None = None,
                       date_to: int | None = None,
                       min_count: int = 10,
@@ -71,6 +81,7 @@ def detect_rapid_fire(date_from: int | None = None,
 # R003: 정액 거래 패턴 (Round amount)
 # ------------------------------------------------------------------
 
+@st.cache_data(ttl=300, show_spinner=False)
 def detect_round_amounts(date_from: int | None = None,
                          date_to: int | None = None,
                          round_unit: int = 1_000_000,
@@ -145,6 +156,7 @@ def detect_institution_concentration(min_ratio: float = 0.8,
 # R005: 거래 패턴 급변
 # ------------------------------------------------------------------
 
+@st.cache_data(ttl=300, show_spinner=False)
 def detect_pattern_change(base_start: int, base_end: int,
                           compare_start: int, compare_end: int,
                           change_threshold: float = 3.0,
@@ -190,6 +202,7 @@ def detect_pattern_change(base_start: int, base_end: int,
 # 전체 규칙 실행
 # ------------------------------------------------------------------
 
+@st.cache_data(ttl=300, show_spinner=False)
 def run_all_rules(date_from: int | None = None,
                   date_to: int | None = None) -> dict:
     """전체 규칙을 실행하고 종합 결과를 반환한다."""
@@ -220,6 +233,60 @@ def run_all_rules(date_from: int | None = None,
 # 모니터링 통계
 # ------------------------------------------------------------------
 
+# ------------------------------------------------------------------
+# R006: 장기 휴면 계좌 재활성화
+# ------------------------------------------------------------------
+
+@st.cache_data(ttl=300, show_spinner=False)
+def detect_dormant_reactivation(dormant_days: int = 180,
+                                 min_reactivation_amount: int = 5_000_000,
+                                 limit: int = 100) -> pd.DataFrame:
+    """R006: 장기 휴면 후 재활성화된 계좌를 탐지한다.
+
+    dormant_days일 이상 무거래 기간 후 min_reactivation_amount 이상의
+    거래가 발생한 계좌를 반환한다.
+    """
+    dormant_days = int(dormant_days)
+    min_reactivation_amount = int(min_reactivation_amount)
+    limit = int(limit)
+    return query(f"""
+        WITH account_dates AS (
+            SELECT 출금계좌일련번호,
+                   거래일자,
+                   거래금액,
+                   LAG(거래일자) OVER (
+                       PARTITION BY 출금계좌일련번호
+                       ORDER BY 거래일자
+                   ) AS 이전거래일자
+            FROM hofinet
+        ),
+        gaps AS (
+            SELECT 출금계좌일련번호,
+                   이전거래일자 AS 마지막활동일,
+                   거래일자 AS 재활성화일,
+                   거래금액 AS 재활성화금액,
+                   -- YYYYMMDD 정수 간 일수 차이 근사 계산
+                   (거래일자 / 10000 - 이전거래일자 / 10000) * 365
+                   + ((거래일자 / 100 % 100) - (이전거래일자 / 100 % 100)) * 30
+                   + (거래일자 % 100 - 이전거래일자 % 100) AS 휴면일수
+            FROM account_dates
+            WHERE 이전거래일자 IS NOT NULL
+        )
+        SELECT 출금계좌일련번호, 마지막활동일, 재활성화일,
+               휴면일수, 재활성화금액
+        FROM gaps
+        WHERE 휴면일수 >= {dormant_days}
+          AND 재활성화금액 >= {min_reactivation_amount}
+        ORDER BY 휴면일수 DESC, 재활성화금액 DESC
+        LIMIT {limit}
+    """)
+
+
+# ------------------------------------------------------------------
+# 모니터링 통계
+# ------------------------------------------------------------------
+
+@st.cache_data(ttl=300, hash_funcs=_CACHE_HASH_FUNCS, show_spinner=False)
 def get_monitoring_summary(filters=None) -> dict:
     """모니터링 종합 통계를 반환한다."""
     conditions = []
