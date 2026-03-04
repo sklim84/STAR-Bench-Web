@@ -572,6 +572,9 @@ from src.features.network import (
 class TestDetectRingTransactions:
     """detect_ring_transactions() 단위 테스트."""
 
+    def setup_method(self):
+        detect_ring_transactions.clear()
+
     def test_fallback_when_memgraph_unavailable(self):
         """Memgraph 미실행 시 빈 DataFrame을 반환해야 한다."""
         with patch("src.features.network.graph_db.is_available", return_value=False):
@@ -660,6 +663,9 @@ class TestDetectRingTransactions:
 class TestDetectLayeringPatterns:
     """detect_layering_patterns() 단위 테스트."""
 
+    def setup_method(self):
+        detect_layering_patterns.clear()
+
     def test_fallback_when_memgraph_unavailable(self):
         """Memgraph 미실행 시 빈 DataFrame을 반환해야 한다."""
         with patch("src.features.network.graph_db.is_available", return_value=False):
@@ -740,6 +746,9 @@ class TestDetectLayeringPatterns:
 # ──────────────────────────────────────────────
 class TestDetectFunnelAccounts:
     """detect_funnel_accounts() 단위 테스트."""
+
+    def setup_method(self):
+        detect_funnel_accounts.clear()
 
     def test_fallback_when_memgraph_unavailable(self):
         """Memgraph 미실행 시 빈 DataFrame을 반환해야 한다."""

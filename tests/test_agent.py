@@ -42,8 +42,8 @@ class TestToolsDefinition:
         assert isinstance(TOOLS, list)
 
     def test_tools_count(self):
-        """도구가 정확히 20개이어야 한다."""
-        assert len(TOOLS) == 20
+        """도구가 정확히 23개이어야 한다."""
+        assert len(TOOLS) == 23
 
     def test_tools_have_required_structure(self):
         """각 도구가 type과 function 키를 가져야 한다."""
@@ -76,6 +76,9 @@ class TestToolsDefinition:
             "analyze_channel_risk",
             "get_receiving_account_profile",
             "analyze_cross_institution_flow",
+            "lookup_fiu_reference_types",
+            "validate_str_fields",
+            "get_aml_glossary",
         }
         assert names == expected
 
@@ -804,6 +807,23 @@ class TestExecuteToolAnalyzeNetwork:
         parsed = json.loads(result)
         if "이상거래비율_percent" in parsed:
             assert parsed["이상거래비율_percent"] >= 0
+
+    def test_string_account_id_is_normalized_to_int(self):
+        """문자열 account_id 입력도 정수로 처리되고 중심 계좌는 연결 목록에서 제외되어야 한다."""
+        df = pd.DataFrame({
+            "source": [100, 300],
+            "target": [200, 100],
+            "거래횟수": [2, 1],
+            "총금액": [1000, 500],
+            "이상거래여부": [0, 0],
+        })
+        with patch("src.features.agent.get_account_ego_network", return_value=df):
+            result = _execute_tool("analyze_network", {"account_id": "100", "hops": 1})
+
+        parsed = json.loads(result)
+        assert parsed["account_id"] == 100
+        assert parsed["연결계좌수"] == 2
+        assert 100 not in parsed["연결계좌_샘플"]
 
 
 # ──────────────────────────────────────────────

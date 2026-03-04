@@ -5,6 +5,7 @@
 """
 
 import json
+from datetime import datetime, timedelta
 
 import pandas as pd
 import streamlit as st
@@ -14,6 +15,29 @@ from src.data.db import query
 _CACHE_HASH_FUNCS = {
     dict: lambda d: json.dumps(d, sort_keys=True, default=str) if d else "none",
 }
+
+
+def _parse_yyyymmdd(date_int: int) -> datetime:
+    """YYYYMMDD 정수를 datetime으로 변환한다."""
+    return datetime.strptime(str(int(date_int)), "%Y%m%d")
+
+
+def _to_yyyymmdd(dt: datetime) -> int:
+    """datetime을 YYYYMMDD 정수로 변환한다."""
+    return int(dt.strftime("%Y%m%d"))
+
+
+def _calculate_previous_period(date_from: int, date_to: int) -> tuple[int, int]:
+    """기준기간의 직전 동일 길이 기간(달력 기준)을 반환한다."""
+    start_dt = _parse_yyyymmdd(date_from)
+    end_dt = _parse_yyyymmdd(date_to)
+    if start_dt > end_dt:
+        raise ValueError("date_from must be <= date_to")
+
+    span_days = (end_dt - start_dt).days
+    prev_end = start_dt - timedelta(days=1)
+    prev_start = prev_end - timedelta(days=span_days)
+    return _to_yyyymmdd(prev_start), _to_yyyymmdd(prev_end)
 
 
 # ------------------------------------------------------------------
@@ -212,13 +236,14 @@ def run_all_rules(date_from: int | None = None,
     r004 = detect_institution_concentration(limit=50)
     r005_result = pd.DataFrame()
     if date_from and date_to:
-        # 기준 기간 = 직전 동일 길이 기간
-        span = int(date_to) - int(date_from)
-        base_end = int(date_from) - 1
-        base_start = base_end - span
-        r005_result = detect_pattern_change(
-            base_start, base_end, int(date_from), int(date_to), limit=50
-        )
+        try:
+            base_start, base_end = _calculate_previous_period(int(date_from), int(date_to))
+            r005_result = detect_pattern_change(
+                base_start, base_end, int(date_from), int(date_to), limit=50
+            )
+        except ValueError:
+            # 잘못된 날짜 입력은 R005만 빈 결과로 두고 나머지 규칙은 계속 반환
+            r005_result = pd.DataFrame()
 
     return {
         "R001_심야대량거래": {"건수": len(r001), "상위": r001.head(10).to_dict(orient="records")},
@@ -265,10 +290,12 @@ def detect_dormant_reactivation(dormant_days: int = 180,
                    이전거래일자 AS 마지막활동일,
                    거래일자 AS 재활성화일,
                    거래금액 AS 재활성화금액,
-                   -- YYYYMMDD 정수 간 일수 차이 근사 계산
-                   (거래일자 / 10000 - 이전거래일자 / 10000) * 365
-                   + ((거래일자 / 100 % 100) - (이전거래일자 / 100 % 100)) * 30
-                   + (거래일자 % 100 - 이전거래일자 % 100) AS 휴면일수
+                   -- 날짜 파싱 기반 정확한 일수 차이 계산
+                   date_diff(
+                       'day',
+                       strptime(CAST(이전거래일자 AS VARCHAR), '%Y%m%d'),
+                       strptime(CAST(거래일자 AS VARCHAR), '%Y%m%d')
+                   ) AS 휴면일수
             FROM account_dates
             WHERE 이전거래일자 IS NOT NULL
         )

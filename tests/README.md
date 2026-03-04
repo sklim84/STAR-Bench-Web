@@ -1,43 +1,29 @@
 # Tests
 
-KA-001-AML-Assistant 프로젝트의 단위 테스트 디렉토리입니다.
+`tests/`는 `src/` 모듈의 단위 테스트를 담습니다.
 
-## 테스트 파일 구조
+## 커버 범위(요약)
 
-| 파일 | 대상 모듈 | 설명 |
-|------|----------|------|
-| `test_modules.py` | 프로젝트 구조 / 의존성 | 모듈 임포트, 패키지 설치, 디렉토리 구조 검증 |
-| `test_config.py` | `config.py` | 경로 상수, 데이터 파일, DuckDB 설정, API 키 검증 |
-| `test_loader.py` | `src/data/loader.py` | Parquet 스키마, 데이터 무결성 검증 |
-| `test_db.py` | `src/data/db.py` | DuckDB 연결, query/query_arrow 함수 검증 |
-| `test_dashboard.py` | `src/features/dashboard.py` | 8개 대시보드 쿼리 함수 검증 |
+- 데이터 계층: `test_loader.py`, `test_db.py`, `test_graph_etl.py`, `test_graph_db.py`
+- 에이전트/분석 기능: `test_agent.py`, `test_agent_str.py`, `test_agent_tools_extended.py`
+- 피처 모듈: `test_dashboard.py`, `test_detector.py`, `test_network.py`, `test_monitoring.py`, `test_flow_analyzer.py`, `test_ctr_monitor.py`, `test_risk_scorer.py`, `test_aml_reference.py`
+- 공통/설정: `test_config.py`, `test_modules.py`, `conftest.py`
+- UI 유틸: `test_chart_utils.py`
 
-## 테스트 실행
+## 실행 방법
 
 ```bash
-# 전체 테스트
-pytest tests/ -v
+# tests 디렉토리 전체
+pytest -q tests
 
-# 개별 파일
-pytest tests/test_config.py -v
+# 특정 파일
+pytest -q tests/test_agent_tools_extended.py
 
-# 특정 클래스
-pytest tests/test_dashboard.py::TestGetSummary -v
-
-# 특정 케이스
-pytest tests/test_config.py::TestPathConstants::test_base_dir_is_project_root -v
+# 특정 테스트
+pytest -q tests/test_db.py::TestConnectionLifecycle::test_close_handles_none_and_resets_connection
 ```
 
-## 테스트 작성 규칙
+## 참고
 
-- **클래스명**: `Test<FunctionName>` (예: `TestGetSummary`)
-- **메서드명**: `test_<검증내용>` (예: `test_returns_dataframe`)
-- **구조**: Arrange-Act-Assert (AAA) 패턴
-- **Fixture**: 반복 호출이 비싼 함수는 `@pytest.fixture(scope="class")`로 캐싱
-- **공통 Fixture**: `conftest.py`에 정의
-
-## 테스트 환경
-
-- **Framework**: pytest
-- **Python**: 3.13+
-- **필수 패키지**: `requirements.txt` 참조
+- `tests/__pycache__/`는 파이썬 실행 중 자동 생성되는 캐시이며 소스가 아닙니다.
+- 테스트는 in-memory DuckDB 픽스처(`tests/conftest.py`)를 사용합니다.

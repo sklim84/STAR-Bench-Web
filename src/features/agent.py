@@ -38,6 +38,7 @@ from src.features.monitoring import (
     detect_pattern_change,
     run_all_rules,
     detect_dormant_reactivation,
+    _calculate_previous_period,
 )
 from src.features.dashboard import (
     get_trend_analysis as _get_trend_analysis,
@@ -1232,13 +1233,18 @@ def _tool_analyze_network(arguments: dict) -> str:
     if account_id is None:
         return json.dumps({"error": "account_id가 필요합니다."}, ensure_ascii=False)
 
+    try:
+        aid = int(account_id)
+    except (TypeError, ValueError):
+        return json.dumps({"error": "account_id는 정수여야 합니다."}, ensure_ascii=False)
+
     hops = max(1, min(int(arguments.get("hops", 1)), 5))
 
     try:
         if hops > 2:
-            df = get_account_ego_network_deep(account_id, hops=hops)
+            df = get_account_ego_network_deep(aid, hops=hops)
         else:
-            df = get_account_ego_network(account_id, hops=hops)
+            df = get_account_ego_network(aid, hops=hops)
     except Exception as exc:
         return json.dumps(
             {"error": f"네트워크 조회 오류: {str(exc)}"},
@@ -1248,7 +1254,7 @@ def _tool_analyze_network(arguments: dict) -> str:
     if df is None or df.empty:
         return json.dumps(
             {
-                "account_id": account_id,
+                "account_id": aid,
                 "안내": "해당 계좌의 거래 내역이 없습니다.",
                 "연결계좌수": 0,
                 "총거래건수": 0,
@@ -1259,8 +1265,17 @@ def _tool_analyze_network(arguments: dict) -> str:
         )
 
     # ego 네트워크에서 계좌 번호 집합 수집
-    all_accounts = set(df["source"].tolist()) | set(df["target"].tolist())
-    all_accounts.discard(account_id)
+    def _to_int_set(values):
+        out = set()
+        for v in values:
+            try:
+                out.add(int(v))
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    all_accounts = _to_int_set(df["source"].tolist()) | _to_int_set(df["target"].tolist())
+    all_accounts.discard(aid)
     연결계좌수 = len(all_accounts)
 
     총거래건수 = int(df["거래횟수"].sum())
@@ -1273,7 +1288,7 @@ def _tool_analyze_network(arguments: dict) -> str:
 
     return json.dumps(
         {
-            "account_id": account_id,
+            "account_id": aid,
             "탐색범위_hop": hops,
             "연결계좌수": 연결계좌수,
             "총거래건수": 총거래건수,
@@ -1993,9 +2008,13 @@ def _tool_detect_monitoring_alerts(arguments: dict) -> str:
                     {"error": "R005(거래패턴급변)에는 date_from, date_to가 필요합니다."},
                     ensure_ascii=False,
                 )
-            span = int(date_to) - int(date_from)
-            base_end = int(date_from) - 1
-            base_start = base_end - span
+            try:
+                base_start, base_end = _calculate_previous_period(int(date_from), int(date_to))
+            except ValueError:
+                return json.dumps(
+                    {"error": "유효한 날짜 범위가 아닙니다. date_from <= date_to 인 YYYYMMDD 정수를 입력하세요."},
+                    ensure_ascii=False,
+                )
             df = detect_pattern_change(
                 base_start=base_start, base_end=base_end,
                 compare_start=int(date_from), compare_end=int(date_to),

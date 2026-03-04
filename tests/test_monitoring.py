@@ -2,6 +2,7 @@
 
 import pandas as pd
 import pytest
+from unittest.mock import patch
 
 from src.features.monitoring import (
     detect_nighttime_bulk,
@@ -12,6 +13,7 @@ from src.features.monitoring import (
     run_all_rules,
     get_monitoring_summary,
     detect_dormant_reactivation,
+    _calculate_previous_period,
 )
 
 
@@ -128,6 +130,21 @@ class TestRunAllRules:
             assert "건수" in result[key]
             assert result[key]["건수"] >= 0
 
+    def test_previous_period_calculation_uses_calendar_days(self):
+        base_start, base_end = _calculate_previous_period(20240201, 20240229)
+        assert base_start == 20240103
+        assert base_end == 20240131
+
+    def test_r005_previous_period_passed_to_detector(self):
+        with patch("src.features.monitoring.detect_pattern_change", return_value=pd.DataFrame()) as mock_r005:
+            run_all_rules(date_from=20240201, date_to=20240229)
+
+        args = mock_r005.call_args.args
+        assert args[0] == 20240103
+        assert args[1] == 20240131
+        assert args[2] == 20240201
+        assert args[3] == 20240229
+
 
 class TestGetMonitoringSummary:
     """get_monitoring_summary() 단위 테스트."""
@@ -174,3 +191,11 @@ class TestDetectDormantReactivation:
         )
         if not result.empty:
             assert (result["재활성화금액"] >= 10_000_000).all()
+
+    def test_uses_precise_date_diff_sql(self):
+        with patch("src.features.monitoring.query", return_value=pd.DataFrame()) as mock_query:
+            detect_dormant_reactivation(limit=1)
+        sql = mock_query.call_args.args[0]
+        assert "date_diff(" in sql
+        assert "strptime(CAST(이전거래일자 AS VARCHAR), '%Y%m%d')" in sql
+        assert "strptime(CAST(거래일자 AS VARCHAR), '%Y%m%d')" in sql

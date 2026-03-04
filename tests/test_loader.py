@@ -11,8 +11,10 @@
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pyarrow.compute as pc
+from unittest.mock import MagicMock
 
 import config
+from src.data import loader
 from src.data.loader import SCHEMA, load_parquet
 
 
@@ -144,3 +146,52 @@ class TestDataIntegrity:
         max_date = pc.max(col).as_py()
         assert min_date >= 20210101, f"최소 거래일자: {min_date}"
         assert max_date <= 20241231, f"최대 거래일자: {max_date}"
+
+
+class TestCsvToParquetBranches:
+    """csv_to_parquet/load_parquet 분기 테스트."""
+
+    def test_csv_to_parquet_returns_zero_when_parquet_exists(self, tmp_path):
+        """force=False이고 parquet 파일이 이미 존재하면 0.0을 반환해야 한다."""
+        csv_path = tmp_path / "sample.csv"
+        parquet_path = tmp_path / "sample.parquet"
+        csv_path.write_text("dummy\n", encoding="utf-8")
+        parquet_path.write_text("already", encoding="utf-8")
+
+        elapsed = loader.csv_to_parquet(csv_path=csv_path, parquet_path=parquet_path, force=False)
+
+        assert elapsed == 0.0
+
+    def test_csv_to_parquet_force_writes_int8_fraud_type(self, monkeypatch, tmp_path):
+        """force=True일 때 변환이 수행되고 이상거래유형이 int8로 기록되어야 한다."""
+        csv_path = tmp_path / "input.csv"
+        parquet_path = tmp_path / "out.parquet"
+        csv_path.write_text("dummy\n", encoding="utf-8")
+
+        table = pa.table({
+            "이상거래유형": pa.array([1.0, None], type=pa.float32()),
+        })
+        write_mock = MagicMock()
+
+        monkeypatch.setattr(loader.pcsv, "read_csv", lambda *_args, **_kwargs: table)
+        monkeypatch.setattr(loader.pq, "write_table", write_mock)
+        monkeypatch.setattr(loader.time, "time", MagicMock(side_effect=[100.0, 102.5]))
+
+        elapsed = loader.csv_to_parquet(csv_path=csv_path, parquet_path=parquet_path, force=True)
+
+        assert elapsed == 2.5
+        assert write_mock.call_count == 1
+        written_table = write_mock.call_args.args[0]
+        assert written_table.schema.field("이상거래유형").type == pa.int8()
+        assert write_mock.call_args.kwargs["compression"] == "snappy"
+
+    def test_load_parquet_reads_from_given_path(self, monkeypatch, tmp_path):
+        """load_parquet는 전달된 경로 문자열을 read_table에 넘겨야 한다."""
+        parquet_path = tmp_path / "custom.parquet"
+        read_mock = MagicMock(return_value="TABLE")
+        monkeypatch.setattr(loader.pq, "read_table", read_mock)
+
+        result = loader.load_parquet(parquet_path=parquet_path)
+
+        assert result == "TABLE"
+        read_mock.assert_called_once_with(str(parquet_path))

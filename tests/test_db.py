@@ -10,6 +10,7 @@
 
 import pandas as pd
 import pyarrow as pa
+from unittest.mock import MagicMock
 
 from src.data import db
 
@@ -199,3 +200,76 @@ class TestFraudAnalysis:
         """)
         assert result["withdraw_banks"].iloc[0] >= 10
         assert result["deposit_banks"].iloc[0] >= 10
+
+
+class TestConnectionLifecycle:
+    """db 연결 초기화/종료 분기 테스트."""
+
+    def test_get_connection_initializes_when_conn_missing(self, monkeypatch):
+        """_conn이 없으면 connect, thread 설정, 테이블 초기화를 수행해야 한다."""
+        class DummyConn:
+            def __init__(self):
+                self.executed = []
+
+            def execute(self, sql):
+                self.executed.append(sql)
+                return self
+
+        dummy = DummyConn()
+        init_called = {"count": 0}
+
+        monkeypatch.setattr(db, "_conn", None)
+        monkeypatch.setattr(db.duckdb, "connect", lambda _path: dummy)
+        monkeypatch.setattr(db, "_init_table", lambda: init_called.__setitem__("count", init_called["count"] + 1))
+
+        conn = db.get_connection()
+
+        assert conn is dummy
+        assert init_called["count"] == 1
+        assert any("SET threads TO" in sql for sql in dummy.executed)
+
+    def test_init_table_calls_csv_conversion_when_parquet_missing(self, monkeypatch):
+        """Parquet이 없으면 csv_to_parquet를 호출해야 한다."""
+        class DummyPath:
+            def exists(self):
+                return False
+
+            def as_posix(self):
+                return "/tmp/fake.parquet"
+
+        class DummyConn:
+            def __init__(self):
+                self.executed = []
+
+            def execute(self, sql):
+                self.executed.append(sql)
+                return self
+
+            def fetchone(self):
+                return [123]
+
+        dummy = DummyConn()
+        csv_called = {"called": False}
+
+        monkeypatch.setattr(db, "_conn", dummy)
+        monkeypatch.setattr(db.config, "PARQUET_PATH", DummyPath())
+        monkeypatch.setattr(db, "csv_to_parquet", lambda: csv_called.__setitem__("called", True))
+
+        count = db._init_table()
+
+        assert count == 123
+        assert csv_called["called"] is True
+        assert any("CREATE TABLE IF NOT EXISTS hofinet" in sql for sql in dummy.executed)
+
+    def test_close_handles_none_and_resets_connection(self, monkeypatch):
+        """close()는 None일 때 안전하고, 연결이 있으면 닫고 None으로 돌려야 한다."""
+        monkeypatch.setattr(db, "_conn", None)
+        db.close()
+        assert db._conn is None
+
+        dummy = MagicMock()
+        monkeypatch.setattr(db, "_conn", dummy)
+        db.close()
+
+        dummy.close.assert_called_once()
+        assert db._conn is None
