@@ -35,3 +35,4 @@ _models/*.joblib
 
 # Claude Code
 .claude/
+CLAUDE.md
