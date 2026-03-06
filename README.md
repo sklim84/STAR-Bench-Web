@@ -142,7 +142,60 @@ app.py                          # 라우팅 + 글로벌 CSS 주입
 
 ## 벤치마크 (`_paper/`)
 
-논문 작성 목적의 에이전트 행위능력 벤치마크입니다. 23개 도구, 24개 카테고리, 총 1,258건의 테스트 케이스를 사용하여 다중 모델을 비교합니다.
+논문 작성 목적의 에이전트 행위능력 벤치마크입니다. AML 도메인 특화 23개 도구에 대해 LLM의 도구 선택(tool selection) 및 파라미터 추출(parameter extraction) 능력을 평가합니다.
+
+### 벤치마크 데이터셋 구성
+
+벤치마크 데이터셋은 4개 시트(도구 정의, 평가 시나리오, 벤치마크 케이스, 케이스 요약)로 구성되며, 상세 내용은 [`benchmark_dataset.xlsx`](_paper/benchmarks/benchmark_dataset.xlsx)를 참조합니다.
+
+- **총 테스트 케이스**: 1,258건 (정상 1,099건 + 무관질문 159건)
+- **평가 도구**: 23개 (AML 에이전트의 function calling 도구)
+- **평가 카테고리**: 24개 (도구별 22개 + multi_tool + missing_parameters)
+- **난이도 분포**: Easy 663건 (52.7%) / Medium 412건 (32.7%) / Hard 173건 (13.8%)
+
+#### 도구 정의 및 평가 시나리오
+
+각 도구에 대해 **정답 도구(①)**, **유사 기능 도구(②)**, **인접·미끼 도구(③)** 역할을 정의하고, 도구별 평가 시나리오(시나리오 설정, 사용자 질문, 정답, 정답 설정 근거, 모델 사고 과정)를 설계하였습니다.
+
+| 서브 도메인 | 도구 | 설명 |
+|------------|------|------|
+| **이상거래 통계 및 현황 조회** | get_statistics | 전체 이상거래 요약 통계 조회 |
+| | get_fraud_type_summary | 이상거래 유형별 상세 현황 조회 |
+| | get_account_profile | 특정 계좌의 거래 통계 프로파일 조회 |
+| | compare_periods | 두 기간 이상거래 통계 비교 |
+| | get_institution_report | 금융회사 종합 현황 보고 |
+| | query_transactions | SQL 기반 거래 데이터 원본 조회 |
+| **AML 탐지·분석 및 보고서 작성** | analyze_network | 계좌 거래 네트워크 구조 분석 |
+| | detect_aml_patterns | AML 특화 패턴 탐지 |
+| | rank_risky_transactions | 위험도 상위 거래 일괄 랭킹 |
+| | predict_fraud | XGBoost 모델 기반 이상거래 확률 예측 |
+| | generate_str | 의심거래보고서(STR) 공식 양식 작성 |
+| **CTR·위험평가·모니터링** | detect_ctr_candidates | CTR 대상 고액거래 및 분할거래 탐지 |
+| | score_account_risk | 계좌 행위 기반 위험도 종합 평가 |
+| | detect_monitoring_alerts | 규칙 기반 거래 모니터링 알림 탐지 |
+| **자금 흐름·추세·채널 분석** | detect_dormant_reactivation | 장기 휴면 계좌 재활성화 탐지 |
+| | detect_smurfing_network | 스머핑(자금 수집/분산) 네트워크 탐지 |
+| | get_trend_analysis | 시계열 추세 분석 |
+| | analyze_channel_risk | 채널(매체) 위험도 분석 |
+| | get_receiving_account_profile | 입금 계좌 프로파일 조회 |
+| | analyze_cross_institution_flow | 기관간 자금 흐름 분석 |
+| **AML 참조 자료** | lookup_fiu_reference_types | FIU 의심거래 참고유형 검색 |
+| | validate_str_fields | STR 필드 점검 |
+| | get_aml_glossary | AML 용어집 |
+
+#### 카테고리별 케이스 분포
+
+| 카테고리 | 합계 | 정상 | 무관질문 | Easy | Medium | Hard |
+|---------|------|------|---------|------|--------|------|
+| multi_tool | 100 | 92 | 8 | 16 | 55 | 29 |
+| query_transactions | 66 | 58 | 12 | 29 | 23 | 10 |
+| get_statistics | 60 | 55 | 8 | 30 | 17 | 10 |
+| predict_fraud | 60 | 53 | 7 | 37 | 16 | 7 |
+| 기타 18개 카테고리 | 947 | 816 | 134 | 540 | 290 | 114 |
+| missing_parameters | 25 | 0 | 25 | 11 | 11 | 3 |
+| **합계** | **1,258** | **1,099** | **169** | **663** | **412** | **173** |
+
+**평가 메트릭**: 종합점수(0~1), 도구 선택 정확도(primary_tool_hit_rate), 파라미터 추출 정확도(param_accuracy), 에러 유형별 분포(wrong_func, wrong_params, missing_params, connection_error)
 
 ### 실험 결과 (18개 모델, 2026-03-06)
 
