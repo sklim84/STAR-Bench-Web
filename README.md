@@ -144,6 +144,46 @@ app.py                          # 라우팅 + 글로벌 CSS 주입
 
 논문 작성 목적의 에이전트 행위능력 벤치마크입니다. 23개 도구, 24개 카테고리, 총 1,258건의 테스트 케이스를 사용하여 다중 모델을 비교합니다.
 
+### 실험 결과 (18개 모델, 2026-03-06)
+
+| 모델 | 파라미터 | 종합점수 | 도구정확도 | 파라미터정확도 |
+|------|---------|---------|----------|-------------|
+| Qwen3-4B-Thinking (think) | 4B | 0.927 | 94.7% | 90.0% |
+| Qwen3-4B-Thinking (nothink) | 4B | 0.927 | 94.7% | 90.1% |
+| gpt-oss-120b (think) | 120B | 0.912 | 92.3% | 92.5% |
+| gpt-oss-120b (nothink) | 120B | 0.909 | 92.1% | 92.0% |
+| Mistral-Small-3.2-24B | 24B | 0.900 | 89.5% | 89.5% |
+| gpt-oss-20b (nothink) | 20B | 0.892 | 89.6% | 88.4% |
+| gpt-oss-20b (think) | 20B | 0.891 | 89.5% | 88.4% |
+| Qwen3-4B-Instruct | 4B | 0.887 | 90.5% | 88.1% |
+| Llama-3.1-8B-Instruct | 8B | 0.809 | 81.9% | 79.1% |
+| Kanana-1.5-8B | 8B | 0.771 | 74.6% | 73.0% |
+| Kanana-1.5-15.7B | 15.7B (3B active) | 0.717 | 66.2% | 68.5% |
+| Granite-3.1-8B | 8B | 0.326 | 12.9% | 23.4% |
+| EXAONE-3.5-7.8B | 7.8B | 0.325 | 12.6% | 23.4% |
+| Gemma-3-12B | 12B | 0.325 | 12.6% | 23.4% |
+| Gemma-3-27B | 27B | 0.325 | 12.6% | 23.4% |
+| Phi-4-mini | 14B | 0.225 | 8.3% | 13.8% |
+| Kanana-1.5-2.1B | 2.1B | 0.224 | 22.1% | 21.4% |
+| EXAONE-3.5-32B | 32B | 0.072 | 2.1% | 6.5% |
+
+> Granite, EXAONE, Gemma 등 하위 모델은 vLLM tool-call parser 호환 문제로 도구 호출 추출이 실패한 케이스가 대부분이며, 파서 변경 재실험 진행 중.
+
+### 비교 대상 모델 (8개 계열, 20개 구성)
+
+| 계열 | 모델 | 파라미터 | 실행 환경 |
+|------|------|---------|---------|
+| GPT-OSS | gpt-oss-20b, gpt-oss-120b | 20B, 120B | vLLM |
+| Qwen3 | Qwen3-4B-Instruct, Qwen3-4B-Thinking | 4B | vLLM |
+| Mistral | Mistral-Small-3.2-24B-Instruct | 24B | vLLM |
+| Llama | Llama-3.1-8B-Instruct | 8B | vLLM |
+| Kanana | kanana-1.5-2.1b, 8b, 15.7b-a3b | 2.1B~15.7B | vLLM (커스텀 파서) |
+| EXAONE | EXAONE-3.5-7.8B, 32B | 7.8B, 32B | vLLM |
+| Gemma | gemma-3-12b-it, 27b-it | 12B, 27B | vLLM |
+| Granite | granite-3.1-8b | 8B | vLLM |
+
+### 실행 방법
+
 ```bash
 # 단일 모델 벤치마크
 python _paper/benchmarks/run_multi_model.py \
@@ -157,4 +197,24 @@ python _paper/benchmarks/run_multi_model.py \
 bash _paper/benchmarks/scripts/run_all_models.sh
 ```
 
-지원 프로바이더: OpenAI, Anthropic, Ollama, vLLM (로컬 모델)
+### 결과 디렉토리 구조
+
+```
+_paper/results/
+├── eval/              # 모델별 평가 결과 JSON (eval_<model>_<timestamp>.json)
+├── checkpoint/        # 케이스별 체크포인트 JSONL (재실행 시 완료건 스킵)
+├── logs/
+│   ├── bench/         # 벤치마크 실행 로그
+│   └── vllm/          # vLLM 서버 로그
+├── figures/           # 시각화 PNG (visualize_results.py로 생성)
+│   ├── fig1_overall_performance.png   # 모델별 종합 성능 비교
+│   ├── fig2_radar_chart.png           # 카테고리별 레이더 차트
+│   ├── fig3_error_distribution.png    # 에러 유형 분포
+│   ├── fig4_difficulty_heatmap.png    # 난이도별 성능 히트맵
+│   ├── fig5_tool_vs_param.png         # 도구정확도 vs 파라미터정확도
+│   └── fig6_category_heatmap.png      # 카테고리 × 모델 히트맵
+├── visualize_results.py               # 시각화 생성 스크립트
+└── comparison_*.xlsx                  # 다중 모델 비교 리포트
+```
+
+지원 프로바이더: OpenAI, Anthropic, vLLM (로컬 모델)
