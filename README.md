@@ -169,6 +169,30 @@ app.py                          # 라우팅 + 글로벌 CSS 주입
 
 > Granite, EXAONE, Gemma 등 하위 모델은 vLLM tool-call parser 호환 문제로 도구 호출 추출이 실패한 케이스가 대부분이며, 파서 변경 재실험 진행 중.
 
+#### 종합 성능 비교
+
+<img src="_paper/results/figures/fig1_overall_performance.png" width="700" alt="Overall Performance">
+
+#### 도구 선택 vs 파라미터 추출 정확도
+
+<img src="_paper/results/figures/fig5_tool_vs_param.png" width="600" alt="Tool vs Param">
+
+#### 난이도별 성능 히트맵
+
+<img src="_paper/results/figures/fig4_difficulty_heatmap.png" width="700" alt="Difficulty Heatmap">
+
+#### 카테고리별 레이더 차트 (상위 6개 모델)
+
+<img src="_paper/results/figures/fig2_radar_chart.png" width="700" alt="Radar Chart">
+
+#### 에러 유형 분포
+
+<img src="_paper/results/figures/fig3_error_distribution.png" width="700" alt="Error Distribution">
+
+#### 카테고리 × 모델 히트맵
+
+<img src="_paper/results/figures/fig6_category_heatmap.png" width="800" alt="Category Heatmap">
+
 ### 비교 대상 모델 (8개 계열, 20개 구성)
 
 | 계열 | 모델 | 파라미터 | 실행 환경 |
