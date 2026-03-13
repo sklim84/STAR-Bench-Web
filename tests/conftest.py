@@ -7,19 +7,11 @@ DuckDB 파일 잠금 문제 해결:
 - 모든 테스트는 이 in-memory 연결을 공유 (세션 스코프)
 """
 
-import logging
 import sys
 from pathlib import Path
 
 import duckdb
 import pytest
-
-# Streamlit 런타임 경고 억제 (벤치마크 테스트에서 st.cache_data 로드 시 발생)
-for _name in ("streamlit", "streamlit.runtime", "streamlit.runtime.caching", "streamlit.runtime.caching.cache_data_api"):
-    _log = logging.getLogger(_name)
-    _log.setLevel(logging.CRITICAL)
-    _log.propagate = False
-    _log.handlers = []
 
 # 프로젝트 루트를 sys.path에 추가
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -60,13 +52,3 @@ def patch_db_connection():
     # 테스트 종료 후 정리
     conn.close()
     db_module._conn = original_conn
-
-
-def pytest_configure(config):
-    """커스텀 마크 등록."""
-    config.addinivalue_line(
-        "markers", "integration: 실제 OpenAI API를 호출하는 통합 테스트 (OPENAI_API_KEY 필요)"
-    )
-    config.addinivalue_line(
-        "markers", "memgraph: Memgraph 인스턴스가 실행 중일 때만 실행되는 테스트"
-    )
