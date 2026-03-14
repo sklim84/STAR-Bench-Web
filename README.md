@@ -295,3 +295,70 @@ _paper/results/
 ```
 
 지원 프로바이더: OpenAI, Anthropic, vLLM (로컬 모델)
+
+## TODO
+
+### 영문 Ablation 실험 (한/영 프롬프트 비교)
+
+동일 1,258건 벤치마크 케이스를 영어로 번역하여, 질문 언어(한국어↔영어)에 따른 tool-calling 정확도 차이를 분석하는 단일변수 실험.
+
+- **번역 완료**: GPT-4o-mini로 24개 케이스 파일 전체 영문 번역 (`_paper/benchmarks_en/`)
+- **`benchmark.py` 수정 완료**: `--cases-dir` 옵션 추가로 한/영 데이터셋 전환 가능
+- **결과 저장 경로**: `_paper/results_en/` (한국어: `_paper/results/`)
+
+#### 완료 모델 (10/44)
+
+| GPU | 모델 | 상태 |
+|-----|------|------|
+| GPU0 | xLAM-1B, EXAONE-1.2B, Qwen2.5-1.5B, xLAM-3B, Ministral-3B, Kanana-2.1B | 완료 |
+| GPU0 | Qwen3-4B, xLAM-8B | 완료 |
+| GPU1 | Ministral-14B, Kanana-15.7B | 완료 |
+
+#### 미완료 모델 (34/44)
+
+**GPU0 대상 (소형/중형 모델)**:
+- [ ] Qwen3-8B, Kanana-8B, OLMo-3-7B, Command-R-7B, Granite-3.2-8B
+- [ ] Llama-3.1-8B, Hermes-3-8B, DeepSeek-R1-Qwen3-8B, Ministral-8B, Mistral-Nemo-12B
+- [ ] Qwen3-4B-Thinking (think/nothink)
+- [ ] Qwen3.5-0.8B, Qwen3.5-2B, Qwen3.5-4B, Qwen3.5-9B (각 think/nothink)
+
+**GPU1 대상 (중형/대형 모델)**:
+- [ ] Mistral-Small-24B, xLAM-32B, EXAONE-32B, GLM-4.7-Flash, Qwen3-Coder-30B
+- [ ] gpt-oss-20b (think/nothink)
+- [ ] Qwen3-30B-A3B-Thinking (think/nothink)
+- [ ] Qwen3.5-27B (think/nothink)
+- [ ] Qwen3-30B-A3B-Instruct
+
+**TP=2 대상 (70B 모델, GPU 2장 필요)**:
+- [ ] Llama-3.3-70B, xLAM-70B
+
+**상용 API 모델**:
+- [ ] gpt-4o-mini, gpt-5-mini (OpenAI)
+- [ ] claude-haiku-4-5, claude-sonnet-4-5 (Anthropic)
+
+#### 실행 방법
+
+```bash
+# GPU0 소형/중형 모델
+CUDA_VISIBLE_DEVICES=0 bash /tmp/bench_en_gpu0_retry.sh
+
+# GPU1 중형/대형 모델
+CUDA_VISIBLE_DEVICES=1 bash /tmp/bench_en_gpu1_retry.sh
+
+# TP=2 70B 모델 (GPU0/1 완료 후)
+bash /tmp/bench_en_tp2_retry.sh
+
+# 상용 API 모델
+python -m _paper.scripts.benchmark --models gpt-4o-mini --output _paper/results_en/ --cases-dir _paper/benchmarks_en/
+python -m _paper.scripts.benchmark --models claude-haiku-4-5-20251001 --output _paper/results_en/ --cases-dir _paper/benchmarks_en/
+```
+
+#### 완료 후 작업
+- [ ] 한/영 결과 비교 분석 (Korean vs English accuracy delta)
+- [ ] 비교 시각화 생성 (fig 추가)
+- [ ] 한국어 벤치마크 시각화 재생성 (44개 모델 반영)
+
+### 기타
+
+- [ ] `benchmark.py` 코드 정리: VLLM_BASE_URL 상수 추출, 미사용 openpyxl import lazy화
+- [ ] `evaluator.py` 리팩토링: _safe_json_load(), _check_keywords() 헬퍼 추출, 108줄 거대함수 분리
