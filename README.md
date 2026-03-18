@@ -298,67 +298,64 @@ _paper/results/
 
 ## TODO
 
-### 영문 Ablation 실험 (한/영 프롬프트 비교)
+### 1. api_error 재실험 (checkpoint 삭제 후 재실행 필요)
+
+vLLM 타임아웃 등으로 api_error가 발생한 케이스. checkpoint 삭제 후 재실행하면 이어서 처리됨.
+재실행 방법: 해당 모델의 checkpoint 파일 삭제 → `--checkpoint` 옵션으로 벤치마크 재실행.
+
+**KR 재실험 (api_error 비율 10% 이상):**
+- [ ] DeepSeek-R1-Qwen3-8B — score=0, 전체 실패
+- [ ] Llama-3.2-3B — api_error 360건 (29%)
+- [ ] Llama-3.2-1B — api_error 190건 (15%)
+- [ ] Llama-3.1-8B — api_error 106건 (8%)
+
+**EN 재실험 (api_error 비율 10% 이상):**
+- [ ] Qwen3-8B — api_error 578건 (46%)
+- [ ] Llama-3.2-3B — api_error 569건 (45%)
+- [ ] Qwen3.5-2B think — 455건 (36%)
+- [ ] Qwen3.5-0.8B nothink — 445건 (35%)
+- [ ] Qwen3.5-2B nothink — 411건 (33%)
+- [ ] Mistral-Small-24B — 409건 (33%)
+- [ ] Qwen3.5-4B think — 358건 (28%)
+- [ ] Qwen3.5-9B think — 331건 (26%)
+- [ ] GLM-4.7-Flash — 298건 (24%)
+- [ ] Qwen3.5-0.8B think — 270건 (21%)
+- [ ] Qwen3.5-4B nothink — 233건 (19%)
+- [ ] Ministral-8B — 214건 (17%)
+- [ ] Qwen3-Coder-30B — 205건 (16%)
+- [ ] Qwen3.5-9B nothink — 197건 (16%)
+- [ ] Ministral-3B — 156건 (12%)
+- [ ] Llama-3.1-8B — 142건 (11%)
+- [ ] Qwen3-30B-Instruct — 139건 (11%)
+- [ ] Llama-3.2-1B — 125건 (10%)
+- [ ] Qwen3.5-27B nothink — 122건 (10%)
+- [ ] Qwen3.5-27B think — 126건 (10%)
+
+### 2. 상용 API 모델 벤치마크
+
+- [ ] gpt-4o-mini KR+EN — 이전 실행 시 API 키 문제로 실패, 재실행 필요
+- [ ] claude-haiku-4-5 KR+EN — 전체 api_error, 재실행 필요
+- [ ] claude-sonnet-4-5 KR+EN (선택)
+- [ ] gpt-5-mini KR+EN (선택)
+
+### 3. 영문 Ablation 실험 현황
 
 동일 1,258건 벤치마크 케이스를 영어로 번역하여, 질문 언어(한국어↔영어)에 따른 tool-calling 정확도 차이를 분석하는 단일변수 실험.
 
 - **번역 완료**: GPT-4o-mini로 24개 케이스 파일 전체 영문 번역 (`_paper/benchmarks_en/`)
 - **`benchmark.py` 수정 완료**: `--cases-dir` 옵션 추가로 한/영 데이터셋 전환 가능
-- **결과 저장 경로**: `_paper/results_en/` (한국어: `_paper/results/`)
+- **결과**: KR 51개 모델 / EN 50개 모델 완료 (api_error 재실험 제외)
 
-#### 완료 모델 (10/44)
+### 4. 분석 & 시각화
 
-| GPU | 모델 | 상태 |
-|-----|------|------|
-| GPU0 | xLAM-1B, EXAONE-1.2B, Qwen2.5-1.5B, xLAM-3B, Ministral-3B, Kanana-2.1B | 완료 |
-| GPU0 | Qwen3-4B, xLAM-8B | 완료 |
-| GPU1 | Ministral-14B, Kanana-15.7B | 완료 |
+- [ ] 한/영 결과 비교 분석 (Korean vs English accuracy delta, paired t-test)
+- [ ] Think vs NoThink 분석 (10+ 모델 비교)
+- [ ] 파라미터 효율성 분석 (모델 크기 vs 종합점수)
+- [ ] 국산 모델 특집 분석 (Kanana 1.5→2 세대 비교, EXAONE, A.X)
+- [ ] 비교 시각화 재생성 (fig 추가)
 
-#### 미완료 모델 (34/44)
+### 5. 코드 정리
 
-**GPU0 대상 (소형/중형 모델)**:
-- [ ] Qwen3-8B, Kanana-8B, OLMo-3-7B, Command-R-7B, Granite-3.2-8B
-- [ ] Llama-3.1-8B, Hermes-3-8B, DeepSeek-R1-Qwen3-8B, Ministral-8B, Mistral-Nemo-12B
-- [ ] Qwen3-4B-Thinking (think/nothink)
-- [ ] Qwen3.5-0.8B, Qwen3.5-2B, Qwen3.5-4B, Qwen3.5-9B (각 think/nothink)
-
-**GPU1 대상 (중형/대형 모델)**:
-- [ ] Mistral-Small-24B, xLAM-32B, EXAONE-32B, GLM-4.7-Flash, Qwen3-Coder-30B
-- [ ] gpt-oss-20b (think/nothink)
-- [ ] Qwen3-30B-A3B-Thinking (think/nothink)
-- [ ] Qwen3.5-27B (think/nothink)
-- [ ] Qwen3-30B-A3B-Instruct
-
-**TP=2 대상 (70B 모델, GPU 2장 필요)**:
-- [ ] Llama-3.3-70B, xLAM-70B
-
-**상용 API 모델**:
-- [ ] gpt-4o-mini, gpt-5-mini (OpenAI)
-- [ ] claude-haiku-4-5, claude-sonnet-4-5 (Anthropic)
-
-#### 실행 방법
-
-```bash
-# GPU0 소형/중형 모델
-CUDA_VISIBLE_DEVICES=0 bash /tmp/bench_en_gpu0_retry.sh
-
-# GPU1 중형/대형 모델
-CUDA_VISIBLE_DEVICES=1 bash /tmp/bench_en_gpu1_retry.sh
-
-# TP=2 70B 모델 (GPU0/1 완료 후)
-bash /tmp/bench_en_tp2_retry.sh
-
-# 상용 API 모델
-python -m _paper.scripts.benchmark --models gpt-4o-mini --output _paper/results_en/ --cases-dir _paper/benchmarks_en/
-python -m _paper.scripts.benchmark --models claude-haiku-4-5-20251001 --output _paper/results_en/ --cases-dir _paper/benchmarks_en/
-```
-
-#### 완료 후 작업
-- [ ] 한/영 결과 비교 분석 (Korean vs English accuracy delta)
-- [ ] 비교 시각화 생성 (fig 추가)
-- [ ] 한국어 벤치마크 시각화 재생성 (44개 모델 반영)
-
-### 기타
-
-- [ ] `benchmark.py` 코드 정리: VLLM_BASE_URL 상수 추출, 미사용 openpyxl import lazy화
-- [ ] `evaluator.py` 리팩토링: _safe_json_load(), _check_keywords() 헬퍼 추출, 108줄 거대함수 분리
+- [ ] `benchmark.py`: VLLM_BASE_URL 상수 추출, 미사용 openpyxl import lazy화
+- [ ] `evaluator.py`: _safe_json_load(), _check_keywords() 헬퍼 추출, 108줄 거대함수 분리
+- [ ] KR eval 중복 파일 정리 완료 (28개 삭제, 2026-03-18)
