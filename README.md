@@ -298,43 +298,21 @@ _paper/results/
 
 ## TODO
 
-### 1. api_error 재실험 (Phase7로 스케줄링 완료)
+### 1. api_error 재실험 (Phase7 진행 중 + KR 보충 실행 중)
 
 벤치마크 중 발생한 api_error의 근본 원인 3가지와 조치:
 
-| 원인 | 영향 | 조치 |
-|------|------|------|
-| **컨텍스트 길이 초과** — 영문 번역으로 토큰 수 증가하여 `max-model-len 16384` 초과 | EN의 Qwen3.5 계열, Mistral-Small, GLM 등 대부분 | `--max-model-len 32768`로 상향 |
-| **tool parser 비호환** — `deepseek_v3` 파서가 토큰 매핑 실패 | DeepSeek-R1-Qwen3-8B (KR+EN 전체 실패) | `hermes` 파서로 변경하여 재시도 |
-| **단일 tool-call 제한** — Llama-3.2 계열이 multi-tool call 미지원 (`This model only supports single tool-calls at once!`) | Llama-3.2-1B/3B의 multi_tool 카테고리 | **모델 한계 (수정 불가)** — 해당 케이스는 에러로 기록되며, 논문에서 "Llama-3.2 계열은 병렬 tool calling을 지원하지 않아 multi-tool 케이스에서 체계적 실패 발생"으로 기술 |
+| 원인 | 영향 | 조치 | 상태 |
+|------|------|------|------|
+| **컨텍스트 길이 초과** — 영문 번역으로 토큰 수 증가하여 `max-model-len 16384` 초과 | EN의 Qwen3.5 계열, Mistral-Small, GLM 등 대부분 | `--max-model-len 32768`로 상향 | Phase7 진행 중 |
+| **tool parser 비호환** — `deepseek_v3` 파서가 토큰 매핑 실패 | DeepSeek-R1-Qwen3-8B (KR+EN 전체 실패) | `hermes` 파서로 변경하여 재시도 | Phase7 진행 중 |
+| **단일 tool-call 제한** — Llama-3.2 계열이 multi-tool call 미지원 (`This model only supports single tool-calls at once!`) | Llama-3.2-1B/3B의 multi_tool 카테고리 | **모델 한계 (수정 불가)** — 논문에서 "Llama-3.2 계열은 병렬 tool calling을 지원하지 않아 multi-tool 케이스에서 체계적 실패 발생"으로 기술 | 완료 (모델 한계) |
 
-**KR 재실험 (api_error 비율 10% 이상):**
-- [ ] DeepSeek-R1-Qwen3-8B — score=0, 전체 실패 → hermes 파서로 변경
-- [ ] Llama-3.2-3B — api_error 360건 (29%) → max-model-len 32768
-- [ ] Llama-3.2-1B — api_error 190건 (15%) → max-model-len 32768
-- [ ] Llama-3.1-8B — api_error 106건 (8%)
+재실험 방법: checkpoint에서 api_error 행 제거 → `--checkpoint --max-model-len 32768`로 재실행 → 정상건 보존 + 실패건만 재시도.
 
-**EN 재실험 (api_error 비율 10% 이상, 모두 max-model-len 32768 적용):**
-- [ ] Qwen3-8B — 578건 (46%)
-- [ ] Llama-3.2-3B — 569건 (45%)
-- [ ] Qwen3.5-2B think — 455건 (36%)
-- [ ] Qwen3.5-0.8B nothink — 445건 (35%)
-- [ ] Qwen3.5-2B nothink — 411건 (33%)
-- [ ] Mistral-Small-24B — 409건 (33%)
-- [ ] Qwen3.5-4B think — 358건 (28%)
-- [ ] Qwen3.5-9B think — 331건 (26%)
-- [ ] GLM-4.7-Flash — 298건 (24%)
-- [ ] Qwen3.5-0.8B think — 270건 (21%)
-- [ ] Qwen3.5-4B nothink — 233건 (19%)
-- [ ] Ministral-8B — 214건 (17%)
-- [ ] Qwen3-Coder-30B — 205건 (16%)
-- [ ] Qwen3.5-9B nothink — 197건 (16%)
-- [ ] Ministral-3B — 156건 (12%)
-- [ ] Llama-3.1-8B — 142건 (11%)
-- [ ] Qwen3-30B-Instruct — 139건 (11%)
-- [ ] Llama-3.2-1B — 125건 (10%)
-- [ ] Qwen3.5-27B nothink — 122건 (10%)
-- [ ] Qwen3.5-27B think — 126건 (10%)
+**KR 재실험:** Phase7 Step1 + GPU1 보충 스크립트로 21개 모델 처리 중 (부족 총 332건)
+**EN 재실험:** Phase7 Step2~4로 20개 모델 처리 중 (`--max-model-len 32768` 적용)
+**TP=2 모델 (KR):** Llama-70B, Scout-17B, A.X-4.0 — Phase7 이후 별도 처리 필요
 
 ### 2. 상용 API 모델 벤치마크
 
@@ -349,9 +327,27 @@ _paper/results/
 
 - **번역 완료**: GPT-4o-mini로 24개 케이스 파일 전체 영문 번역 (`_paper/benchmarks_en/`)
 - **`benchmark.py` 수정 완료**: `--cases-dir` 옵션 추가로 한/영 데이터셋 전환 가능
-- **결과**: KR 51개 모델 / EN 50개 모델 완료 (api_error 재실험 제외)
+- **결과 (2026-03-19)**: KR 51개 모델 / EN 50개 모델 벤치마크 완료, api_error 재실험 진행 중
+- **추가 모델**: Kanana 2 instruct/thinking (KR+EN), SKT A.X-4.0/Light (KR+EN), Llama-4-Scout-17B FP8 (KR+EN), Llama-3.2-1B/3B (KR+EN)
 
-### 4. 분석 & 시각화
+### 4. 재현성 검증 (Phase6 완료)
+
+상위 3개 모델 2회차 재실행으로 결과 분산(variance) 측정:
+- [x] Qwen3-4B-Thinking (think/nothink) — `_paper/results_repro/`
+- [x] Mistral-Small-3.2-24B — `_paper/results_repro/`
+- [x] gpt-oss-20b (think/nothink) — `_paper/results_repro/`
+
+### 5. 제외 모델 (vLLM 미지원 / OOM)
+
+| 모델 | 사유 |
+|------|------|
+| gpt-oss-120b | OOM (bf16 240GB, FP8도 crash) |
+| Qwen3.5-27B (단일 GPU) | Mamba hybrid cuda graph crash → TP=2+enforce-eager로 성공 |
+| HyperCLOVAX-SEED-Think-14B/32B | `HCXVisionV2ForCausalLM` 아키텍처 미지원 |
+| Solar-Open-100B | bf16 205GB → TP=2 불가, INT4는 공정 비교 불가 |
+| Llama-4-Scout-17B (bf16) | bf16 218GB → FP8 양자화로 TP=2 성공 |
+
+### 6. 분석 & 시각화
 
 - [ ] 한/영 결과 비교 분석 (Korean vs English accuracy delta, paired t-test)
 - [ ] Think vs NoThink 분석 (10+ 모델 비교)
@@ -359,8 +355,9 @@ _paper/results/
 - [ ] 국산 모델 특집 분석 (Kanana 1.5→2 세대 비교, EXAONE, A.X)
 - [ ] 비교 시각화 재생성 (fig 추가)
 
-### 5. 코드 정리
+### 7. 코드 정리
 
 - [ ] `benchmark.py`: VLLM_BASE_URL 상수 추출, 미사용 openpyxl import lazy화
 - [ ] `evaluator.py`: _safe_json_load(), _check_keywords() 헬퍼 추출, 108줄 거대함수 분리
-- [ ] KR eval 중복 파일 정리 완료 (28개 삭제, 2026-03-18)
+- [x] KR eval 중복 파일 정리 완료 (28개 삭제, 2026-03-18)
+- [x] visualize_results.py 중복 제거 (symlink 전환, 2026-03-17)
