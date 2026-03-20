@@ -33,6 +33,15 @@ _datasets/*.duckdb.wal
 _models/*.pkl
 _models/*.joblib
 
+# Coverage
+.coverage
+htmlcov/
+
+# Benchmark logs (regeneratable)
+_paper/results/**/logs/
+_paper/results_en/**/logs/
+_paper/results_repro/**/logs/
+
 # Claude Code
 .claude/
 CLAUDE.md
