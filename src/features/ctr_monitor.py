@@ -17,7 +17,7 @@ _CACHE_HASH_FUNCS = {
 }
 
 
-def _safe_int(val, default=0):
+def _safe_int(val, default: int = 0) -> int:
     """NaN-safe int 변환."""
     if val is None or (isinstance(val, float) and math.isnan(val)):
         return default

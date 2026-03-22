@@ -160,7 +160,7 @@ def score_account(account_id: int) -> dict:
     aid = int(account_id)
 
     # 계좌 존재 여부 확인
-    check = query(f"SELECT COUNT(*) AS cnt FROM hofinet WHERE 출금계좌일련번호 = {aid}")
+    check = query("SELECT COUNT(*) AS cnt FROM hofinet WHERE 출금계좌일련번호 = ?", [aid])
     if check.empty or _safe_int(check.iloc[0]["cnt"]) == 0:
         return {"account_id": aid, "error": "해당 계좌의 거래 내역이 없습니다."}
 

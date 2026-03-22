@@ -37,7 +37,7 @@ FRAUD_TYPE_LABELS = {
 }
 
 
-def _load_split(split_name):
+def _load_split(split_name: str) -> pd.DataFrame:
     """원본 Training/Test/Validation 분할 데이터를 로드한다."""
     import pyarrow.csv as pcsv
     from src.data.loader import CONVERT_OPTIONS
@@ -51,7 +51,7 @@ def _load_split(split_name):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def get_training_data():
+def get_training_data() -> tuple:
     """학습/테스트/검증 데이터를 반환한다."""
     train = _load_split("Training")
     test = _load_split("Test")
@@ -64,7 +64,7 @@ def get_training_data():
     return X_train, y_train, X_test, y_test, X_val, y_val
 
 
-def train_model(X_train, y_train, X_val, y_val, params=None):
+def train_model(X_train: pd.DataFrame, y_train: pd.Series, X_val: pd.DataFrame, y_val: pd.Series, params: dict | None = None):
     """XGBoost 모델을 학습하고 저장한다.
 
     Args:
@@ -115,14 +115,14 @@ def train_model(X_train, y_train, X_val, y_val, params=None):
 
 
 @st.cache_resource
-def load_model():
+def load_model() -> object | None:
     """저장된 모델을 로드한다. 없으면 None. 앱 생명주기 동안 1회만 디스크에서 로드."""
     if MODEL_PATH.exists():
         return joblib.load(MODEL_PATH)
     return None
 
 
-def evaluate_model(model, X_test, y_test):
+def evaluate_model(model: object, X_test: pd.DataFrame, y_test: pd.Series) -> dict:
     """모델 성능을 평가하고 결과를 반환한다."""
     y_prob = model.predict_proba(X_test)[:, 1]
     y_pred = model.predict(X_test)
@@ -143,7 +143,7 @@ def evaluate_model(model, X_test, y_test):
     }
 
 
-def get_feature_importance(model):
+def get_feature_importance(model: object) -> pd.DataFrame:
     """피처 중요도를 DataFrame으로 반환한다."""
     importance = model.feature_importances_
     return pd.DataFrame({
@@ -152,7 +152,7 @@ def get_feature_importance(model):
     }).sort_values("중요도", ascending=False)
 
 
-def find_optimal_threshold(y_test, y_prob):
+def find_optimal_threshold(y_test: pd.Series, y_prob) -> dict:
     """Precision-Recall 커브에서 F1-Score를 최대화하는 최적 임계값을 탐색한다.
 
     다양한 임계값(0.1~0.9, 0.05 단위)에서 precision, recall, f1을 계산하고
@@ -226,7 +226,7 @@ def find_optimal_threshold(y_test, y_prob):
     }
 
 
-def get_roc_curve_data(y_test, y_prob):
+def get_roc_curve_data(y_test: pd.Series, y_prob) -> dict:
     """ROC 커브 데이터를 반환한다.
 
     Args:
@@ -246,7 +246,7 @@ def get_roc_curve_data(y_test, y_prob):
     }
 
 
-def evaluate_by_fraud_type(model, limit=5000):
+def evaluate_by_fraud_type(model: object, limit: int = 5000) -> pd.DataFrame:
     """이상거래 유형별 모델 탐지 성능(Recall)을 평가한다.
 
     DB에서 이상거래 포함 샘플을 추출하고, 유형별로 recall을 계산한다.
@@ -300,7 +300,7 @@ def evaluate_by_fraud_type(model, limit=5000):
     return pd.DataFrame(records)
 
 
-def get_probability_distribution(y_test, y_prob, bins=10):
+def get_probability_distribution(y_test: pd.Series, y_prob, bins: int = 10) -> pd.DataFrame:
     """예측 확률 구간별 정상/이상 건수 분포를 반환한다.
 
     Args:
@@ -339,7 +339,7 @@ def get_probability_distribution(y_test, y_prob, bins=10):
     return pd.DataFrame(records)
 
 
-def predict_from_db(model, limit=1000):
+def predict_from_db(model: object, limit: int = 1000) -> pd.DataFrame:
     """hofinet 테이블에서 샘플을 추출하여 예측 결과를 반환한다."""
     # limit은 int 형변환으로 안전하게 처리 (DuckDB는 LIMIT 파라미터 바인딩 미지원)
     limit = int(limit)

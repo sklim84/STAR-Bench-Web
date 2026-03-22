@@ -17,7 +17,7 @@ _CACHE_HASH_FUNCS = {
 # 글로벌 필터 헬퍼
 # ------------------------------------------------------------------
 
-def _build_filter_conditions(filters):
+def _build_filter_conditions(filters: dict | None) -> str:
     """필터 딕셔너리를 SQL 조건 문자열로 변환한다 (WHERE 키워드 없이)."""
     if not filters:
         return ""
@@ -35,7 +35,7 @@ def _build_filter_conditions(filters):
     return " AND ".join(clauses)
 
 
-def _apply_filters(base_where, filters):
+def _apply_filters(base_where: str, filters: dict | None) -> str:
     """기존 WHERE 절과 필터 조건을 결합한다.
 
     Args:
@@ -56,7 +56,7 @@ def _apply_filters(base_where, filters):
 
 
 @st.cache_data(ttl=300, hash_funcs=_CACHE_HASH_FUNCS, show_spinner=False)
-def get_summary(filters=None):
+def get_summary(filters: dict | None = None) -> pd.DataFrame:
     """전체 요약 지표를 반환한다."""
     where = _apply_filters("", filters)
     return query(f"""
@@ -75,7 +75,7 @@ def get_summary(filters=None):
 
 
 @st.cache_data(ttl=300, hash_funcs=_CACHE_HASH_FUNCS, show_spinner=False)
-def get_quarterly_trend(filters=None):
+def get_quarterly_trend(filters: dict | None = None) -> pd.DataFrame:
     """분기별 거래 건수 및 이상거래 추이를 반환한다."""
     where = _apply_filters("", filters)
     return query(f"""
@@ -98,7 +98,7 @@ def get_quarterly_trend(filters=None):
 
 
 @st.cache_data(ttl=300, hash_funcs=_CACHE_HASH_FUNCS, show_spinner=False)
-def get_hourly_distribution(filters=None):
+def get_hourly_distribution(filters: dict | None = None) -> pd.DataFrame:
     """시간대별 거래 분포를 반환한다."""
     where = _apply_filters("", filters)
     return query(f"""
@@ -115,7 +115,7 @@ def get_hourly_distribution(filters=None):
 
 
 @st.cache_data(ttl=300, hash_funcs=_CACHE_HASH_FUNCS, show_spinner=False)
-def get_amount_distribution(filters=None):
+def get_amount_distribution(filters: dict | None = None) -> pd.DataFrame:
     """거래금액 구간별 분포를 반환한다."""
     where = _apply_filters("", filters)
     return query(f"""
@@ -147,7 +147,7 @@ def get_amount_distribution(filters=None):
 
 
 @st.cache_data(ttl=300, hash_funcs=_CACHE_HASH_FUNCS, show_spinner=False)
-def get_fraud_type_distribution(filters=None):
+def get_fraud_type_distribution(filters: dict | None = None) -> pd.DataFrame:
     """이상거래유형별 분포를 반환한다."""
     where = _apply_filters("WHERE 이상거래여부 = 1", filters)
     return query(f"""
@@ -163,7 +163,7 @@ def get_fraud_type_distribution(filters=None):
 
 
 @st.cache_data(ttl=300, hash_funcs=_CACHE_HASH_FUNCS, show_spinner=False)
-def get_monthly_trend(filters=None):
+def get_monthly_trend(filters: dict | None = None) -> pd.DataFrame:
     """월별 거래 건수 및 이상거래 추이를 반환한다."""
     where = _apply_filters("", filters)
     return query(f"""
@@ -180,7 +180,7 @@ def get_monthly_trend(filters=None):
 
 
 @st.cache_data(ttl=300, hash_funcs=_CACHE_HASH_FUNCS, show_spinner=False)
-def get_medium_distribution(filters=None):
+def get_medium_distribution(filters: dict | None = None) -> pd.DataFrame:
     """매체구분별 거래 분포를 반환한다."""
     where = _apply_filters("", filters)
     return query(f"""
@@ -197,7 +197,7 @@ def get_medium_distribution(filters=None):
 
 
 @st.cache_data(ttl=300, hash_funcs=_CACHE_HASH_FUNCS, show_spinner=False)
-def get_top_banks(filters=None):
+def get_top_banks(filters: dict | None = None) -> pd.DataFrame:
     """금융회사별 이상거래 건수 상위를 반환한다."""
     where = _apply_filters("", filters)
     return query(f"""
@@ -231,7 +231,7 @@ def get_top_banks(filters=None):
 # ------------------------------------------------------------------
 
 @st.cache_data(ttl=300, hash_funcs=_CACHE_HASH_FUNCS, show_spinner=False)
-def get_fund_type_distribution(filters=None):
+def get_fund_type_distribution(filters: dict | None = None) -> pd.DataFrame:
     """자금구분별 거래 건수, 이상거래, 이상거래비율, 총거래금액을 반환한다."""
     where = _apply_filters("", filters)
     return query(f"""
@@ -253,7 +253,7 @@ def get_fund_type_distribution(filters=None):
 # ------------------------------------------------------------------
 
 @st.cache_data(ttl=300, hash_funcs=_CACHE_HASH_FUNCS, show_spinner=False)
-def get_fraud_amount_summary(filters=None):
+def get_fraud_amount_summary(filters: dict | None = None) -> pd.DataFrame:
     """이상거래여부별 금액 통계를 반환한다."""
     where = _apply_filters("", filters)
     return query(f"""
@@ -273,7 +273,7 @@ def get_fraud_amount_summary(filters=None):
 
 
 @st.cache_data(ttl=300, hash_funcs=_CACHE_HASH_FUNCS, show_spinner=False)
-def get_fraud_amount_by_type(filters=None):
+def get_fraud_amount_by_type(filters: dict | None = None) -> pd.DataFrame:
     """이상거래유형별 금액 통계를 반환한다."""
     where = _apply_filters("WHERE 이상거래여부 = 1", filters)
     return query(f"""
@@ -296,7 +296,7 @@ def get_fraud_amount_by_type(filters=None):
 # ------------------------------------------------------------------
 
 @st.cache_data(ttl=300, hash_funcs=_CACHE_HASH_FUNCS, show_spinner=False)
-def get_hourly_fraud_type_heatmap(filters=None):
+def get_hourly_fraud_type_heatmap(filters: dict | None = None) -> pd.DataFrame:
     """시간대별 이상거래유형 건수를 반환한다 (히트맵용)."""
     where = _apply_filters("WHERE 이상거래여부 = 1", filters)
     return query(f"""
@@ -316,7 +316,7 @@ def get_hourly_fraud_type_heatmap(filters=None):
 # ------------------------------------------------------------------
 
 @st.cache_data(ttl=300, hash_funcs=_CACHE_HASH_FUNCS, show_spinner=False)
-def get_fraud_type_monthly_trend(filters=None):
+def get_fraud_type_monthly_trend(filters: dict | None = None) -> pd.DataFrame:
     """이상거래유형별 월별 건수 추이를 반환한다."""
     where = _apply_filters("WHERE 이상거래여부 = 1", filters)
     return query(f"""

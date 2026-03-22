@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def get_bank_network():
+def get_bank_network() -> pd.DataFrame:
     """금융회사 간 거래 네트워크 데이터를 반환한다."""
     return query("""
         SELECT
@@ -29,7 +29,7 @@ def get_bank_network():
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def get_fraud_account_network(limit=500):
+def get_fraud_account_network(limit: int = 500) -> pd.DataFrame:
     """이상거래 관련 계좌 간 네트워크 데이터를 반환한다."""
     # limit은 외부 입력이므로 int 형변환으로 안전하게 처리 (DuckDB는 LIMIT 파라미터 바인딩 미지원)
     limit = int(limit)
@@ -49,7 +49,7 @@ def get_fraud_account_network(limit=500):
     """)
 
 
-def get_account_ego_network(account_id, hops=1):
+def get_account_ego_network(account_id: int, hops: int = 1) -> pd.DataFrame:
     """특정 계좌의 ego 네트워크(n-hop 이웃)를 반환한다."""
     # account_id는 int64 계좌 번호이므로 int 형변환으로 SQL 인젝션 방지
     account_id = int(account_id)
@@ -96,7 +96,7 @@ def get_account_ego_network(account_id, hops=1):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def get_fraud_accounts():
+def get_fraud_accounts() -> pd.DataFrame:
     """이상거래에 관련된 출금 계좌 목록을 반환한다."""
     return query("""
         SELECT DISTINCT 출금계좌일련번호 as 계좌
@@ -107,7 +107,7 @@ def get_fraud_accounts():
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def get_bank_network_stats():
+def get_bank_network_stats() -> pd.DataFrame:
     """금융회사 네트워크 요약 통계를 반환한다."""
     return query("""
         SELECT
@@ -118,7 +118,7 @@ def get_bank_network_stats():
     """)
 
 
-def build_bank_graph(df):
+def build_bank_graph(df: pd.DataFrame) -> nx.Graph:
     """DataFrame으로부터 금융회사 간 네트워크 그래프를 생성한다."""
     G = nx.DiGraph()
     for _, row in df.iterrows():
@@ -132,7 +132,7 @@ def build_bank_graph(df):
     return G
 
 
-def build_account_graph(df):
+def build_account_graph(df: pd.DataFrame) -> nx.DiGraph:
     """DataFrame으로부터 계좌 간 네트워크 그래프를 생성한다."""
     G = nx.DiGraph()
     for _, row in df.iterrows():
@@ -149,7 +149,7 @@ def build_account_graph(df):
 # 강화 기능: 중심성 지표 분석
 # ------------------------------------------------------------------
 
-def compute_centrality_metrics(G):
+def compute_centrality_metrics(G: nx.Graph) -> dict:
     """네트워크의 주요 중심성 지표를 계산하여 DataFrame으로 반환한다.
 
     Parameters
@@ -190,7 +190,7 @@ def compute_centrality_metrics(G):
 # 강화 기능: 커뮤니티 탐지
 # ------------------------------------------------------------------
 
-def detect_communities(G):
+def detect_communities(G: nx.Graph) -> dict:
     """Greedy modularity 기반 커뮤니티 탐지를 수행한다.
 
     DiGraph를 undirected로 변환한 뒤 greedy_modularity_communities를 적용하고,
@@ -229,7 +229,7 @@ def detect_communities(G):
 # ------------------------------------------------------------------
 
 @st.cache_data(ttl=300, show_spinner=False)
-def get_fraud_flow_matrix():
+def get_fraud_flow_matrix() -> pd.DataFrame:
     """금융회사 간 이상거래 흐름 매트릭스 데이터를 반환한다.
 
     Returns
@@ -255,7 +255,7 @@ def get_fraud_flow_matrix():
 # 강화 기능: 네트워크 통계 확장
 # ------------------------------------------------------------------
 
-def get_extended_network_stats(G):
+def get_extended_network_stats(G: nx.Graph) -> dict:
     """네트워크의 확장 통계를 계산하여 딕셔너리로 반환한다.
 
     Parameters
@@ -310,7 +310,7 @@ def get_extended_network_stats(G):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def detect_ring_transactions(min_len=3, max_len=6, min_amount=0, limit=100):
+def detect_ring_transactions(min_len: int = 3, max_len: int = 6, min_amount: int = 0, limit: int = 100) -> pd.DataFrame:
     """순환거래(ring) 사이클을 탐지한다.
 
     자금세탁의 핵심 패턴인 A->B->C->...->A 순환 거래를 그래프 탐색으로 찾는다.
@@ -375,7 +375,7 @@ def detect_ring_transactions(min_len=3, max_len=6, min_amount=0, limit=100):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def detect_layering_patterns(min_layers=3, limit=100):
+def detect_layering_patterns(min_layers: int = 3, limit: int = 100) -> pd.DataFrame:
     """다단계 레이어링 패턴을 탐지한다.
 
     출발 계좌에서 중개 계좌를 거쳐 도착 계좌에 이르는
@@ -442,7 +442,7 @@ def detect_layering_patterns(min_layers=3, limit=100):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def detect_funnel_accounts(min_inflow=10, max_outflow=3, limit=100):
+def detect_funnel_accounts(min_inflow: int = 10, max_outflow: int = 3, limit: int = 100) -> pd.DataFrame:
     """대포통장(funnel) 패턴을 탐지한다.
 
     다수의 계좌로부터 입금을 받고(inflow) 소수의 계좌로 출금하는(outflow)
@@ -516,7 +516,7 @@ def detect_funnel_accounts(min_inflow=10, max_outflow=3, limit=100):
     return pd.DataFrame(rows)
 
 
-def get_account_ego_network_deep(account_id, hops=3):
+def get_account_ego_network_deep(account_id: int, hops: int = 3) -> pd.DataFrame:
     """N-hop 심층 ego 네트워크를 Memgraph에서 추출한다.
 
     지정된 계좌를 중심으로 hops 단계까지의 이웃 계좌와 그들 사이의
@@ -576,7 +576,7 @@ def get_account_ego_network_deep(account_id, hops=3):
     return df
 
 
-def find_shortest_path(account_a, account_b):
+def find_shortest_path(account_a: int, account_b: int) -> pd.DataFrame:
     """두 계좌 간 최단 거래 경로를 찾는다.
 
     Memgraph의 shortestPath 알고리즘을 사용하여 두 계좌를 잇는
@@ -630,7 +630,7 @@ def find_shortest_path(account_a, account_b):
     }
 
 
-def get_temporal_network(start_date, end_date, fraud_only=True):
+def get_temporal_network(start_date: int, end_date: int, fraud_only: bool = True) -> pd.DataFrame:
     """시간 윈도우 내 거래 네트워크를 추출한다.
 
     지정된 기간 내의 거래만으로 구성된 네트워크를 Memgraph에서 추출한다.
@@ -686,7 +686,7 @@ def get_temporal_network(start_date, end_date, fraud_only=True):
     return df
 
 
-def compute_risk_score(account_id):
+def compute_risk_score(account_id: int) -> dict:
     """그래프 기반 복합 위험 점수를 계산한다.
 
     여러 그래프 지표를 종합하여 특정 계좌의 AML 위험 점수(0.0~1.0)를
