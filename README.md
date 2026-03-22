@@ -298,44 +298,48 @@ _paper/results/
 
 ## TODO
 
-### 1. api_error 재실험 (Phase7 진행 중 + KR 보충 실행 중)
+### 1. api_error 재실험 (완료)
 
 벤치마크 중 발생한 api_error의 근본 원인 3가지와 조치:
 
 | 원인 | 영향 | 조치 | 상태 |
 |------|------|------|------|
-| **컨텍스트 길이 초과** — 영문 번역으로 토큰 수 증가하여 `max-model-len 16384` 초과 | EN의 Qwen3.5 계열, Mistral-Small, GLM 등 대부분 | `--max-model-len 32768`로 상향 | Phase7 진행 중 |
-| **tool parser 비호환** — `deepseek_v3` 파서가 토큰 매핑 실패 | DeepSeek-R1-Qwen3-8B (KR+EN 전체 실패) | `hermes` 파서로 변경하여 재시도 | Phase7 진행 중 |
-| **단일 tool-call 제한** — Llama-3.2 계열이 multi-tool call 미지원 (`This model only supports single tool-calls at once!`) | Llama-3.2-1B/3B의 multi_tool 카테고리 | **모델 한계 (수정 불가)** — 논문에서 "Llama-3.2 계열은 병렬 tool calling을 지원하지 않아 multi-tool 케이스에서 체계적 실패 발생"으로 기술 | 완료 (모델 한계) |
+| **컨텍스트 길이 초과** — 영문 번역으로 토큰 수 증가하여 `max-model-len 16384` 초과 | EN의 Qwen3.5 계열, Mistral-Small, GLM 등 대부분 | `--max-model-len 32768`로 상향 | ✅ 완료 |
+| **tool parser 비호환** — `deepseek_v3` 파서가 토큰 매핑 실패 | DeepSeek-R1-Qwen3-8B (KR+EN 전체 실패) | `hermes` 파서로 변경하여 재시도 | ✅ 완료 |
+| **단일 tool-call 제한** — Llama-3.2 계열이 multi-tool call 미지원 (`This model only supports single tool-calls at once!`) | Llama-3.2-1B/3B의 multi_tool 카테고리 | **모델 한계 (수정 불가)** — 논문에서 "Llama-3.2 계열은 병렬 tool calling을 지원하지 않아 multi-tool 케이스에서 체계적 실패 발생"으로 기술 | ✅ 모델 한계 |
+| **Kanana 1.5 파서 불일치** — KR은 functionary, EN은 hermes 파서 사용 | Kanana 1.5 3종 한/영 비교 공정성 | KR을 hermes 파서로 재실행하여 통일 | ✅ 완료 |
 
-재실험 방법: checkpoint에서 api_error 행 제거 → `--checkpoint --max-model-len 32768`로 재실행 → 정상건 보존 + 실패건만 재시도.
-
-**KR 재실험:** Phase7 Step1 + GPU1 보충 스크립트로 21개 모델 처리 중 (부족 총 332건)
-**EN 재실험:** Phase7 Step2~4로 20개 모델 처리 중 (`--max-model-len 32768` 적용)
-**TP=2 모델 (KR):** Llama-70B, Scout-17B, A.X-4.0 — Phase7 이후 별도 처리 필요
-
-### 2. 상용 API 모델 벤치마크
-
-- [ ] gpt-4o-mini KR+EN — 이전 실행 시 API 키 문제로 실패, 재실행 필요
-- [ ] claude-haiku-4-5 KR+EN — 전체 api_error, 재실행 필요
-- [ ] claude-sonnet-4-5 KR+EN (선택)
-- [ ] gpt-5-mini KR+EN (선택)
-
-### 3. 영문 Ablation 실험 현황
+### 2. 영문 Ablation 실험 (KR 54 / EN 54 모델 완료)
 
 동일 1,258건 벤치마크 케이스를 영어로 번역하여, 질문 언어(한국어↔영어)에 따른 tool-calling 정확도 차이를 분석하는 단일변수 실험.
 
 - **번역 완료**: GPT-4o-mini로 24개 케이스 파일 전체 영문 번역 (`_paper/benchmarks_en/`)
 - **`benchmark.py` 수정 완료**: `--cases-dir` 옵션 추가로 한/영 데이터셋 전환 가능
-- **결과 (2026-03-19)**: KR 51개 모델 / EN 50개 모델 벤치마크 완료, api_error 재실험 진행 중
-- **추가 모델**: Kanana 2 instruct/thinking (KR+EN), SKT A.X-4.0/Light (KR+EN), Llama-4-Scout-17B FP8 (KR+EN), Llama-3.2-1B/3B (KR+EN)
+- **결과 (2026-03-22)**: KR 54개 모델 / EN 54개 모델 × 1,258건 완료
+- **모델 계열**: Qwen3/3.5, Mistral, Llama, EXAONE, Kanana 1.5/2, SKT A.X, xLAM, GLM, gpt-oss, DeepSeek-R1, OLMo, Granite, Command-R, Scout
 
-### 4. 재현성 검증 (Phase6 완료)
+### 3. 재현성 검증 (45개 eval 완료, TP=2 진행 중)
 
-상위 3개 모델 2회차 재실행으로 결과 분산(variance) 측정:
-- [x] Qwen3-4B-Thinking (think/nothink) — `_paper/results_repro/`
-- [x] Mistral-Small-3.2-24B — `_paper/results_repro/`
-- [x] gpt-oss-20b (think/nothink) — `_paper/results_repro/`
+전체 모델 2회차 재실행으로 결과 분산(variance) 측정 (`_paper/results_repro/`):
+
+**완료 (45개 eval):**
+- 상위권: Qwen3-4B-Thinking, Mistral-Small-24B, gpt-oss-20b, Qwen3.5-9B, xLAM-32b, Ministral-14B, EXAONE-32B, Kanana-2-thinking, GLM-4.7-Flash, Qwen3-Coder-30B, Qwen3.5-4B, Qwen3-30B-Thinking
+- 중위권: Kanana-2-instruct, Qwen3-8B, Llama-3.1-8B, Kanana-1.5-2.1B, DeepSeek-R1, OLMo-7B, Granite-8B
+- 하위권 포함 전체 단일GPU 모델
+
+**진행 중 (TP=2):**
+- [ ] Qwen3.5-27B (think/nothink) — 진행 중
+- [ ] Llama-3.3-70B
+- [ ] skt/A.X-4.0
+- [ ] xLAM-70B
+- [ ] Llama-4-Scout-17B FP8
+
+### 4. 상용 API 모델 벤치마크
+
+- [ ] gpt-4o-mini KR+EN — 재실행 필요
+- [ ] claude-haiku-4-5 KR+EN — 재실행 필요
+- [ ] claude-sonnet-4-5 KR+EN (선택)
+- [ ] gpt-5-mini KR+EN (선택)
 
 ### 5. 제외 모델 (vLLM 미지원 / OOM)
 
@@ -361,3 +365,5 @@ _paper/results/
 - [ ] `evaluator.py`: _safe_json_load(), _check_keywords() 헬퍼 추출, 108줄 거대함수 분리
 - [x] KR eval 중복 파일 정리 완료 (28개 삭제, 2026-03-18)
 - [x] visualize_results.py 중복 제거 (symlink 전환, 2026-03-17)
+- [x] 로그 파일 git 제외 (.gitignore 추가, 2026-03-20)
+- [x] 오래된 comparison 파일 정리 (최신 1개만 유지, 2026-03-20)
