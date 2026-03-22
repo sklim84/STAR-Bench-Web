@@ -318,28 +318,21 @@ _paper/results/
 - **결과 (2026-03-22)**: KR 54개 모델 / EN 54개 모델 × 1,258건 완료
 - **모델 계열**: Qwen3/3.5, Mistral, Llama, EXAONE, Kanana 1.5/2, SKT A.X, xLAM, GLM, gpt-oss, DeepSeek-R1, OLMo, Granite, Command-R, Scout
 
-### 3. 재현성 검증 (45개 eval 완료, TP=2 진행 중)
+### 3. 재현성 검증 — 5회 반복 실험 (표준편차/신뢰구간 보고용)
 
-전체 모델 2회차 재실행으로 결과 분산(variance) 측정 (`_paper/results_repro/`):
+전체 54개 모델 × 1,258건 × 5회 반복 실행으로 결과 분산(variance), 표준편차, 95% 신뢰구간을 측정.
 
-**완료 (45개 eval):**
-- 상위권: Qwen3-4B-Thinking, Mistral-Small-24B, gpt-oss-20b, Qwen3.5-9B, xLAM-32b, Ministral-14B, EXAONE-32B, Kanana-2-thinking, GLM-4.7-Flash, Qwen3-Coder-30B, Qwen3.5-4B, Qwen3-30B-Thinking
-- 중위권: Kanana-2-instruct, Qwen3-8B, Llama-3.1-8B, Kanana-1.5-2.1B, DeepSeek-R1, OLMo-7B, Granite-8B
-- 하위권 포함 전체 단일GPU 모델
+| 라운드 | 디렉토리 | 상태 |
+|--------|---------|------|
+| Round 1 (본실험) | `_paper/results/` | ✅ 완료 (54개 모델) |
+| Round 2 | `_paper/results_repro/` | ⏳ TP=2 모델 진행 중 (45/54 eval) |
+| Round 3 | `_paper/results_repro/round3/` | ⬜ Round 2 완료 후 자동 시작 |
+| Round 4 | `_paper/results_repro/round4/` | ⬜ Round 3 완료 후 자동 시작 |
+| Round 5 | `_paper/results_repro/round5/` | ⬜ Round 4 완료 후 자동 시작 |
 
-**진행 중 (TP=2):**
-- [ ] Qwen3.5-27B (think/nothink) — 진행 중
-- [ ] Llama-3.3-70B
-- [ ] skt/A.X-4.0
-- [ ] xLAM-70B
-- [ ] Llama-4-Scout-17B FP8
-
-### 4. 상용 API 모델 벤치마크
-
-- [ ] gpt-4o-mini KR+EN — 재실행 필요
-- [ ] claude-haiku-4-5 KR+EN — 재실행 필요
-- [ ] claude-sonnet-4-5 KR+EN (선택)
-- [ ] gpt-5-mini KR+EN (선택)
+**라운드별 구성**: vLLM 단일GPU 모델 48개 (GPU0+1 병렬) + TP=2 모델 6개 (순차). 상용 API 모델(gpt-4o-mini, claude-haiku)은 제외.
+**1라운드 예상 소요**: ~20시간 (단일GPU ~14시간 + TP=2 ~6시간)
+**전체 예상 완료**: ~2026-03-25
 
 ### 5. 제외 모델 (vLLM 미지원 / OOM)
 
