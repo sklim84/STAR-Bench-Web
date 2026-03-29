@@ -1,18 +1,18 @@
 /* ══════════════════════════════════════════════════════════════
-   AML Assistant – Design System
+   AML Assistant – Design System (Light Theme)
    ══════════════════════════════════════════════════════════════ */
 
 /* ── CSS 변수 ── */
 :root {
-    --mint:        #4ECDC4;
-    --mint-dim:    rgba(78, 205, 196, 0.15);
-    --mint-border: rgba(78, 205, 196, 0.28);
-    --bg-card:     rgba(255, 255, 255, 0.05);
-    --border:      rgba(255, 255, 255, 0.09);
-    --text-hi:     #E8EAED;
-    --text-mid:    #9EA3B8;
-    --text-lo:     #6B7080;
-    --shadow:      0 4px 24px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    --mint:        #059669;
+    --mint-dim:    rgba(5, 150, 105, 0.10);
+    --mint-border: rgba(5, 150, 105, 0.25);
+    --bg-card:     #F5F7FA;
+    --border:      #E5E7EB;
+    --text-hi:     #1F2937;
+    --text-mid:    #6B7280;
+    --text-lo:     #9CA3AF;
+    --shadow:      0 4px 24px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.08);
     --blur:        blur(16px);
     --r-lg:        16px;
     --r-md:        12px;
@@ -21,13 +21,8 @@
 
 /* ══ 1. 전역 배경 ══ */
 .stApp {
-    background: #070B14;
+    background: #FFFFFF;
     overflow-x: hidden;
-    background-image:
-        radial-gradient(ellipse at 15% 40%, rgba(78, 205, 196, 0.07) 0%, transparent 55%),
-        radial-gradient(ellipse at 85% 15%, rgba(99, 130, 220, 0.08) 0%, transparent 55%),
-        radial-gradient(ellipse at 50% 90%, rgba(120, 70, 200, 0.05) 0%, transparent 55%);
-    background-attachment: fixed;
 }
 
 /* ── 메인 컨텐츠 패딩 (Streamlit 기본값 override) ── */
@@ -59,7 +54,7 @@ div.stSpinner,
     align-items: center !important;
     justify-content: center !important;
     z-index: 9999 !important;
-    background: rgba(7, 11, 20, 0.75) !important;
+    background: rgba(255, 255, 255, 0.75) !important;
 }
 div.stSpinner > div,
 [data-testid="stSpinner"] > div {
@@ -83,13 +78,11 @@ section.main div.block-container div:has(> iframe) iframe {
     min-width: 100% !important;
 }
 
-/* ══ 3. 글래스 카드 공통 ══ */
+/* ══ 3. 카드 공통 ══ */
 .glass-card,
 .dark-card,
 .metric-card {
     background: var(--bg-card);
-    backdrop-filter: var(--blur);
-    -webkit-backdrop-filter: var(--blur);
     border: 1px solid var(--border);
     border-radius: var(--r-lg);
     box-shadow: var(--shadow);
@@ -110,9 +103,8 @@ section.main div.block-container div:has(> iframe) iframe {
 
 .metric-card:hover {
     box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.5),
-        0 0 0 1px rgba(78, 205, 196, 0.2),
-        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        0 8px 32px rgba(0, 0, 0, 0.10),
+        0 0 0 1px rgba(5, 150, 105, 0.20);
     transform: translateY(-2px);
 }
 
@@ -181,17 +173,17 @@ section.main div.block-container div:has(> iframe) iframe {
     font-weight: 700;
     margin: 28px 0 16px 0;
     padding: 12px 0 12px 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-    background: linear-gradient(90deg, #4ECDC4, #6B8EFF);
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(90deg, #059669, #3B82F6);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
 }
 
-/* 섹션 구분선 (참조 이미지 스타일) */
+/* 섹션 구분선 */
 .section-divider {
     height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.12), transparent);
+    background: linear-gradient(90deg, transparent, var(--border), transparent);
     margin: 24px 0;
     border: none;
 }
@@ -201,8 +193,6 @@ section.main div.block-container div:has(> iframe) iframe {
 /* st.metric */
 [data-testid="stMetric"] {
     background: var(--bg-card) !important;
-    backdrop-filter: var(--blur);
-    -webkit-backdrop-filter: var(--blur);
     border: 1px solid var(--border) !important;
     border-radius: var(--r-lg) !important;
     padding: 20px 22px !important;
@@ -226,9 +216,7 @@ section.main div.block-container div:has(> iframe) iframe {
 /* 탭 */
 .stTabs [data-baseweb="tab-list"] {
     gap: 0;
-    background: rgba(255, 255, 255, 0.04);
-    backdrop-filter: var(--blur);
-    -webkit-backdrop-filter: var(--blur);
+    background: #F9FAFB;
     border: 1px solid var(--border);
     border-radius: var(--r-md);
     padding: 4px;
@@ -243,7 +231,7 @@ section.main div.block-container div:has(> iframe) iframe {
 }
 
 .stTabs [data-baseweb="tab"]:hover {
-    background: rgba(255, 255, 255, 0.06) !important;
+    background: rgba(0, 0, 0, 0.04) !important;
     color: var(--text-hi) !important;
 }
 
@@ -264,9 +252,9 @@ section.main div.block-container div:has(> iframe) iframe {
 }
 
 .stButton > button:hover {
-    background: rgba(78, 205, 196, 0.22);
-    border-color: rgba(78, 205, 196, 0.55);
-    box-shadow: 0 0 20px rgba(78, 205, 196, 0.2);
+    background: rgba(5, 150, 105, 0.18);
+    border-color: rgba(5, 150, 105, 0.45);
+    box-shadow: 0 0 20px rgba(5, 150, 105, 0.12);
     transform: translateY(-1px);
 }
 
@@ -278,28 +266,28 @@ section.main div.block-container div:has(> iframe) iframe {
 .stSelectbox > div > div,
 .stMultiSelect > div > div,
 .stTextInput > div > div {
-    background: var(--bg-card) !important;
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    background: #FFFFFF !important;
+    border: 1px solid var(--border) !important;
     border-radius: 10px !important;
     color: var(--text-hi) !important;
 }
 
 .stSelectbox > div > div:focus-within,
 .stTextInput > div > div:focus-within {
-    border-color: rgba(78, 205, 196, 0.5) !important;
-    box-shadow: 0 0 0 2px rgba(78, 205, 196, 0.12) !important;
+    border-color: rgba(5, 150, 105, 0.5) !important;
+    box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.12) !important;
 }
 
 /* 슬라이더 */
 [data-testid="stSlider"] [data-baseweb="slider"] [role="slider"] {
     background: var(--mint) !important;
     border-color: var(--mint) !important;
-    box-shadow: 0 0 8px rgba(78, 205, 196, 0.4) !important;
+    box-shadow: 0 0 8px rgba(5, 150, 105, 0.25) !important;
 }
 
 /* Expander */
 .streamlit-expanderHeader {
-    background: rgba(255, 255, 255, 0.04) !important;
+    background: #F9FAFB !important;
     border: 1px solid var(--border) !important;
     border-radius: 10px !important;
     color: var(--text-hi) !important;
@@ -307,13 +295,13 @@ section.main div.block-container div:has(> iframe) iframe {
 }
 
 .streamlit-expanderHeader:hover {
-    background: rgba(255, 255, 255, 0.07) !important;
-    border-color: rgba(78, 205, 196, 0.25) !important;
+    background: #F3F4F6 !important;
+    border-color: rgba(5, 150, 105, 0.25) !important;
 }
 
 details[open] summary.streamlit-expanderHeader {
-    background: rgba(78, 205, 196, 0.07) !important;
-    border-color: rgba(78, 205, 196, 0.25) !important;
+    background: rgba(5, 150, 105, 0.06) !important;
+    border-color: rgba(5, 150, 105, 0.25) !important;
     color: var(--mint) !important;
     border-bottom-left-radius: 0 !important;
     border-bottom-right-radius: 0 !important;
@@ -327,15 +315,15 @@ details[open] summary.streamlit-expanderHeader {
 /* 데이터프레임 */
 [data-testid="stDataFrame"],
 [data-testid="stTable"] {
-    background: rgba(255, 255, 255, 0.03) !important;
-    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    background: #FAFBFC !important;
+    border: 1px solid var(--border) !important;
     border-radius: var(--r-md) !important;
 }
 
 /* Divider / HR */
 .stDivider,
 hr {
-    border-color: rgba(255, 255, 255, 0.08) !important;
+    border-color: var(--border) !important;
 }
 
 /* ══ 6. 커스텀 HTML 컴포넌트 ══ */
@@ -350,13 +338,13 @@ hr {
 }
 
 .dark-table th {
-    background: rgba(78, 205, 196, 0.08);
+    background: rgba(5, 150, 105, 0.06);
     color: var(--text-mid);
     font-weight: 600;
     font-size: 13px;
     padding: 10px 16px;
     text-align: left;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid var(--border);
     letter-spacing: 0.3px;
 }
 
@@ -364,31 +352,31 @@ hr {
     color: var(--text-hi);
     font-size: 14px;
     padding: 10px 16px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    border-bottom: 1px solid #F3F4F6;
 }
 
 .dark-table tr:hover td {
-    background: rgba(78, 205, 196, 0.05);
+    background: rgba(5, 150, 105, 0.04);
 }
 
 .dark-table tr.row-highlight td {
-    background: rgba(78, 205, 196, 0.1);
-    border-left: 2px solid rgba(78, 205, 196, 0.6);
+    background: rgba(5, 150, 105, 0.08);
+    border-left: 2px solid rgba(5, 150, 105, 0.5);
 }
 
 .dark-table tr.row-risk-high td {
-    background: rgba(225, 87, 89, 0.12);
+    background: rgba(225, 87, 89, 0.08);
 }
 
 .dark-table tr.row-risk-medium td {
-    background: rgba(242, 142, 43, 0.09);
+    background: rgba(242, 142, 43, 0.06);
 }
 
 /* AI 인사이트 카드 */
 .ai-insight {
-    background: rgba(78, 205, 196, 0.04);
-    border: 1px solid rgba(78, 205, 196, 0.15);
-    border-left: 3px solid rgba(78, 205, 196, 0.55);
+    background: rgba(5, 150, 105, 0.04);
+    border: 1px solid rgba(5, 150, 105, 0.15);
+    border-left: 3px solid rgba(5, 150, 105, 0.5);
     border-radius: var(--r-sm);
     padding: 10px 16px;
     margin-top: 6px;
@@ -425,13 +413,13 @@ hr {
 }
 
 .memgraph-badge.connected {
-    background: rgba(78, 205, 196, 0.07);
-    border: 1px solid rgba(78, 205, 196, 0.28);
+    background: rgba(5, 150, 105, 0.06);
+    border: 1px solid rgba(5, 150, 105, 0.25);
 }
 
 .memgraph-badge.disconnected {
-    background: rgba(225, 87, 89, 0.08);
-    border: 1px solid rgba(225, 87, 89, 0.28);
+    background: rgba(225, 87, 89, 0.06);
+    border: 1px solid rgba(225, 87, 89, 0.25);
 }
 
 /* ══ 8. Home 기능 안내 카드 ══ */
@@ -444,16 +432,16 @@ hr {
 }
 
 .feature-card {
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.09);
+    background: #F9FAFB;
+    border: 1px solid var(--border);
     border-radius: 14px;
     padding: 22px 20px;
     transition: background 0.25s ease, border-color 0.25s ease;
 }
 
 .feature-card:hover {
-    background: rgba(78, 205, 196, 0.06);
-    border-color: rgba(78, 205, 196, 0.28);
+    background: rgba(5, 150, 105, 0.04);
+    border-color: rgba(5, 150, 105, 0.25);
     cursor: default;
 }
 
@@ -476,7 +464,7 @@ hr {
     line-height: 1.65;
 }
 
-/* ══ 8. 스크롤바 ══ */
+/* ══ 9. 스크롤바 ══ */
 ::-webkit-scrollbar {
     width: 5px;
     height: 5px;
@@ -487,10 +475,10 @@ hr {
 }
 
 ::-webkit-scrollbar-thumb {
-    background: rgba(78, 205, 196, 0.25);
+    background: rgba(5, 150, 105, 0.25);
     border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: rgba(78, 205, 196, 0.45);
+    background: rgba(5, 150, 105, 0.45);
 }

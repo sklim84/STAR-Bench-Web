@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 # ------------------------------------------------------------------
-# 글래스모피즘 테마 CSS (assets/style.css)
+# 라이트 테마 CSS (assets/style.css)
 # ------------------------------------------------------------------
 @st.cache_data(ttl=3600, show_spinner=False)
 def _load_css_content() -> str:
@@ -43,20 +43,19 @@ init_database()
 # ------------------------------------------------------------------
 selected = option_menu(
     menu_title=None,
-    options=["홈", "대시보드", "네트워크", "탐지", "CTR", "위험평가", "모니터링", "참조자료", "에이전트"],
+    options=["Home", "Dashboard", "Network", "Detection", "CTR", "Risk", "Monitoring", "Reference", "Agent"],
     icons=["house-fill", "bar-chart-fill", "diagram-3-fill", "robot", "cash-coin", "shield-check", "bell-fill", "journal-bookmark-fill", "chat-dots-fill"],
     default_index=0,
     orientation="horizontal",
     styles={
         "container": {
             "padding": "8px 16px",
-            "background": "rgba(255, 255, 255, 0.04)",
-            "backdrop-filter": "blur(16px)",
+            "background": "#FFFFFF",
             "border-radius": "0",
             "border": "none",
-            "border-bottom": "1px solid rgba(255, 255, 255, 0.09)",
+            "border-bottom": "1px solid #E5E7EB",
             "margin-bottom": "20px",
-            "box-shadow": "0 2px 12px rgba(0, 0, 0, 0.25)",
+            "box-shadow": "0 2px 8px rgba(0, 0, 0, 0.06)",
             "width": "100%",
             "max-width": "none",
         },
@@ -69,7 +68,7 @@ selected = option_menu(
             "min-width": "0",
         },
         "icon": {
-            "color": "#9EA3B8",
+            "color": "#6B7280",
             "font-size": "15px",
         },
         "nav-link": {
@@ -80,16 +79,16 @@ selected = option_menu(
             "text-align": "center",
             "margin": "2px",
             "padding": "10px 8px",
-            "color": "#9EA3B8",
+            "color": "#6B7280",
             "border-radius": "10px",
-            "--hover-color": "rgba(255, 255, 255, 0.06)",
+            "--hover-color": "rgba(0, 0, 0, 0.04)",
         },
         "nav-link-selected": {
-            "background": "rgba(78, 205, 196, 0.15)",
-            "color": "#4ECDC4",
+            "background": "rgba(5, 150, 105, 0.10)",
+            "color": "#059669",
             "font-weight": "700",
             "border-radius": "10px",
-            "border": "1px solid rgba(78, 205, 196, 0.3)",
+            "border": "1px solid rgba(5, 150, 105, 0.25)",
         },
     },
 )
@@ -97,18 +96,18 @@ selected = option_menu(
 # ------------------------------------------------------------------
 # 선택된 메뉴에 따라 페이지 렌더링
 # ------------------------------------------------------------------
-if selected == "홈":
+if selected == "Home":
     st.markdown('<p class="page-title page-title-lg">AML Assistant Platform</p>', unsafe_allow_html=True)
-    st.markdown('<p class="page-subtitle">에이전트를 활용하여 자금세탁의심거래를 분석하는 웹 서비스</p>', unsafe_allow_html=True)
+    st.markdown('<p class="page-subtitle">Web service for analyzing suspicious money laundering transactions using AI agents</p>', unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # 요약 메트릭 카드 (dashboard.get_summary() 활용)
+    # Summary metric cards (using dashboard.get_summary())
     from src.features.dashboard import get_summary
-    with st.spinner("데이터 불러오는 중..."):
+    with st.spinner("Loading data..."):
         summary = get_summary()
     if summary.empty:
-        st.error("데이터를 불러올 수 없습니다. 데이터 로딩 상태를 확인하세요.")
+        st.error("Unable to load data. Please check the data loading status.")
         st.stop()
     row = summary.iloc[0]
 
@@ -120,85 +119,85 @@ if selected == "홈":
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         st.markdown(f"""<div class="metric-card">
-            <div class="label">총 거래 건수</div>
+            <div class="label">Total Transactions</div>
             <div class="value">{total:,}</div>
             <div class="sub">2021 Q4 ~ 2024 Q4</div>
         </div>""", unsafe_allow_html=True)
     with c2:
         st.markdown(f"""<div class="metric-card">
-            <div class="label">이상거래 건수</div>
+            <div class="label">Fraud Transactions</div>
             <div class="value">{fraud:,}</div>
-            <div class="sub">전체 대비 {fraud_rate:.2f}%</div>
+            <div class="sub">{fraud_rate:.2f}% of total</div>
         </div>""", unsafe_allow_html=True)
     with c3:
         st.markdown(f"""<div class="metric-card">
-            <div class="label">출금 계좌 수</div>
+            <div class="label">Sender Accounts</div>
             <div class="value">{int(row['출금계좌수']):,}</div>
-            <div class="sub">고유 계좌 기준</div>
+            <div class="sub">Unique accounts</div>
         </div>""", unsafe_allow_html=True)
     with c4:
         st.markdown(f"""<div class="metric-card">
-            <div class="label">참여 금융회사</div>
+            <div class="label">Financial Institutions</div>
             <div class="value">{banks_count:,}</div>
-            <div class="sub">출금 + 입금 기관</div>
+            <div class="sub">Sender + Receiver</div>
         </div>""", unsafe_allow_html=True)
 
-    # 기능 안내 카드 그리드
-    st.markdown('<p class="section-header">기능 안내</p>', unsafe_allow_html=True)
+    # Feature guide card grid
+    st.markdown('<p class="section-header">Features</p>', unsafe_allow_html=True)
     st.markdown("""
     <div class="feature-grid">
         <div class="feature-card">
             <span class="f-icon">📊</span>
-            <div class="f-name">대시보드</div>
-            <div class="f-desc">거래 통계, 이상거래 유형 분포, 시간대·금융회사별 패턴을 대시보드로 시각화</div>
+            <div class="f-name">Dashboard</div>
+            <div class="f-desc">Visualize transaction statistics, fraud type distribution, and patterns by time period and financial institution</div>
         </div>
         <div class="feature-card">
             <span class="f-icon">🔗</span>
-            <div class="f-name">네트워크</div>
-            <div class="f-desc">금융회사·계좌 간 거래 그래프, 커뮤니티 탐지, 순환거래·레이어링 등 AML 패턴 분석</div>
+            <div class="f-name">Network</div>
+            <div class="f-desc">Transaction graph between institutions and accounts, community detection, ring transactions, layering, and other AML pattern analysis</div>
         </div>
         <div class="feature-card">
             <span class="f-icon">🤖</span>
-            <div class="f-name">탐지</div>
-            <div class="f-desc">XGBoost 모델 기반 이상거래 확률 예측, 모델 학습·평가 및 특성 중요도 분석</div>
+            <div class="f-name">Detection</div>
+            <div class="f-desc">XGBoost model-based fraud probability prediction, model training/evaluation, and feature importance analysis</div>
         </div>
         <div class="feature-card">
             <span class="f-icon">💰</span>
             <div class="f-name">CTR</div>
-            <div class="f-desc">고액현금거래보고(CTR) 대상 조회 및 분할거래(Structuring) 탐지</div>
+            <div class="f-desc">Currency Transaction Report (CTR) candidate lookup and structuring detection</div>
         </div>
         <div class="feature-card">
             <span class="f-icon">🛡️</span>
-            <div class="f-name">위험평가</div>
-            <div class="f-desc">5개 행위 지표 기반 계좌 위험도 산출 (0~100점) 및 고위험 계좌 랭킹</div>
+            <div class="f-name">Risk Assessment</div>
+            <div class="f-desc">Account risk scoring (0~100) based on 5 behavioral indicators and high-risk account ranking</div>
         </div>
         <div class="feature-card">
             <span class="f-icon">🔔</span>
-            <div class="f-name">모니터링</div>
-            <div class="f-desc">5개 규칙(심야대량·다건·정액·기관집중·패턴급변) 기반 의심거래 탐지</div>
+            <div class="f-name">Monitoring</div>
+            <div class="f-desc">Rule-based suspicious transaction detection (nighttime bulk, rapid-fire, round amounts, institution concentration, pattern change)</div>
         </div>
         <div class="feature-card">
             <span class="f-icon">📚</span>
-            <div class="f-name">참조자료</div>
-            <div class="f-desc">FIU 의심거래 참고유형 검색, STR 필드 점검, AML 용어집 (CDD, STR, CTR, RBA 등)</div>
+            <div class="f-name">Reference</div>
+            <div class="f-desc">FIU suspicious transaction reference types, STR field validation, AML glossary (CDD, STR, CTR, RBA, etc.)</div>
         </div>
         <div class="feature-card">
             <span class="f-icon">💬</span>
-            <div class="f-name">에이전트</div>
-            <div class="f-desc">AI 에이전트와 대화로 거래 조회·분석하고 의심거래보고서(STR) 자동 작성</div>
+            <div class="f-name">Agent</div>
+            <div class="f-desc">Query and analyze transactions through AI agent conversation, and auto-generate Suspicious Transaction Reports (STR)</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
-elif selected == "대시보드":
+elif selected == "Dashboard":
     from _pages.dashboard_page import render
     render()
 
-elif selected == "네트워크":
+elif selected == "Network":
     from _pages.network_page import render
     render()
 
-elif selected == "탐지":
+elif selected == "Detection":
     from _pages.detection_page import render
     render()
 
@@ -206,18 +205,18 @@ elif selected == "CTR":
     from _pages.ctr_page import render
     render()
 
-elif selected == "위험평가":
+elif selected == "Risk":
     from _pages.risk_page import render
     render()
 
-elif selected == "모니터링":
+elif selected == "Monitoring":
     from _pages.monitoring_page import render
     render()
 
-elif selected == "참조자료":
+elif selected == "Reference":
     from _pages.aml_reference_page import render
     render()
 
-elif selected == "에이전트":
+elif selected == "Agent":
     from _pages.agent_page import render
     render()

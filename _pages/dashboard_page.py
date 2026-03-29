@@ -33,10 +33,10 @@ _HF = 420
 
 # 매체구분/자금구분 코드 → 한국어 레이블
 _MEDIUM_LABELS = {
-    1: "창구", 2: "ATM", 3: "PB센터",
-    4: "인터넷뱅킹", 5: "전화/휴대전화", 6: "콜센터", 7: "기타",
+    1: "Counter", 2: "ATM", 3: "PB Center",
+    4: "Internet Banking", 5: "Phone/Mobile", 6: "Call Center", 7: "Other",
 }
-_FUND_LABELS = {0: "해당없음", 1: "입금", 3: "출금", 4: "이체"}
+_FUND_LABELS = {0: "N/A", 1: "Deposit", 3: "Withdrawal", 4: "Transfer"}
 
 
 def _int_to_date(d: int) -> _date:
@@ -51,12 +51,14 @@ def _date_to_int(d: _date) -> int:
 
 
 def _format_amount(amount):
-    """금액을 읽기 쉬운 한국어 형식으로 포맷한다."""
+    """Format amount into a human-readable string."""
     amount = float(amount)
-    if amount >= 1_0000_0000:
-        return f"{amount / 1_0000_0000:,.1f}억"
-    elif amount >= 1_0000:
-        return f"{amount / 1_0000:,.0f}만"
+    if amount >= 1_000_000_000:
+        return f"{amount / 1_000_000_000:,.1f}B"
+    elif amount >= 1_000_000:
+        return f"{amount / 1_000_000:,.1f}M"
+    elif amount >= 1_000:
+        return f"{amount / 1_000:,.0f}K"
     else:
         return f"{amount:,.0f}"
 
@@ -95,28 +97,28 @@ def _render_filters():
     min_d = _int_to_date(min_date_int)
     max_d = _int_to_date(max_date_int)
 
-    with st.expander("🔍 데이터 필터", expanded=True):
+    with st.expander("🔍 Data Filters", expanded=True):
         col_date1, col_date2, col_bank, col_fraud = st.columns([1.5, 1.5, 2, 2])
 
         with col_date1:
             date_from_d = st.date_input(
-                "시작 일자", value=min_d, min_value=min_d, max_value=max_d,
+                "Start Date", value=min_d, min_value=min_d, max_value=max_d,
                 key="filter_date_from",
             )
             date_from = _date_to_int(date_from_d)
 
         with col_date2:
             date_to_d = st.date_input(
-                "종료 일자", value=max_d, min_value=min_d, max_value=max_d,
+                "End Date", value=max_d, min_value=min_d, max_value=max_d,
                 key="filter_date_to",
             )
             date_to = _date_to_int(date_to_d)
 
         with col_bank:
             selected_banks = st.multiselect(
-                "출금 금융회사",
+                "Sender Institution",
                 options=bank_options,
-                format_func=lambda x: f"금융회사 {x}",
+                format_func=lambda x: f"Institution {x}",
                 key="filter_banks",
             )
 
@@ -127,7 +129,7 @@ def _render_filters():
                     for _, row in fraud_type_options.iterrows()
                 }
                 selected_fraud_types = st.multiselect(
-                    "이상거래 유형",
+                    "Fraud Type",
                     options=list(fraud_type_map.keys()),
                     format_func=lambda x: fraud_type_map.get(x, str(x)),
                     key="filter_fraud_types",
@@ -136,7 +138,7 @@ def _render_filters():
                 selected_fraud_types = []
 
         if date_from > date_to:
-            st.warning("시작 일자가 종료 일자보다 큽니다. 기간 필터를 무시합니다.")
+            st.warning("Start date is later than end date. Ignoring date filter.")
         else:
             if date_from != min_date_int:
                 filters["date_from"] = date_from
