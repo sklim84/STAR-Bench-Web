@@ -158,35 +158,35 @@ def _render_filters():
 # ------------------------------------------------------------------
 
 def render():
-    st.markdown('<p class="page-title">기본 분석 대시보드</p>', unsafe_allow_html=True)
+    st.markdown('<p class="page-title">Analytics Dashboard</p>', unsafe_allow_html=True)
 
     filters = _render_filters()
 
-    # ── 요약 지표 카드 (항상 표시) ──
+    # ── Summary metric cards (always shown) ──
     try:
         summary = get_summary(filters)
         if summary.empty:
-            st.info("선택한 조건에 해당하는 데이터가 없습니다.")
+            st.info("No data found for the selected criteria.")
             return
         row = summary.iloc[0]
         if row['총거래'] == 0:
-            st.info("선택한 조건에 해당하는 데이터가 없습니다.")
+            st.info("No data found for the selected criteria.")
             return
     except Exception as e:
-        st.error(f"요약 데이터를 불러올 수 없습니다: {e}")
+        st.error(f"Unable to load summary data: {e}")
         return
 
     fraud_ratio = f"{row['이상거래비율']:.2f}%"
     total_txn = int(row['총거래'])
     fraud_txn = int(row['이상거래'])
 
-    st.markdown('<p class="section-header">거래 요약</p>', unsafe_allow_html=True)
+    st.markdown('<p class="section-header">Transaction Summary</p>', unsafe_allow_html=True)
     c1, c2, c3, c4, c5 = st.columns(5)
-    _metric(c1, "총 거래 건수",   f"{total_txn:,}",              "2021 Q4 ~ 2024 Q4")
-    _metric(c2, "이상거래 건수",   f"{fraud_txn:,}",              f"전체 대비 {fraud_ratio}")
-    _metric(c3, "이상거래 비율",   fraud_ratio,                   "이상거래 / 총거래")
-    _metric(c4, "출금 계좌 수",    f"{int(row['출금계좌수']):,}",  "고유 계좌 기준")
-    _metric(c5, "입금 계좌 수",    f"{int(row['입금계좌수']):,}",  "고유 계좌 기준")
+    _metric(c1, "Total Transactions",   f"{total_txn:,}",              "2021 Q4 ~ 2024 Q4")
+    _metric(c2, "Fraud Transactions",   f"{fraud_txn:,}",              f"{fraud_ratio} of total")
+    _metric(c3, "Fraud Ratio",          fraud_ratio,                   "Fraud / Total")
+    _metric(c4, "Sender Accounts",      f"{int(row['출금계좌수']):,}",  "Unique accounts")
+    _metric(c5, "Receiver Accounts",    f"{int(row['입금계좌수']):,}",  "Unique accounts")
 
     # ── 이상거래 금액 분석 (항상 표시) ──
     try:
@@ -204,19 +204,19 @@ def render():
                 if normal_avg_amount > 0 else "-"
             )
 
-            st.markdown('<p class="section-header">이상거래 금액 분석</p>', unsafe_allow_html=True)
+            st.markdown('<p class="section-header">Fraud Amount Analysis</p>', unsafe_allow_html=True)
             ac1, ac2, ac3, ac4 = st.columns(4)
-            _metric(ac1, "이상거래 총금액",    _format_amount(fraud_total_amount), "이상거래여부=1 합계")
-            _metric(ac2, "이상거래 평균금액",  _format_amount(fraud_avg_amount),   "이상거래 건당 평균")
-            _metric(ac3, "정상거래 평균금액",  _format_amount(normal_avg_amount),  "정상거래 건당 평균")
-            _metric(ac4, "이상/정상 배율",     ratio_str,                          "이상거래 평균 / 정상거래 평균", white=True)
+            _metric(ac1, "Total Fraud Amount",    _format_amount(fraud_total_amount), "Sum of fraud=1")
+            _metric(ac2, "Avg Fraud Amount",      _format_amount(fraud_avg_amount),   "Per fraud transaction")
+            _metric(ac3, "Avg Normal Amount",     _format_amount(normal_avg_amount),  "Per normal transaction")
+            _metric(ac4, "Fraud/Normal Ratio",    ratio_str,                          "Fraud avg / Normal avg", white=True)
     except Exception:
         pass
 
     # ── 세부 분석 탭 (선택된 탭만 쿼리 실행하여 지연 로딩) ──
-    tab_names = ["📈 추이 분석", "🔍 거래 분석", "⚠️ 이상거래 유형", "🏦 금융회사"]
+    tab_names = ["📈 Trend Analysis", "🔍 Transaction Analysis", "⚠️ Fraud Types", "🏦 Financial Institutions"]
     selected_tab = st.radio(
-        "세부 분석",
+        "Detailed Analysis",
         tab_names,
         horizontal=True,
         key="dashboard_tab",
@@ -228,41 +228,41 @@ def render():
     # 탭1: 추이 분석 – 월별 거래 추이
     # ─────────────────────────────────────────────
     if selected_tab == tab_names[0]:
-        st.markdown('<p class="section-header">월별 거래 추이</p>', unsafe_allow_html=True)
+        st.markdown('<p class="section-header">Monthly Transaction Trend</p>', unsafe_allow_html=True)
         try:
             monthly = get_monthly_trend(filters)
             if monthly.empty:
-                st.info("선택한 조건에 해당하는 월별 데이터가 없습니다.")
+                st.info("No monthly data found for the selected criteria.")
             else:
                 monthly["연월str"] = monthly["연월"].astype(str).str[:4] + "-" + monthly["연월"].astype(str).str[4:]
 
                 fig_monthly = make_subplots(specs=[[{"secondary_y": True}]])
                 fig_monthly.add_trace(
-                    go.Bar(x=monthly["연월str"], y=monthly["총거래"], name="총 거래",
+                    go.Bar(x=monthly["연월str"], y=monthly["총거래"], name="Total Transactions",
                            marker_color=BAR_COLOR, opacity=0.8),
                     secondary_y=False,
                 )
                 fig_monthly.add_trace(
-                    go.Scatter(x=monthly["연월str"], y=monthly["이상거래비율"], name="이상거래 비율(%)",
+                    go.Scatter(x=monthly["연월str"], y=monthly["이상거래비율"], name="Fraud Ratio (%)",
                                mode="lines+markers", marker_color=LINE_COLOR, line=dict(width=2)),
                     secondary_y=True,
                 )
                 _apply_dark(fig_monthly, height=_HF, secondary_y=True)
-                fig_monthly.update_yaxes(title_text="거래 건수",       title_font=dict(color="#8B8FA3", size=11), secondary_y=False)
-                fig_monthly.update_yaxes(title_text="이상거래 비율(%)", title_font=dict(color="#8B8FA3", size=11), secondary_y=True)
+                fig_monthly.update_yaxes(title_text="Transaction Count",  title_font=dict(color="#8B8FA3", size=11), secondary_y=False)
+                fig_monthly.update_yaxes(title_text="Fraud Ratio (%)",    title_font=dict(color="#8B8FA3", size=11), secondary_y=True)
                 st.plotly_chart(fig_monthly, width='stretch')
 
                 peak_m = monthly.loc[monthly['총거래'].idxmax(), '연월str']
                 max_ratio_m = monthly.loc[monthly['이상거래비율'].idxmax()]
                 mid = len(monthly) // 2
-                trend_dir = "증가" if monthly.iloc[mid:]['이상거래비율'].mean() > monthly.iloc[:mid]['이상거래비율'].mean() else "감소"
+                trend_dir = "increasing" if monthly.iloc[mid:]['이상거래비율'].mean() > monthly.iloc[:mid]['이상거래비율'].mean() else "decreasing"
                 _render_insight([
-                    f"거래량 최고 월: {peak_m}",
-                    f"이상거래 비율 최고: {max_ratio_m['연월str']} ({max_ratio_m['이상거래비율']:.2f}%)",
-                    f"후반기 이상거래 비율 추세: {trend_dir} 방향",
+                    f"Peak transaction month: {peak_m}",
+                    f"Highest fraud ratio: {max_ratio_m['연월str']} ({max_ratio_m['이상거래비율']:.2f}%)",
+                    f"Second-half fraud ratio trend: {trend_dir}",
                 ])
         except Exception as e:
-            st.error(f"월별 추이 데이터를 불러올 수 없습니다: {e}")
+            st.error(f"Unable to load monthly trend data: {e}")
 
     # ─────────────────────────────────────────────
     # 탭2: 거래 분석 – 시간대 / 금액구간 / 매체 / 자금
@@ -271,143 +271,143 @@ def render():
         col_left, col_right = st.columns(2)
 
         with col_left:
-            st.markdown('<p class="section-header">시간대별 분포</p>', unsafe_allow_html=True)
+            st.markdown('<p class="section-header">Hourly Distribution</p>', unsafe_allow_html=True)
             try:
                 hourly = get_hourly_distribution(filters)
                 if hourly.empty:
-                    st.info("선택한 조건에 해당하는 시간대별 데이터가 없습니다.")
+                    st.info("No hourly data found for the selected criteria.")
                 else:
                     hourly["시간대명"] = hourly["거래시간대"].apply(lambda h: f"{h:02d}~{h+3:02d}시")
 
                     fig_hour = make_subplots(specs=[[{"secondary_y": True}]])
                     fig_hour.add_trace(
-                        go.Bar(x=hourly["시간대명"], y=hourly["총거래"], name="총 거래",
+                        go.Bar(x=hourly["시간대명"], y=hourly["총거래"], name="Total Transactions",
                                marker_color=BAR_COLOR, opacity=0.8),
                         secondary_y=False,
                     )
                     fig_hour.add_trace(
-                        go.Scatter(x=hourly["시간대명"], y=hourly["이상거래비율"], name="이상거래 비율(%)",
+                        go.Scatter(x=hourly["시간대명"], y=hourly["이상거래비율"], name="Fraud Ratio (%)",
                                    mode="lines+markers", marker_color=LINE_COLOR, line=dict(width=2)),
                         secondary_y=True,
                     )
                     _apply_dark(fig_hour, height=_H2, secondary_y=True)
-                    fig_hour.update_yaxes(title_text="거래 건수",       title_font=dict(color="#8B8FA3", size=11), secondary_y=False)
-                    fig_hour.update_yaxes(title_text="이상거래 비율(%)", title_font=dict(color="#8B8FA3", size=11), secondary_y=True)
+                    fig_hour.update_yaxes(title_text="Transaction Count",  title_font=dict(color="#8B8FA3", size=11), secondary_y=False)
+                    fig_hour.update_yaxes(title_text="Fraud Ratio (%)",    title_font=dict(color="#8B8FA3", size=11), secondary_y=True)
                     st.plotly_chart(fig_hour, width='stretch')
 
                     peak_h = hourly.loc[hourly['총거래'].idxmax(), '시간대명']
                     max_ratio_h = hourly.loc[hourly['이상거래비율'].idxmax()]
                     min_ratio_h = hourly.loc[hourly['이상거래비율'].idxmin()]
                     _render_insight([
-                        f"거래 집중 시간대: {peak_h}",
-                        f"이상거래 비율 최고: {max_ratio_h['시간대명']} ({max_ratio_h['이상거래비율']:.2f}%)",
-                        f"이상거래 비율 최저: {min_ratio_h['시간대명']} ({min_ratio_h['이상거래비율']:.2f}%)",
+                        f"Peak transaction hours: {peak_h}",
+                        f"Highest fraud ratio: {max_ratio_h['시간대명']} ({max_ratio_h['이상거래비율']:.2f}%)",
+                        f"Lowest fraud ratio: {min_ratio_h['시간대명']} ({min_ratio_h['이상거래비율']:.2f}%)",
                     ])
             except Exception as e:
-                st.error(f"시간대별 데이터를 불러올 수 없습니다: {e}")
+                st.error(f"Unable to load hourly data: {e}")
 
         with col_right:
-            st.markdown('<p class="section-header">거래금액 구간별 분포</p>', unsafe_allow_html=True)
+            st.markdown('<p class="section-header">Amount Range Distribution</p>', unsafe_allow_html=True)
             try:
                 amount = get_amount_distribution(filters)
                 if amount.empty:
-                    st.info("선택한 조건에 해당하는 금액 데이터가 없습니다.")
+                    st.info("No amount data found for the selected criteria.")
                 else:
                     fig_amt = make_subplots(specs=[[{"secondary_y": True}]])
                     fig_amt.add_trace(
-                        go.Bar(x=amount["금액구간"], y=amount["총거래"], name="총 거래",
+                        go.Bar(x=amount["금액구간"], y=amount["총거래"], name="Total Transactions",
                                marker_color=BAR_COLOR, opacity=0.8),
                         secondary_y=False,
                     )
                     fig_amt.add_trace(
-                        go.Scatter(x=amount["금액구간"], y=amount["이상거래비율"], name="이상거래 비율(%)",
+                        go.Scatter(x=amount["금액구간"], y=amount["이상거래비율"], name="Fraud Ratio (%)",
                                    mode="lines+markers", marker_color=LINE_COLOR, line=dict(width=2)),
                         secondary_y=True,
                     )
                     _apply_dark(fig_amt, height=_H2, secondary_y=True)
-                    fig_amt.update_yaxes(title_text="거래 건수",       title_font=dict(color="#8B8FA3", size=11), secondary_y=False)
-                    fig_amt.update_yaxes(title_text="이상거래 비율(%)", title_font=dict(color="#8B8FA3", size=11), secondary_y=True)
+                    fig_amt.update_yaxes(title_text="Transaction Count",  title_font=dict(color="#8B8FA3", size=11), secondary_y=False)
+                    fig_amt.update_yaxes(title_text="Fraud Ratio (%)",    title_font=dict(color="#8B8FA3", size=11), secondary_y=True)
                     st.plotly_chart(fig_amt, width='stretch')
 
                     peak_a = amount.loc[amount['총거래'].idxmax(), '금액구간']
                     max_ratio_a = amount.loc[amount['이상거래비율'].idxmax()]
                     _render_insight([
-                        f"거래 집중 금액 구간: {peak_a}",
-                        f"이상거래 비율 최고 구간: {max_ratio_a['금액구간']} ({max_ratio_a['이상거래비율']:.2f}%)",
+                        f"Peak amount range: {peak_a}",
+                        f"Highest fraud ratio range: {max_ratio_a['금액구간']} ({max_ratio_a['이상거래비율']:.2f}%)",
                     ])
             except Exception as e:
-                st.error(f"금액 구간별 데이터를 불러올 수 없습니다: {e}")
+                st.error(f"Unable to load amount range data: {e}")
 
         col_left2, col_right2 = st.columns(2)
 
         with col_left2:
-            st.markdown('<p class="section-header">매체구분별 분포</p>', unsafe_allow_html=True)
+            st.markdown('<p class="section-header">Channel Distribution</p>', unsafe_allow_html=True)
             try:
                 medium = get_medium_distribution(filters)
                 if medium.empty:
-                    st.info("선택한 조건에 해당하는 매체구분 데이터가 없습니다.")
+                    st.info("No channel data found for the selected criteria.")
                 else:
-                    medium["매체명"] = medium["매체구분"].map(_MEDIUM_LABELS).fillna("매체 " + medium["매체구분"].astype(str))
+                    medium["매체명"] = medium["매체구분"].map(_MEDIUM_LABELS).fillna("Channel " + medium["매체구분"].astype(str))
 
                     fig_med = make_subplots(specs=[[{"secondary_y": True}]])
                     fig_med.add_trace(
-                        go.Bar(x=medium["매체명"], y=medium["총거래"], name="총 거래",
+                        go.Bar(x=medium["매체명"], y=medium["총거래"], name="Total Transactions",
                                marker_color=BAR_COLOR, opacity=0.8),
                         secondary_y=False,
                     )
                     fig_med.add_trace(
-                        go.Scatter(x=medium["매체명"], y=medium["이상거래비율"], name="이상거래 비율(%)",
+                        go.Scatter(x=medium["매체명"], y=medium["이상거래비율"], name="Fraud Ratio (%)",
                                    mode="lines+markers", marker_color=LINE_COLOR, line=dict(width=2)),
                         secondary_y=True,
                     )
                     _apply_dark(fig_med, height=_H2, secondary_y=True)
-                    fig_med.update_yaxes(title_text="거래 건수",       title_font=dict(color="#8B8FA3", size=11), secondary_y=False)
-                    fig_med.update_yaxes(title_text="이상거래 비율(%)", title_font=dict(color="#8B8FA3", size=11), secondary_y=True)
+                    fig_med.update_yaxes(title_text="Transaction Count",  title_font=dict(color="#8B8FA3", size=11), secondary_y=False)
+                    fig_med.update_yaxes(title_text="Fraud Ratio (%)",    title_font=dict(color="#8B8FA3", size=11), secondary_y=True)
                     st.plotly_chart(fig_med, width='stretch')
 
                     peak_med = medium.loc[medium['총거래'].idxmax(), '매체명']
                     max_ratio_med = medium.loc[medium['이상거래비율'].idxmax()]
                     _render_insight([
-                        f"거래 집중 매체: {peak_med}",
-                        f"이상거래 비율 최고 매체: {max_ratio_med['매체명']} ({max_ratio_med['이상거래비율']:.2f}%)",
+                        f"Peak transaction channel: {peak_med}",
+                        f"Highest fraud ratio channel: {max_ratio_med['매체명']} ({max_ratio_med['이상거래비율']:.2f}%)",
                     ])
             except Exception as e:
-                st.error(f"매체구분 데이터를 불러올 수 없습니다: {e}")
+                st.error(f"Unable to load channel data: {e}")
 
         with col_right2:
-            st.markdown('<p class="section-header">자금구분별 분포</p>', unsafe_allow_html=True)
+            st.markdown('<p class="section-header">Fund Type Distribution</p>', unsafe_allow_html=True)
             try:
                 fund_type = get_fund_type_distribution(filters)
                 if fund_type.empty:
-                    st.info("선택한 조건에 해당하는 자금구분 데이터가 없습니다.")
+                    st.info("No fund type data found for the selected criteria.")
                 else:
-                    fund_type["자금명"] = fund_type["자금구분"].map(_FUND_LABELS).fillna("자금 " + fund_type["자금구분"].astype(str))
+                    fund_type["자금명"] = fund_type["자금구분"].map(_FUND_LABELS).fillna("Fund " + fund_type["자금구분"].astype(str))
 
                     fig_fund = make_subplots(specs=[[{"secondary_y": True}]])
                     fig_fund.add_trace(
-                        go.Bar(x=fund_type["자금명"], y=fund_type["총거래"], name="총 거래",
+                        go.Bar(x=fund_type["자금명"], y=fund_type["총거래"], name="Total Transactions",
                                marker_color=BAR_COLOR, opacity=0.8),
                         secondary_y=False,
                     )
                     fig_fund.add_trace(
                         go.Scatter(x=fund_type["자금명"], y=fund_type["이상거래비율"],
-                                   name="이상거래 비율(%)",
+                                   name="Fraud Ratio (%)",
                                    mode="lines+markers", marker_color=LINE_COLOR, line=dict(width=2)),
                         secondary_y=True,
                     )
                     _apply_dark(fig_fund, height=_H2, secondary_y=True)
-                    fig_fund.update_yaxes(title_text="거래 건수",       title_font=dict(color="#8B8FA3", size=11), secondary_y=False)
-                    fig_fund.update_yaxes(title_text="이상거래 비율(%)", title_font=dict(color="#8B8FA3", size=11), secondary_y=True)
+                    fig_fund.update_yaxes(title_text="Transaction Count",  title_font=dict(color="#8B8FA3", size=11), secondary_y=False)
+                    fig_fund.update_yaxes(title_text="Fraud Ratio (%)",    title_font=dict(color="#8B8FA3", size=11), secondary_y=True)
                     st.plotly_chart(fig_fund, width='stretch')
 
                     peak_fund = fund_type.loc[fund_type['총거래'].idxmax(), '자금명']
                     max_ratio_fund = fund_type.loc[fund_type['이상거래비율'].idxmax()]
                     _render_insight([
-                        f"거래 집중 자금구분: {peak_fund}",
-                        f"이상거래 비율 최고 자금구분: {max_ratio_fund['자금명']} ({max_ratio_fund['이상거래비율']:.2f}%)",
+                        f"Peak fund type: {peak_fund}",
+                        f"Highest fraud ratio fund type: {max_ratio_fund['자금명']} ({max_ratio_fund['이상거래비율']:.2f}%)",
                     ])
             except Exception as e:
-                st.error(f"자금구분 데이터를 불러올 수 없습니다: {e}")
+                st.error(f"Unable to load fund type data: {e}")
 
     # ─────────────────────────────────────────────
     # 탭3: 이상거래 유형 – 분포 / 금액 / 히트맵 / 월별추이
@@ -422,10 +422,10 @@ def render():
         col_left3, col_right3 = st.columns(2)
 
         with col_left3:
-            st.markdown('<p class="section-header">이상거래 유형별 분포</p>', unsafe_allow_html=True)
+            st.markdown('<p class="section-header">Fraud Type Distribution</p>', unsafe_allow_html=True)
             try:
                 if fraud_type.empty:
-                    st.info("선택한 조건에 해당하는 이상거래 유형 데이터가 없습니다.")
+                    st.info("No fraud type data found for the selected criteria.")
                 else:
                     fraud_type["레이블"] = fraud_type["이상거래유형"].astype(int).astype(str) + ". " + fraud_type["이상거래설명"].fillna("")
 
@@ -447,18 +447,18 @@ def render():
                     top1_ft = fraud_type.loc[fraud_type['건수'].idxmax()]
                     top1_ft_pct = top1_ft['건수'] / total_ft * 100
                     _render_insight([
-                        f"최다 발생 유형: {int(top1_ft['이상거래유형'])}. {top1_ft['이상거래설명']} ({top1_ft_pct:.1f}%)",
-                        f"탐지된 이상거래 유형 수: {len(fraud_type)}종",
+                        f"Most frequent type: {int(top1_ft['이상거래유형'])}. {top1_ft['이상거래설명']} ({top1_ft_pct:.1f}%)",
+                        f"Detected fraud types: {len(fraud_type)}",
                     ])
             except Exception as e:
-                st.error(f"이상거래 유형 데이터를 불러올 수 없습니다: {e}")
+                st.error(f"Unable to load fraud type data: {e}")
 
         with col_right3:
-            st.markdown('<p class="section-header">이상거래 유형별 금액</p>', unsafe_allow_html=True)
+            st.markdown('<p class="section-header">Fraud Type by Amount</p>', unsafe_allow_html=True)
             try:
                 fraud_by_type = get_fraud_amount_by_type(filters)
                 if fraud_by_type.empty:
-                    st.info("선택한 조건에 해당하는 유형별 금액 데이터가 없습니다.")
+                    st.info("No amount-by-type data found for the selected criteria.")
                 else:
                     fraud_by_type["레이블"] = (
                         fraud_by_type["이상거래유형"].astype(int).astype(str) + ". "
@@ -474,22 +474,22 @@ def render():
                         textfont=dict(color="#E0E0E0", size=11),
                     ))
                     _apply_dark(fig_fraud_amt, height=_H2)
-                    fig_fraud_amt.update_xaxes(title_text="총 거래금액", title_font=dict(color="#8B8FA3", size=11))
+                    fig_fraud_amt.update_xaxes(title_text="Total Amount", title_font=dict(color="#8B8FA3", size=11))
                     fig_fraud_amt.update_yaxes(title_text="", autorange="reversed")
                     st.plotly_chart(fig_fraud_amt, width='stretch')
 
                     top_amt_row = fraud_by_type.loc[fraud_by_type['총금액'].idxmax()]
                     _render_insight([
-                        f"최다 금액 유형: {int(top_amt_row['이상거래유형'])}. {top_amt_row['이상거래설명']} ({_format_amount(float(top_amt_row['총금액']))})",
+                        f"Highest amount type: {int(top_amt_row['이상거래유형'])}. {top_amt_row['이상거래설명']} ({_format_amount(float(top_amt_row['총금액']))})",
                     ])
             except Exception as e:
-                st.error(f"유형별 금액 데이터를 불러올 수 없습니다: {e}")
+                st.error(f"Unable to load amount-by-type data: {e}")
 
-        st.markdown('<p class="section-header">시간대 × 이상거래유형 교차 분석</p>', unsafe_allow_html=True)
+        st.markdown('<p class="section-header">Hourly x Fraud Type Cross Analysis</p>', unsafe_allow_html=True)
         try:
             heatmap_data = get_hourly_fraud_type_heatmap(filters)
             if heatmap_data.empty:
-                st.info("선택한 조건에 해당하는 히트맵 데이터가 없습니다.")
+                st.info("No heatmap data found for the selected criteria.")
             else:
                 pivot = heatmap_data.pivot_table(
                     index="이상거래유형", columns="거래시간대", values="건수", fill_value=0
@@ -501,15 +501,15 @@ def render():
                     z=pivot.values,
                     x=x_labels,
                     y=y_labels,
-                    colorscale=[[0, "#1A1F2E"], [0.5, "#2A6B65"], [1, "#4ECDC4"]],
+                    colorscale=[[0, "#F5F7FA"], [0.5, "#6EE7B7"], [1, "#059669"]],
                     hovertemplate="시간대: %{x}<br>유형: %{y}<br>건수: %{z}<extra></extra>",
                     texttemplate="%{z}",
                     textfont=dict(color="#E0E0E0", size=11),
                 ))
                 _apply_dark(fig_heatmap, height=360)
                 fig_heatmap.update_layout(
-                    xaxis_title="거래 시간대",
-                    yaxis_title="이상거래 유형",
+                    xaxis_title="Time Period",
+                    yaxis_title="Fraud Type",
                     xaxis=dict(title_font=dict(color="#8B8FA3", size=11)),
                     yaxis=dict(title_font=dict(color="#8B8FA3", size=11)),
                 )
@@ -521,17 +521,17 @@ def render():
                 top_types = heatmap_data.groupby('이상거래유형')['건수'].sum().nlargest(1)
                 top_type_label = type_map.get(int(top_types.index[0]), f"유형 {int(top_types.index[0])}")
                 _render_insight([
-                    f"이상거래 집중 조합: {peak_hm_type} × {peak_hm_hour} ({int(peak_hm['건수']):,}건)",
-                    f"시간대 전체 합산 최다 유형: {top_type_label}",
+                    f"Peak fraud combination: {peak_hm_type} x {peak_hm_hour} ({int(peak_hm['건수']):,} cases)",
+                    f"Most frequent type across all hours: {top_type_label}",
                 ])
         except Exception as e:
-            st.error(f"히트맵 데이터를 불러올 수 없습니다: {e}")
+            st.error(f"Unable to load heatmap data: {e}")
 
-        st.markdown('<p class="section-header">이상거래 유형별 월별 추이</p>', unsafe_allow_html=True)
+        st.markdown('<p class="section-header">Fraud Type Monthly Trend</p>', unsafe_allow_html=True)
         try:
             trend_data = get_fraud_type_monthly_trend(filters)
             if trend_data.empty:
-                st.info("선택한 조건에 해당하는 월별 추이 데이터가 없습니다.")
+                st.info("No monthly trend data found for the selected criteria.")
             else:
                 trend_data["연월str"] = (
                     trend_data["연월"].astype(str).str[:4] + "-"
@@ -563,8 +563,8 @@ def render():
                         bgcolor="rgba(0,0,0,0)",
                     ),
                 )
-                fig_trend.update_xaxes(title_text="연월",          title_font=dict(color="#8B8FA3", size=11))
-                fig_trend.update_yaxes(title_text="이상거래 건수", title_font=dict(color="#8B8FA3", size=11))
+                fig_trend.update_xaxes(title_text="Year-Month",       title_font=dict(color="#8B8FA3", size=11))
+                fig_trend.update_yaxes(title_text="Fraud Count",    title_font=dict(color="#8B8FA3", size=11))
                 st.plotly_chart(fig_trend, width='stretch')
 
                 type_growths = {}
@@ -576,76 +576,76 @@ def render():
                     growing   = max(type_growths, key=type_growths.get)
                     declining = min(type_growths, key=type_growths.get)
                     _render_insight([
-                        f"증가 추세 유형: {growing} (+{type_growths[growing]:,}건)",
-                        f"감소 추세 유형: {declining} ({type_growths[declining]:,}건)",
+                        f"Increasing trend type: {growing} (+{type_growths[growing]:,})",
+                        f"Decreasing trend type: {declining} ({type_growths[declining]:,})",
                     ])
         except Exception as e:
-            st.error(f"유형별 월별 추이 데이터를 불러올 수 없습니다: {e}")
+            st.error(f"Unable to load fraud type monthly trend data: {e}")
 
     # ─────────────────────────────────────────────
     # 탭4: 금융회사 – 출금/입금 상위 20
     # ─────────────────────────────────────────────
     elif selected_tab == tab_names[3]:
-        st.markdown('<p class="section-header">금융회사별 이상거래 현황 (상위 20)</p>', unsafe_allow_html=True)
+        st.markdown('<p class="section-header">Fraud by Financial Institution (Top 20)</p>', unsafe_allow_html=True)
         try:
             banks = get_top_banks(filters)
             if banks.empty:
-                st.info("선택한 조건에 해당하는 금융회사 데이터가 없습니다.")
+                st.info("No institution data found for the selected criteria.")
             else:
-                tab_out, tab_in = st.tabs(["출금 금융회사", "입금 금융회사"])
+                tab_out, tab_in = st.tabs(["Sender Institutions", "Receiver Institutions"])
 
                 with tab_out:
                     banks_out = banks[banks["구분"] == "출금"].sort_values("이상거래", ascending=False).head(20)
                     if banks_out.empty:
-                        st.info("출금 금융회사 이상거래 데이터가 없습니다.")
+                        st.info("No sender institution fraud data available.")
                     else:
                         banks_out["금융회사명"] = banks_out["금융회사"].astype(str)
                         fig_bank_out = make_subplots(specs=[[{"secondary_y": True}]])
                         fig_bank_out.add_trace(
-                            go.Bar(x=banks_out["금융회사명"], y=banks_out["이상거래"], name="이상거래 건수",
+                            go.Bar(x=banks_out["금융회사명"], y=banks_out["이상거래"], name="Fraud Count",
                                    marker_color=ACCENT_COLOR),
                             secondary_y=False,
                         )
                         fig_bank_out.add_trace(
-                            go.Scatter(x=banks_out["금융회사명"], y=banks_out["이상거래비율"], name="이상거래 비율(%)",
+                            go.Scatter(x=banks_out["금융회사명"], y=banks_out["이상거래비율"], name="Fraud Ratio (%)",
                                        mode="lines+markers", marker_color=LINE_COLOR, line=dict(width=2)),
                             secondary_y=True,
                         )
                         _apply_dark(fig_bank_out, height=_H2, secondary_y=True)
-                        fig_bank_out.update_xaxes(title_text="금융회사 코드",    title_font=dict(color="#8B8FA3", size=11))
-                        fig_bank_out.update_yaxes(title_text="이상거래 건수",    title_font=dict(color="#8B8FA3", size=11), secondary_y=False)
-                        fig_bank_out.update_yaxes(title_text="이상거래 비율(%)", title_font=dict(color="#8B8FA3", size=11), secondary_y=True)
+                        fig_bank_out.update_xaxes(title_text="Institution Code",   title_font=dict(color="#8B8FA3", size=11))
+                        fig_bank_out.update_yaxes(title_text="Fraud Count",        title_font=dict(color="#8B8FA3", size=11), secondary_y=False)
+                        fig_bank_out.update_yaxes(title_text="Fraud Ratio (%)",    title_font=dict(color="#8B8FA3", size=11), secondary_y=True)
                         st.plotly_chart(fig_bank_out, width='stretch')
                         top_out = banks_out.iloc[0]
                         _render_insight([
-                            f"이상거래 최다 출금 금융회사: {int(top_out['금융회사'])}번 ({int(top_out['이상거래']):,}건, 비율 {top_out['이상거래비율']:.2f}%)",
+                            f"Top sender institution by fraud: #{int(top_out['금융회사'])} ({int(top_out['이상거래']):,} cases, ratio {top_out['이상거래비율']:.2f}%)",
                         ])
 
                 with tab_in:
                     banks_in = banks[banks["구분"] == "입금"].sort_values("이상거래", ascending=False).head(20)
                     if banks_in.empty:
-                        st.info("입금 금융회사 이상거래 데이터가 없습니다.")
+                        st.info("No receiver institution fraud data available.")
                     else:
                         banks_in["금융회사명"] = banks_in["금융회사"].astype(str)
                         fig_bank_in = make_subplots(specs=[[{"secondary_y": True}]])
                         fig_bank_in.add_trace(
-                            go.Bar(x=banks_in["금융회사명"], y=banks_in["이상거래"], name="이상거래 건수",
+                            go.Bar(x=banks_in["금융회사명"], y=banks_in["이상거래"], name="Fraud Count",
                                    marker_color=ACCENT_COLOR),
                             secondary_y=False,
                         )
                         fig_bank_in.add_trace(
-                            go.Scatter(x=banks_in["금융회사명"], y=banks_in["이상거래비율"], name="이상거래 비율(%)",
+                            go.Scatter(x=banks_in["금융회사명"], y=banks_in["이상거래비율"], name="Fraud Ratio (%)",
                                        mode="lines+markers", marker_color=LINE_COLOR, line=dict(width=2)),
                             secondary_y=True,
                         )
                         _apply_dark(fig_bank_in, height=_H2, secondary_y=True)
-                        fig_bank_in.update_xaxes(title_text="금융회사 코드",    title_font=dict(color="#8B8FA3", size=11))
-                        fig_bank_in.update_yaxes(title_text="이상거래 건수",    title_font=dict(color="#8B8FA3", size=11), secondary_y=False)
-                        fig_bank_in.update_yaxes(title_text="이상거래 비율(%)", title_font=dict(color="#8B8FA3", size=11), secondary_y=True)
+                        fig_bank_in.update_xaxes(title_text="Institution Code",   title_font=dict(color="#8B8FA3", size=11))
+                        fig_bank_in.update_yaxes(title_text="Fraud Count",        title_font=dict(color="#8B8FA3", size=11), secondary_y=False)
+                        fig_bank_in.update_yaxes(title_text="Fraud Ratio (%)",    title_font=dict(color="#8B8FA3", size=11), secondary_y=True)
                         st.plotly_chart(fig_bank_in, width='stretch')
                         top_in = banks_in.iloc[0]
                         _render_insight([
-                            f"이상거래 최다 입금 금융회사: {int(top_in['금융회사'])}번 ({int(top_in['이상거래']):,}건, 비율 {top_in['이상거래비율']:.2f}%)",
+                            f"Top receiver institution by fraud: #{int(top_in['금융회사'])} ({int(top_in['이상거래']):,} cases, ratio {top_in['이상거래비율']:.2f}%)",
                         ])
         except Exception as e:
-            st.error(f"금융회사 데이터를 불러올 수 없습니다: {e}")
+            st.error(f"Unable to load institution data: {e}")

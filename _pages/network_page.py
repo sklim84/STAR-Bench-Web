@@ -54,7 +54,7 @@ def _plot_network(G, title, node_color_attr=None, edge_color_attr=None,
         노드 -> 커뮤니티 인덱스 매핑. 지정 시 커뮤니티별 색상으로 노드를 표시한다.
     """
     if len(G.nodes()) == 0:
-        st.warning("표시할 네트워크 데이터가 없습니다.")
+        st.warning("No network data to display.")
         return
 
     pos = nx.spring_layout(G, k=2 / np.sqrt(max(len(G.nodes()), 1)), seed=42, iterations=50)
@@ -87,11 +87,11 @@ def _plot_network(G, title, node_color_attr=None, edge_color_attr=None,
         fraud_in = sum(d.get("fraud", 0) for _, _, d in G.in_edges(node, data=True)) if G.is_directed() else 0
         fraud_out = sum(d.get("fraud", 0) for _, _, d in G.out_edges(node, data=True)) if G.is_directed() else 0
 
-        hover_parts = [f"노드: {node}", f"연결: {degree}", f"입금: {in_w:,}", f"출금: {out_w:,}"]
+        hover_parts = [f"Node: {node}", f"Connections: {degree}", f"Inflow: {in_w:,}", f"Outflow: {out_w:,}"]
         if fraud_in + fraud_out > 0:
-            hover_parts += [f"이상(수신): {fraud_in:,}", f"이상(발신): {fraud_out:,}"]
+            hover_parts += [f"Fraud (in): {fraud_in:,}", f"Fraud (out): {fraud_out:,}"]
         if community_map and node in community_map:
-            hover_parts.append(f"커뮤니티: {community_map[node]}")
+            hover_parts.append(f"Community: {community_map[node]}")
         node_text.append("<br>".join(hover_parts))
 
         node_sizes.append(max(8, min(40, 5 + degree * 1.5)))
@@ -132,7 +132,7 @@ def _plot_network(G, title, node_color_attr=None, edge_color_attr=None,
 def _render_dark_table(df, max_rows=20):
     """DataFrame을 dark-table HTML로 렌더링한다."""
     if len(df) == 0:
-        st.info("표시할 데이터가 없습니다.")
+        st.info("No data to display.")
         return
 
     display_df = df.head(max_rows)
@@ -164,10 +164,10 @@ def _render_dark_table(df, max_rows=20):
 
 def _render_tab_bank_network():
     """금융회사 네트워크 탭을 렌더링한다."""
-    with st.spinner("데이터 불러오는 중..."):
+    with st.spinner("Loading data..."):
         stats = get_bank_network_stats()
         if stats.empty:
-            st.warning("금융회사 네트워크 통계를 조회할 수 없습니다.")
+            st.warning("Unable to retrieve institution network statistics.")
             return
         row = stats.iloc[0]
 
@@ -178,25 +178,25 @@ def _render_tab_bank_network():
         ext_stats = get_extended_network_stats(bank_G)
 
     # 메트릭 카드 (HTML .metric-card)
-    st.markdown('<p class="section-header">네트워크 요약</p>', unsafe_allow_html=True)
+    st.markdown('<p class="section-header">Network Summary</p>', unsafe_allow_html=True)
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        _metric_card("출금 금융회사", f"{int(row['출금금융회사수'])}개", "거래 발신 기관 수")
+        _metric_card("Sender Institutions", f"{int(row['출금금융회사수'])}", "Sending institutions")
     with c2:
-        _metric_card("입금 금융회사", f"{int(row['입금금융회사수'])}개", "거래 수신 기관 수")
+        _metric_card("Receiver Institutions", f"{int(row['입금금융회사수'])}", "Receiving institutions")
     with c3:
-        _metric_card("금융회사 간 연결", f"{int(row['연결수']):,}개", "고유 거래 경로 수")
+        _metric_card("Inter-Institution Links", f"{int(row['연결수']):,}", "Unique transaction paths")
     c4, c5, c6 = st.columns(3)
     with c4:
-        _metric_card("네트워크 밀도", f"{ext_stats['밀도']:.4f}", "0(희박) ~ 1(완전 연결)")
+        _metric_card("Network Density", f"{ext_stats['밀도']:.4f}", "0 (sparse) ~ 1 (fully connected)")
     with c5:
-        _metric_card("평균 클러스터링", f"{ext_stats['평균클러스터링계수']:.4f}", "군집화 계수")
+        _metric_card("Avg Clustering", f"{ext_stats['평균클러스터링계수']:.4f}", "Clustering coefficient")
     with c6:
-        _metric_card("허브 금융회사", f"{ext_stats['허브노드']}", f"연결 수: {ext_stats['허브연결수']}")
+        _metric_card("Hub Institution", f"{ext_stats['허브노드']}", f"Connections: {ext_stats['허브연결수']}")
 
     # 이상거래 필터 체크박스
-    fraud_filter = st.checkbox("이상거래 포함 연결만 표시", value=True, key="bank_fraud")
+    fraud_filter = st.checkbox("Show fraud-related links only", value=True, key="bank_fraud")
     if fraud_filter:
         filtered = [(u, v) for u, v, d in bank_G.edges(data=True) if d.get("fraud", 0) > 0]
         if filtered:
@@ -208,13 +208,13 @@ def _render_tab_bank_network():
 
     _plot_network(
         bank_G_show,
-        f"금융회사 간 거래 네트워크 ({len(bank_G_show.nodes())}개 노드, {len(bank_G_show.edges())}개 연결)",
+        f"Inter-Institution Transaction Network ({len(bank_G_show.nodes())} nodes, {len(bank_G_show.edges())} links)",
     )
 
     # 중심성 지표 분석
-    st.markdown('<p class="section-header">중심성 지표 분석 (상위 10)</p>', unsafe_allow_html=True)
+    st.markdown('<p class="section-header">Centrality Analysis (Top 10)</p>', unsafe_allow_html=True)
 
-    with st.spinner("중심성 지표 계산 중..."):
+    with st.spinner("Computing centrality metrics..."):
         centrality_df = compute_centrality_metrics(bank_G)
 
     if len(centrality_df) > 0:
@@ -222,7 +222,7 @@ def _render_tab_bank_network():
 
         # 중심성 지표 테이블 (dark-table)
         display_cols = top10[["노드", "degree", "betweenness", "closeness", "eigenvector"]].copy()
-        display_cols.columns = ["금융회사", "연결 수", "매개 중심성", "근접 중심성", "고유벡터 중심성"]
+        display_cols.columns = ["Institution", "Degree", "Betweenness", "Closeness", "Eigenvector"]
         _render_dark_table(display_cols, max_rows=10)
 
         # 중심성 지표 Bar 차트
@@ -240,11 +240,11 @@ def _render_tab_bank_network():
                 textfont=dict(color="#E0E0E0", size=11),
             ))
             fig_degree.update_layout(
-                title=dict(text="연결 수 (Degree)", font=dict(color="#C0C4D0", size=14)),
+                title=dict(text="Degree (Connections)", font=dict(color="#C0C4D0", size=14)),
             )
             _apply_dark(fig_degree, height=350)
-            fig_degree.update_xaxes(title_text="금융회사", title_font=dict(color="#8B8FA3", size=11))
-            fig_degree.update_yaxes(title_text="연결 수", title_font=dict(color="#8B8FA3", size=11))
+            fig_degree.update_xaxes(title_text="Institution", title_font=dict(color="#8B8FA3", size=11))
+            fig_degree.update_yaxes(title_text="Degree", title_font=dict(color="#8B8FA3", size=11))
             st.plotly_chart(fig_degree, width='stretch')
 
         with col_right:
@@ -257,22 +257,22 @@ def _render_tab_bank_network():
                 textfont=dict(color="#E0E0E0", size=11),
             ))
             fig_between.update_layout(
-                title=dict(text="매개 중심성 (Betweenness)", font=dict(color="#C0C4D0", size=14)),
+                title=dict(text="Betweenness Centrality", font=dict(color="#C0C4D0", size=14)),
             )
             _apply_dark(fig_between, height=350)
-            fig_between.update_xaxes(title_text="금융회사", title_font=dict(color="#8B8FA3", size=11))
-            fig_between.update_yaxes(title_text="매개 중심성", title_font=dict(color="#8B8FA3", size=11))
+            fig_between.update_xaxes(title_text="Institution", title_font=dict(color="#8B8FA3", size=11))
+            fig_between.update_yaxes(title_text="Betweenness", title_font=dict(color="#8B8FA3", size=11))
             st.plotly_chart(fig_between, width='stretch')
 
     else:
-        st.info("중심성 지표를 계산할 노드가 없습니다.")
+        st.info("No nodes available for centrality computation.")
 
     # 금융회사 네트워크 상세 통계 테이블
-    with st.expander("금융회사 네트워크 상세 통계"):
+    with st.expander("Institution Network Detailed Statistics"):
         degree_df = bank_df.groupby("source").agg(
             출금건수=("총거래", "sum"), 이상거래=("이상거래", "sum")
         ).reset_index().sort_values("이상거래", ascending=False).head(15)
-        degree_df.columns = ["금융회사", "출금 건수", "이상거래 건수"]
+        degree_df.columns = ["Institution", "Outflow Count", "Fraud Count"]
         _render_dark_table(degree_df, max_rows=15)
 
 
@@ -282,27 +282,27 @@ def _render_tab_bank_network():
 
 def _render_tab_fraud_account_network():
     """이상거래 계좌 네트워크 탭을 렌더링한다."""
-    limit = st.slider("표시할 이상거래 연결 수", 100, 1000, 300, 50, key="fraud_limit")
-    with st.spinner("이상거래 네트워크 조회 중..."):
+    limit = st.slider("Number of fraud links to display", 100, 1000, 300, 50, key="fraud_limit")
+    with st.spinner("Loading fraud network..."):
         fraud_df = get_fraud_account_network(limit=limit)
 
     if len(fraud_df) == 0:
-        st.info("이상거래 네트워크 데이터가 없습니다.")
+        st.info("No fraud network data available.")
         return
 
     fraud_G = build_account_graph(fraud_df)
 
     # 메트릭 카드 (HTML .metric-card)
-    st.markdown('<p class="section-header">이상거래 계좌 네트워크 요약</p>', unsafe_allow_html=True)
+    st.markdown('<p class="section-header">Fraud Account Network Summary</p>', unsafe_allow_html=True)
     avg_degree = sum(dict(fraud_G.degree()).values()) / max(len(fraud_G.nodes()), 1)
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        _metric_card("이상거래 계좌 수", f"{len(fraud_G.nodes()):,}", "이상거래 관련 고유 계좌")
+        _metric_card("Fraud Accounts", f"{len(fraud_G.nodes()):,}", "Unique fraud-related accounts")
     with c2:
-        _metric_card("이상거래 연결 수", f"{len(fraud_G.edges()):,}", "거래 엣지 수")
+        _metric_card("Fraud Links", f"{len(fraud_G.edges()):,}", "Transaction edges")
     with c3:
-        _metric_card("평균 연결 수", f"{avg_degree:.1f}", "계좌당 평균 연결")
+        _metric_card("Avg Connections", f"{avg_degree:.1f}", "Per account average")
 
     # 커뮤니티 탐지
     st.markdown('<p class="section-header">커뮤니티 탐지</p>', unsafe_allow_html=True)
@@ -493,7 +493,7 @@ def _render_tab_fraud_flow():
         z=pivot.values,
         x=x_labels,
         y=y_labels,
-        colorscale=[[0, "#1A1F2E"], [0.5, "#2A6B65"], [1, "#4ECDC4"]],
+        colorscale=[[0, "#F5F7FA"], [0.5, "#6EE7B7"], [1, "#059669"]],
         hovertemplate=hover_template,
         texttemplate=text_template,
         textfont=dict(color="#E0E0E0", size=10),
