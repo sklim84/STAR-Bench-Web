@@ -321,7 +321,7 @@ def _render_tab_fraud_account_network():
             n_communities = community_df["커뮤니티"].nunique()
 
             st.markdown(
-                f'<p class="caption-text">탐지된 커뮤니티 수: '
+                f'<p class="caption-text">Communities detected: '
                 f'<span style="color:#4ECDC4; font-weight:700;">{n_communities}</span></p>',
                 unsafe_allow_html=True,
             )
@@ -357,10 +357,10 @@ def _render_tab_fraud_account_network():
                     total_amount += d.get("amount", 0)
 
             comm_stats_rows.append({
-                "커뮤니티": comm_id,
-                "노드 수": n_nodes,
-                "내부 연결 수": internal_edges,
-                "내부 거래금액": int(total_amount),
+                "Community": comm_id,
+                "Nodes": n_nodes,
+                "Internal Links": internal_edges,
+                "Internal Amount": int(total_amount),
             })
 
         comm_stats_df = pd.DataFrame(comm_stats_rows)
@@ -422,7 +422,7 @@ def _render_tab_account_explorer():
         with c2:
             _metric_card("Transaction Links", f"{len(ego_G.edges())}", "Unique transaction paths")
 
-        _plot_network(ego_G, f"계좌 {selected}의 {hops}-hop 네트워크", center_node=str(selected))
+        _plot_network(ego_G, f"Account {selected} {hops}-hop Network", center_node=str(selected))
 
         with st.expander("Transaction Details"):
             _render_dark_table(ego_df, max_rows=50)
@@ -451,21 +451,21 @@ def _render_tab_fraud_flow():
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        _metric_card("총 이상거래 건수", f"{total_fraud_count:,}", "금융회사 간 이상거래 합계")
+        _metric_card("Total Fraud Count", f"{total_fraud_count:,}", "Inter-institution fraud total")
     with c2:
-        _metric_card("총 이상거래 금액", _format_amount(total_fraud_amount), "이상거래 금액 합산")
+        _metric_card("Total Fraud Amount", _format_amount(total_fraud_amount), "Fraud amount sum")
     with c3:
-        _metric_card("이상거래 경로 수", f"{n_routes:,}", "출금 → 입금 고유 경로")
+        _metric_card("Fraud Routes", f"{n_routes:,}", "Unique sender-receiver paths")
     with c4:
         _metric_card(
-            "최다 이상거래 경로",
+            "Top Fraud Route",
             f"{int(top_route['source'])} → {int(top_route['target'])}",
-            f"{int(top_route['이상거래건수']):,}건",
+            f"{int(top_route['이상거래건수']):,} cases",
         )
 
-    # 라디오 버튼: 건수 vs 금액
+    # Radio: count vs amount
     metric_choice = st.radio(
-        "히트맵 표시 기준",
+        "Heatmap display metric",
         ["이상거래건수", "이상거래금액"],
         horizontal=True,
         key="flow_metric",
@@ -478,16 +478,16 @@ def _render_tab_fraud_flow():
     )
 
     # 라벨 생성
-    x_labels = [f"금융회사 {int(c)}" for c in pivot.columns]
-    y_labels = [f"금융회사 {int(r)}" for r in pivot.index]
+    x_labels = [f"Institution {int(c)}" for c in pivot.columns]
+    y_labels = [f"Institution {int(r)}" for r in pivot.index]
 
     # 히트맵 값에 대한 텍스트 포맷
     if metric_choice == "이상거래금액":
         text_template = "%{z:,.0f}"
-        hover_template = "출금: %{y}<br>입금: %{x}<br>금액: %{z:,.0f}원<extra></extra>"
+        hover_template = "Sender: %{y}<br>Receiver: %{x}<br>Amount: %{z:,.0f}<extra></extra>"
     else:
         text_template = "%{z:,}"
-        hover_template = "출금: %{y}<br>입금: %{x}<br>건수: %{z:,}<extra></extra>"
+        hover_template = "Sender: %{y}<br>Receiver: %{x}<br>Count: %{z:,}<extra></extra>"
 
     fig_heatmap = go.Figure(go.Heatmap(
         z=pivot.values,
@@ -500,27 +500,29 @@ def _render_tab_fraud_flow():
     ))
     _apply_dark(fig_heatmap, height=500)
     fig_heatmap.update_layout(
-        xaxis_title="입금 금융회사 (수신)",
-        yaxis_title="출금 금융회사 (발신)",
+        xaxis_title="Receiver Institution",
+        yaxis_title="Sender Institution",
         xaxis=dict(title_font=dict(color="#8B8FA3", size=11), side="bottom"),
         yaxis=dict(title_font=dict(color="#8B8FA3", size=11), autorange="reversed"),
     )
     st.plotly_chart(fig_heatmap, width='stretch')
 
     # 상위 이상거래 경로 테이블
-    st.markdown('<p class="section-header">상위 이상거래 경로 (상위 20)</p>', unsafe_allow_html=True)
+    st.markdown('<p class="section-header">Top Fraud Routes (Top 20)</p>', unsafe_allow_html=True)
     top_routes = flow_df.head(20).copy()
-    top_routes.columns = ["출금 금융회사", "입금 금융회사", "이상거래 건수", "이상거래 금액"]
+    top_routes.columns = ["Sender Institution", "Receiver Institution", "Fraud Count", "Fraud Amount"]
     _render_dark_table(top_routes, max_rows=20)
 
 
 def _format_amount(amount):
-    """금액을 읽기 쉬운 한국어 형식으로 포맷한다."""
+    """Format amount into a human-readable string."""
     amount = float(amount)
-    if amount >= 1_0000_0000:
-        return f"{amount / 1_0000_0000:,.1f}억"
-    elif amount >= 1_0000:
-        return f"{amount / 1_0000:,.0f}만"
+    if amount >= 1_000_000_000:
+        return f"{amount / 1_000_000_000:,.1f}B"
+    elif amount >= 1_000_000:
+        return f"{amount / 1_000_000:,.1f}M"
+    elif amount >= 1_000:
+        return f"{amount / 1_000:,.0f}K"
     else:
         return f"{amount:,.0f}"
 
@@ -535,7 +537,7 @@ def _render_memgraph_status():
     if available:
         st.markdown(
             f'<div class="memgraph-badge connected">'
-            f'<span style="color:#4ECDC4; font-weight:700;">Memgraph 연결됨</span>'
+            f'<span style="color:#4ECDC4; font-weight:700;">Memgraph Connected</span>'
             f'<span style="color:#9EA3B8; margin-left:12px; font-size:12px;">'
             f'bolt://{config.MEMGRAPH_HOST}:{config.MEMGRAPH_PORT}</span>'
             f'</div>',
@@ -544,9 +546,9 @@ def _render_memgraph_status():
     else:
         st.markdown(
             '<div class="memgraph-badge disconnected">'
-            '<span style="color:#E15759; font-weight:700;">Memgraph 미실행</span>'
+            '<span style="color:#E15759; font-weight:700;">Memgraph Not Running</span>'
             '<span style="color:#9EA3B8; margin-left:12px; font-size:12px;">'
-            'AML 패턴 탐지에는 Docker로 Memgraph를 실행하세요.</span>'
+            'AML pattern detection requires Memgraph via Docker.</span>'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -600,7 +602,7 @@ def _plot_ring_graph(ring_accounts, amounts=None):
 
     # 노드 라벨
     node_labels = [str(a) for a in display_nodes]
-    node_hover = [f"계좌: {a}" for a in display_nodes]
+    node_hover = [f"Account: {a}" for a in display_nodes]
 
     node_trace = go.Scatter(
         x=node_x, y=node_y, mode="markers+text",
@@ -614,7 +616,7 @@ def _plot_ring_graph(ring_accounts, amounts=None):
 
     fig = go.Figure(data=[edge_trace, node_trace])
     fig.update_layout(
-        title=dict(text=f"순환거래 경로 ({n}개 계좌)", font=dict(color="#C0C4D0", size=14)),
+        title=dict(text=f"Ring Transaction Path ({n} accounts)", font=dict(color="#C0C4D0", size=14)),
         showlegend=False, height=450,
         xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
         yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, scaleanchor="x"),
@@ -680,13 +682,13 @@ def _plot_path_graph(path, amounts=None, dates=None):
         text=node_labels,
         textposition="bottom center",
         textfont=dict(size=10, color="#E0E0E0"),
-        hovertext=[f"계좌: {a}" for a in path],
+        hovertext=[f"Account: {a}" for a in path],
         hoverinfo="text",
     )
 
     fig = go.Figure(data=[edge_trace, node_trace])
     fig.update_layout(
-        title=dict(text=f"최단경로 ({n - 1} hop)", font=dict(color="#C0C4D0", size=14)),
+        title=dict(text=f"Shortest Path ({n - 1} hop)", font=dict(color="#C0C4D0", size=14)),
         showlegend=False, height=300,
         xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
         yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-0.5, 0.5]),
@@ -701,43 +703,43 @@ def _plot_path_graph(path, amounts=None, dates=None):
 
 def _render_sub_ring():
     """서브탭: 순환거래 탐지."""
-    st.markdown('<p class="section-header">순환거래 탐지</p>', unsafe_allow_html=True)
+    st.markdown('<p class="section-header">Ring Transaction Detection</p>', unsafe_allow_html=True)
     st.markdown(
         '<p class="caption-text">'
-        'A -> B -> C -> ... -> A 형태의 순환 자금 이동 패턴을 탐지합니다.'
+        'Detects circular fund transfer patterns of the form A -> B -> C -> ... -> A.'
         '</p>',
         unsafe_allow_html=True,
     )
 
-    with st.expander("탐지 파라미터", expanded=True):
+    with st.expander("Detection Parameters", expanded=True):
         c1, c2, c3, c4 = st.columns(4)
         with c1:
-            min_len = st.number_input("최소 순환 길이", min_value=3, max_value=6, value=3, key="ring_min")
+            min_len = st.number_input("Min ring length", min_value=3, max_value=6, value=3, key="ring_min")
         with c2:
-            max_len = st.number_input("최대 순환 길이", min_value=3, max_value=10, value=6, key="ring_max")
+            max_len = st.number_input("Max ring length", min_value=3, max_value=10, value=6, key="ring_max")
         with c3:
-            min_amount = st.number_input("최소 거래금액", min_value=0, value=0, step=100000, key="ring_amt")
+            min_amount = st.number_input("Min transaction amount", min_value=0, value=0, step=100000, key="ring_amt")
         with c4:
-            limit = st.number_input("최대 결과 수", min_value=10, max_value=500, value=100, key="ring_limit")
+            limit = st.number_input("Max results", min_value=10, max_value=500, value=100, key="ring_limit")
 
-    if st.button("탐지 실행", key="ring_btn"):
-        with st.spinner("순환거래 패턴 탐지 중..."):
+    if st.button("Run Detection", key="ring_btn"):
+        with st.spinner("Detecting ring transaction patterns..."):
             result_df = detect_ring_transactions(
                 min_len=min_len, max_len=max_len,
                 min_amount=min_amount, limit=limit,
             )
 
         if len(result_df) == 0:
-            st.info("탐지된 순환거래 패턴이 없습니다.")
+            st.info("No ring transaction patterns detected.")
             return
 
         mc1, mc2, mc3 = st.columns(3)
         with mc1:
-            _metric_card("탐지 건수", f"{len(result_df):,}", "순환거래 패턴 수")
+            _metric_card("Detections", f"{len(result_df):,}", "Ring transaction patterns")
         with mc2:
-            _metric_card("최대 순환 크기", f"{int(result_df['ring_size'].max())}", "최다 계좌 참여 순환")
+            _metric_card("Max Ring Size", f"{int(result_df['ring_size'].max())}", "Most accounts in a ring")
         with mc3:
-            _metric_card("최대 순환 금액", _format_amount(result_df["total_amount"].max()), "단일 순환 최대 금액")
+            _metric_card("Max Ring Amount", _format_amount(result_df["total_amount"].max()), "Largest single ring amount")
 
         # 첫 번째 결과 시각화
         first = result_df.iloc[0]
@@ -745,135 +747,135 @@ def _render_sub_ring():
         # ring_accounts 리스트에서 순환 시각화
         _plot_ring_graph(ring_accounts)
 
-        # 결과 테이블
-        st.markdown('<p class="section-header">탐지 결과</p>', unsafe_allow_html=True)
+        # Results table
+        st.markdown('<p class="section-header">Detection Results</p>', unsafe_allow_html=True)
         display_df = result_df[["ring_size", "total_amount"]].copy()
-        display_df.columns = ["순환 크기", "총 거래금액"]
+        display_df.columns = ["Ring Size", "Total Amount"]
         _render_dark_table(display_df, max_rows=20)
 
-        with st.expander("전체 결과 상세"):
+        with st.expander("Full Results Detail"):
             _render_dark_table(result_df, max_rows=50)
 
 
 def _render_sub_layering():
-    """서브탭: 레이어링 패턴 탐지."""
-    st.markdown('<p class="section-header">레이어링 패턴 탐지</p>', unsafe_allow_html=True)
+    """Sub-tab: Layering pattern detection."""
+    st.markdown('<p class="section-header">Layering Pattern Detection</p>', unsafe_allow_html=True)
     st.markdown(
         '<p class="caption-text">'
-        '출발 계좌에서 중개 계좌를 거쳐 도착 계좌에 이르는 다단계 자금 이동 패턴을 탐지합니다.'
+        'Detects multi-layer fund transfer patterns from source account through intermediaries to destination account.'
         '</p>',
         unsafe_allow_html=True,
     )
 
-    with st.expander("탐지 파라미터", expanded=True):
+    with st.expander("Detection Parameters", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
-            min_layers = st.number_input("최소 레이어 수", min_value=2, max_value=10, value=3, key="layer_min")
+            min_layers = st.number_input("Min layers", min_value=2, max_value=10, value=3, key="layer_min")
         with c2:
-            limit = st.number_input("최대 결과 수", min_value=10, max_value=500, value=100, key="layer_limit")
+            limit = st.number_input("Max results", min_value=10, max_value=500, value=100, key="layer_limit")
 
-    if st.button("탐지 실행", key="layer_btn"):
-        with st.spinner("레이어링 패턴 탐지 중..."):
+    if st.button("Run Detection", key="layer_btn"):
+        with st.spinner("Detecting layering patterns..."):
             result_df = detect_layering_patterns(min_layers=min_layers, limit=limit)
 
         if len(result_df) == 0:
-            st.info("탐지된 레이어링 패턴이 없습니다.")
+            st.info("No layering patterns detected.")
             return
 
         mc1, mc2, mc3 = st.columns(3)
         with mc1:
-            _metric_card("탐지 건수", f"{len(result_df):,}", "레이어링 패턴 수")
+            _metric_card("Detections", f"{len(result_df):,}", "Layering patterns")
         with mc2:
-            _metric_card("최대 레이어 수", f"{int(result_df['layers'].max())}", "최다 중간 단계")
+            _metric_card("Max Layers", f"{int(result_df['layers'].max())}", "Most intermediate steps")
         with mc3:
-            _metric_card("최대 금액", _format_amount(result_df["total_amount"].max()), "단일 경로 최대 금액")
+            _metric_card("Max Amount", _format_amount(result_df["total_amount"].max()), "Largest single path amount")
 
-        # 결과 테이블
-        st.markdown('<p class="section-header">탐지 결과</p>', unsafe_allow_html=True)
+        # Results table
+        st.markdown('<p class="section-header">Detection Results</p>', unsafe_allow_html=True)
         display_df = result_df[["source_account", "destination_account", "layers", "total_amount"]].copy()
-        display_df.columns = ["출발 계좌", "도착 계좌", "레이어 수", "총 거래금액"]
+        display_df.columns = ["Source Account", "Destination Account", "Layers", "Total Amount"]
         _render_dark_table(display_df, max_rows=20)
 
-        with st.expander("전체 결과 상세"):
+        with st.expander("Full Results Detail"):
             _render_dark_table(result_df, max_rows=50)
 
 
 def _render_sub_funnel():
     """서브탭: 대포통장(funnel) 패턴 탐지."""
-    st.markdown('<p class="section-header">대포통장 패턴 탐지</p>', unsafe_allow_html=True)
+    st.markdown('<p class="section-header">Funnel Account Detection</p>', unsafe_allow_html=True)
     st.markdown(
         '<p class="caption-text">'
-        '다수의 계좌로부터 입금을 받고 소수의 계좌로 출금하는 의심 계좌를 탐지합니다.'
+        'Detects suspect accounts that receive from many accounts and send to few accounts.'
         '</p>',
         unsafe_allow_html=True,
     )
 
-    with st.expander("탐지 파라미터", expanded=True):
+    with st.expander("Detection Parameters", expanded=True):
         c1, c2, c3 = st.columns(3)
         with c1:
-            min_inflow = st.number_input("최소 입금 계좌 수", min_value=5, max_value=50, value=10, key="funnel_in")
+            min_inflow = st.number_input("Min inflow accounts", min_value=5, max_value=50, value=10, key="funnel_in")
         with c2:
-            max_outflow = st.number_input("최대 출금 계좌 수", min_value=1, max_value=10, value=3, key="funnel_out")
+            max_outflow = st.number_input("Max outflow accounts", min_value=1, max_value=10, value=3, key="funnel_out")
         with c3:
-            limit = st.number_input("최대 결과 수", min_value=10, max_value=500, value=100, key="funnel_limit")
+            limit = st.number_input("Max results", min_value=10, max_value=500, value=100, key="funnel_limit")
 
-    if st.button("탐지 실행", key="funnel_btn"):
-        with st.spinner("대포통장 패턴 탐지 중..."):
+    if st.button("Run Detection", key="funnel_btn"):
+        with st.spinner("Detecting funnel account patterns..."):
             result_df = detect_funnel_accounts(
                 min_inflow=min_inflow, max_outflow=max_outflow, limit=limit,
             )
 
         if len(result_df) == 0:
-            st.info("탐지된 대포통장 의심 계좌가 없습니다.")
+            st.info("No funnel account suspects detected.")
             return
 
         mc1, mc2, mc3 = st.columns(3)
         with mc1:
-            _metric_card("의심 계좌 수", f"{len(result_df):,}", "대포통장 의심 계좌")
+            _metric_card("Suspect Accounts", f"{len(result_df):,}", "Funnel account suspects")
         with mc2:
-            _metric_card("최고 Funnel 비율", f"{result_df['funnel_ratio'].max():.2f}", "입금 계좌 수 / 출금 계좌 수")
+            _metric_card("Max Funnel Ratio", f"{result_df['funnel_ratio'].max():.2f}", "Inflow accounts / Outflow accounts")
         with mc3:
-            _metric_card("최대 입금 건수", f"{int(result_df['inflow_count'].max()):,}", "단일 계좌 최다 입금")
+            _metric_card("Max Inflow Count", f"{int(result_df['inflow_count'].max()):,}", "Most inflows to a single account")
 
-        # 결과 테이블
-        st.markdown('<p class="section-header">탐지 결과</p>', unsafe_allow_html=True)
+        # Results table
+        st.markdown('<p class="section-header">Detection Results</p>', unsafe_allow_html=True)
         display_df = result_df[[
             "account_id", "inflow_count", "inflow_amount",
             "outflow_count", "outflow_amount", "funnel_ratio",
         ]].copy()
         display_df.columns = [
-            "계좌 ID", "입금 건수", "입금 금액",
-            "출금 건수", "출금 금액", "Funnel 비율",
+            "Account ID", "Inflow Count", "Inflow Amount",
+            "Outflow Count", "Outflow Amount", "Funnel Ratio",
         ]
         _render_dark_table(display_df, max_rows=20)
 
 
 def _render_sub_shortest_path():
     """서브탭: 최단경로 탐색."""
-    st.markdown('<p class="section-header">최단경로 탐색</p>', unsafe_allow_html=True)
+    st.markdown('<p class="section-header">Shortest Path Search</p>', unsafe_allow_html=True)
     st.markdown(
         '<p class="caption-text">'
-        '두 계좌 간 최단 거래 경로를 탐색합니다.'
+        'Find the shortest transaction path between two accounts.'
         '</p>',
         unsafe_allow_html=True,
     )
 
-    with st.expander("계좌 입력", expanded=True):
+    with st.expander("Account Input", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
-            account_a = st.number_input("출발 계좌 ID", min_value=0, value=0, step=1, key="path_a")
+            account_a = st.number_input("Source Account ID", min_value=0, value=0, step=1, key="path_a")
         with c2:
-            account_b = st.number_input("도착 계좌 ID", min_value=0, value=0, step=1, key="path_b")
+            account_b = st.number_input("Destination Account ID", min_value=0, value=0, step=1, key="path_b")
 
-    if st.button("경로 탐색", key="path_btn"):
+    if st.button("Find Path", key="path_btn"):
         if account_a == 0 or account_b == 0:
-            st.warning("출발 계좌와 도착 계좌를 모두 입력하세요.")
+            st.warning("Please enter both source and destination accounts.")
             return
         if account_a == account_b:
-            st.warning("출발 계좌와 도착 계좌가 동일합니다.")
+            st.warning("Source and destination accounts are the same.")
             return
 
-        with st.spinner(f"계좌 {account_a} -> {account_b} 최단경로 탐색 중..."):
+        with st.spinner(f"Searching shortest path: {account_a} -> {account_b}..."):
             result = find_shortest_path(account_a, account_b)
 
         if "error" in result:
@@ -886,17 +888,17 @@ def _render_sub_shortest_path():
         dates = result.get("dates", [])
 
         if not path:
-            st.info("두 계좌 간 경로가 존재하지 않습니다.")
+            st.info("No path exists between the two accounts.")
             return
 
         mc1, mc2, mc3 = st.columns(3)
         with mc1:
-            _metric_card("경로 길이", f"{hops} hop", "출발~도착 최단 거리")
+            _metric_card("Path Length", f"{hops} hop", "Shortest distance")
         with mc2:
             total_amt = sum(amounts) if amounts else 0
-            _metric_card("총 경유 금액", _format_amount(total_amt), "경로 상 거래금액 합계")
+            _metric_card("Total Path Amount", _format_amount(total_amt), "Sum of amounts along path")
         with mc3:
-            _metric_card("경유 계좌 수", f"{max(0, len(path) - 2)}", "중간 경유 계좌")
+            _metric_card("Intermediate Accounts", f"{max(0, len(path) - 2)}", "Accounts between source and dest")
 
         # 경로 시각화
         _plot_path_graph(path, amounts=amounts, dates=dates)
@@ -912,104 +914,104 @@ def _render_sub_shortest_path():
                     row_data["거래일자"] = dates[i]
                 path_rows.append(row_data)
             path_df = pd.DataFrame(path_rows)
-            st.markdown('<p class="section-header">구간별 상세</p>', unsafe_allow_html=True)
+            st.markdown('<p class="section-header">Segment Details</p>', unsafe_allow_html=True)
             _render_dark_table(path_df, max_rows=20)
 
 
 def _render_sub_temporal():
     """서브탭: 시간대별 네트워크."""
-    st.markdown('<p class="section-header">시간대별 네트워크</p>', unsafe_allow_html=True)
+    st.markdown('<p class="section-header">Temporal Network</p>', unsafe_allow_html=True)
     st.markdown(
         '<p class="caption-text">'
-        '지정된 기간 내 거래 네트워크를 추출합니다.'
+        'Extract the transaction network within a specified time period.'
         '</p>',
         unsafe_allow_html=True,
     )
 
-    with st.expander("조회 조건", expanded=True):
+    with st.expander("Query Parameters", expanded=True):
         c1, c2, c3 = st.columns(3)
         with c1:
             start_date = st.number_input(
-                "시작일 (YYYYMMDD)", min_value=20210101, max_value=20241231,
+                "Start Date (YYYYMMDD)", min_value=20210101, max_value=20241231,
                 value=20210101, step=1, key="temp_start",
             )
         with c2:
             end_date = st.number_input(
-                "종료일 (YYYYMMDD)", min_value=20210101, max_value=20241231,
+                "End Date (YYYYMMDD)", min_value=20210101, max_value=20241231,
                 value=20241231, step=1, key="temp_end",
             )
         with c3:
-            fraud_only = st.checkbox("이상거래만 표시", value=True, key="temp_fraud")
+            fraud_only = st.checkbox("Fraud transactions only", value=True, key="temp_fraud")
 
-    if st.button("조회", key="temp_btn"):
+    if st.button("Query", key="temp_btn"):
         if start_date > end_date:
-            st.warning("시작일이 종료일보다 클 수 없습니다.")
+            st.warning("Start date cannot be later than end date.")
             return
 
-        with st.spinner("시간대별 네트워크 조회 중..."):
+        with st.spinner("Loading temporal network..."):
             result_df = get_temporal_network(start_date, end_date, fraud_only=fraud_only)
 
         if len(result_df) == 0:
-            st.info("해당 기간의 네트워크 데이터가 없습니다.")
+            st.info("No network data for the selected period.")
             return
 
-        # 그래프 구축 및 시각화
+        # Build graph and visualize
         temp_G = build_account_graph(result_df)
 
         mc1, mc2, mc3, mc4 = st.columns(4)
         with mc1:
-            _metric_card("노드 수", f"{len(temp_G.nodes()):,}", "기간 내 계좌 수")
+            _metric_card("Nodes", f"{len(temp_G.nodes()):,}", "Accounts in period")
         with mc2:
-            _metric_card("엣지 수", f"{len(temp_G.edges()):,}", "거래 연결 수")
+            _metric_card("Edges", f"{len(temp_G.edges()):,}", "Transaction links")
         with mc3:
             total_txn = int(result_df["거래횟수"].sum()) if "거래횟수" in result_df.columns else 0
-            _metric_card("총 거래 건수", f"{total_txn:,}", "기간 내 거래 합계")
+            _metric_card("Total Transactions", f"{total_txn:,}", "Sum in period")
         with mc4:
             total_amt = float(result_df["총금액"].sum()) if "총금액" in result_df.columns else 0
-            _metric_card("총 거래 금액", _format_amount(total_amt), "기간 내 금액 합계")
+            _metric_card("Total Amount", _format_amount(total_amt), "Sum in period")
 
-        # 네트워크 시각화
-        fraud_label = "이상거래" if fraud_only else "전체 거래"
+        # Network visualization
+        fraud_label = "Fraud only" if fraud_only else "All transactions"
         _plot_network(
             temp_G,
-            f"시간대별 네트워크: {start_date}~{end_date} ({fraud_label})",
+            f"Temporal Network: {start_date}~{end_date} ({fraud_label})",
         )
 
-        with st.expander("거래 상세"):
+        with st.expander("Transaction Details"):
             _render_dark_table(result_df, max_rows=50)
 
 
 def _render_sub_risk_score():
     """서브탭: 위험도 분석."""
-    st.markdown('<p class="section-header">위험도 분석</p>', unsafe_allow_html=True)
+    st.markdown('<p class="section-header">Risk Score Analysis</p>', unsafe_allow_html=True)
     st.markdown(
         '<p class="caption-text">'
-        '그래프 기반 복합 위험 점수를 산출합니다. '
-        '직접 이상거래 비율, 이웃 이상거래 비율, 사이클 참여, 입출금 집중도를 종합합니다.'
+        'Computes a composite risk score based on graph analysis. '
+        'Combines direct fraud ratio, neighbor fraud ratio, cycle participation, and inflow/outflow concentration.'
         '</p>',
         unsafe_allow_html=True,
     )
 
-    # 계좌 선택: selectbox 또는 직접 입력
-    input_mode = st.radio("입력 방식", ["이상거래 계좌 선택", "계좌 번호 직접 입력"], horizontal=True, key="risk_mode")
+    # Account selection: selectbox or direct input
+    input_mode = st.radio("Input method", ["Select fraud account", "Enter account ID"], horizontal=True, key="risk_mode")
 
-    if input_mode == "이상거래 계좌 선택":
+    if input_mode == "Select fraud account":
         fraud_accounts = get_fraud_accounts()
         account_list = fraud_accounts["계좌"].tolist()
         target_account = st.selectbox(
-            "분석 대상 계좌",
+            "Target account",
             options=account_list[:100],
             key="risk_select",
         )
     else:
-        target_account = st.number_input("계좌 번호", min_value=0, value=0, step=1, key="risk_input")
+        target_account = st.number_input("Account ID", min_value=0, value=0, step=1, key="risk_input")
 
-    if st.button("분석", key="risk_btn"):
+    if st.button("Analyze", key="risk_btn"):
         if target_account == 0:
-            st.warning("분석 대상 계좌를 선택하세요.")
+            st.warning("Please select an account to analyze.")
             return
 
-        with st.spinner(f"계좌 {target_account} 위험도 분석 중..."):
+        with st.spinner(f"Analyzing risk for account {target_account}..."):
             result = compute_risk_score(target_account)
 
         if "error" in result:
@@ -1052,7 +1054,7 @@ def _render_sub_risk_score():
                 ),
             ),
             title=dict(
-                text=f"계좌 {target_account} 위험 점수",
+                text=f"Account {target_account} Risk Score",
                 font=dict(color="#C0C4D0", size=16),
             ),
         ))
@@ -1068,10 +1070,10 @@ def _render_sub_risk_score():
         # 구성 요소별 점수 Bar 차트
         if components:
             comp_names = {
-                "fraud_ratio": "직접 이상거래 비율 (x0.4)",
-                "neighbor_fraud_ratio": "이웃 이상거래 비율 (x0.3)",
-                "cycle_score": "사이클 참여 점수 (x0.2)",
-                "concentration_score": "입출금 집중도 (x0.1)",
+                "fraud_ratio": "Direct Fraud Ratio (x0.4)",
+                "neighbor_fraud_ratio": "Neighbor Fraud Ratio (x0.3)",
+                "cycle_score": "Cycle Participation (x0.2)",
+                "concentration_score": "Flow Concentration (x0.1)",
             }
             comp_keys = ["fraud_ratio", "neighbor_fraud_ratio", "cycle_score", "concentration_score"]
             comp_labels = [comp_names[k] for k in comp_keys]
@@ -1083,7 +1085,7 @@ def _render_sub_risk_score():
             fig_bar.add_trace(go.Bar(
                 x=comp_labels,
                 y=comp_values,
-                name="원시 점수",
+                name="Raw Score",
                 marker_color=BAR_COLOR,
                 text=[f"{v:.4f}" for v in comp_values],
                 textposition="outside",
@@ -1092,7 +1094,7 @@ def _render_sub_risk_score():
             fig_bar.add_trace(go.Bar(
                 x=comp_labels,
                 y=comp_weighted,
-                name="가중 기여도",
+                name="Weighted Contribution",
                 marker_color=MINT_COLOR,
                 text=[f"{v:.4f}" for v in comp_weighted],
                 textposition="outside",
@@ -1100,24 +1102,24 @@ def _render_sub_risk_score():
             ))
             fig_bar.update_layout(
                 barmode="group",
-                title=dict(text="위험 점수 구성 요소", font=dict(color="#C0C4D0", size=14)),
+                title=dict(text="Risk Score Components", font=dict(color="#C0C4D0", size=14)),
             )
             _apply_dark(fig_bar, height=380)
             fig_bar.update_xaxes(title_text="", tickangle=-15)
-            fig_bar.update_yaxes(title_text="점수", title_font=dict(color="#8B8FA3", size=11))
+            fig_bar.update_yaxes(title_text="Score", title_font=dict(color="#8B8FA3", size=11))
             st.plotly_chart(fig_bar, width='stretch')
 
             # 상세 수치 테이블
             detail_rows = []
             for k, lbl in comp_names.items():
                 detail_rows.append({
-                    "구성 요소": lbl,
-                    "원시 점수": round(components.get(k, 0), 4),
-                    "가중치": comp_weights[comp_keys.index(k)],
-                    "가중 기여도": round(components.get(k, 0) * comp_weights[comp_keys.index(k)], 4),
+                    "Component": lbl,
+                    "Raw Score": round(components.get(k, 0), 4),
+                    "Weight": comp_weights[comp_keys.index(k)],
+                    "Weighted Contribution": round(components.get(k, 0) * comp_weights[comp_keys.index(k)], 4),
                 })
             detail_df = pd.DataFrame(detail_rows)
-            with st.expander("상세 점수 테이블"):
+            with st.expander("Detailed Score Table"):
                 _render_dark_table(detail_df, max_rows=10)
 
 
@@ -1128,12 +1130,12 @@ def _render_tab_aml_patterns():
 
     # 6개 서브탭
     sub1, sub2, sub3, sub4, sub5, sub6 = st.tabs([
-        "순환거래",
-        "레이어링",
-        "대포통장",
-        "최단경로",
-        "시간대별",
-        "위험도",
+        "Ring Transactions",
+        "Layering",
+        "Funnel Accounts",
+        "Shortest Path",
+        "Temporal",
+        "Risk Score",
     ])
 
     with sub1:
@@ -1160,19 +1162,19 @@ def _render_tab_aml_patterns():
 # ------------------------------------------------------------------
 
 def render():
-    st.markdown('<p class="page-title">네트워크 분석 대시보드</p>', unsafe_allow_html=True)
-    st.markdown('<p class="page-subtitle">금융회사·계좌 간 거래 그래프 분석 및 AML 패턴 탐지</p>', unsafe_allow_html=True)
+    st.markdown('<p class="page-title">Network Analysis Dashboard</p>', unsafe_allow_html=True)
+    st.markdown('<p class="page-subtitle">Transaction graph analysis between institutions and accounts, AML pattern detection</p>', unsafe_allow_html=True)
 
-    # 5개 탭 구성 (선택된 탭만 쿼리 실행하여 지연 로딩)
+    # 5 tabs (lazy loading - query only on selected tab)
     tab_names = [
-        "금융회사 네트워크",
-        "이상거래 계좌 네트워크",
-        "계좌 탐색",
-        "이상거래 흐름",
-        "AML 패턴 탐지",
+        "Institution Network",
+        "Fraud Account Network",
+        "Account Explorer",
+        "Fraud Flow",
+        "AML Pattern Detection",
     ]
     selected_tab = st.radio(
-        "분석 유형",
+        "Analysis Type",
         tab_names,
         horizontal=True,
         key="network_tab",

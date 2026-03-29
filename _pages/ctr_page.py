@@ -136,18 +136,18 @@ def render():
                 result = assess_account_structuring(account_id)
 
             if result.get("총거래건수", 0) == 0:
-                st.warning("해당 계좌의 거래 내역이 없습니다.")
+                st.warning("No transaction history found for this account.")
             else:
                 c1, c2, c3 = st.columns(3)
                 with c1:
-                    _metric_card("총 거래 건수", f"{result['총거래건수']:,}")
+                    _metric_card("Total Transactions", f"{result['총거래건수']:,}")
                 with c2:
-                    _metric_card("총 거래 금액", f"{result['총거래금액']:,}원")
+                    _metric_card("Total Amount", f"{result['총거래금액']:,} KRW")
                 with c3:
-                    _metric_card("분할거래 의심일수", f"{result['분할거래의심일수']:,}")
+                    _metric_card("Structuring Suspect Days", f"{result['분할거래의심일수']:,}")
 
                 if result["분할거래상세"]:
                     detail_df = pd.DataFrame(result["분할거래상세"])
                     st.dataframe(detail_df, width='stretch')
                 else:
-                    st.success("분할거래 의심 패턴이 탐지되지 않았습니다.")
+                    st.success("No structuring patterns detected.")

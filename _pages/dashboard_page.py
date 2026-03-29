@@ -67,7 +67,7 @@ def _render_insight(bullets: list) -> None:
     """차트 하단에 AI 분석 인사이트 카드를 렌더링한다."""
     items = "".join(f"<li>{b}</li>" for b in bullets)
     st.markdown(
-        f'<div class="ai-insight"><span class="ai-label">🤖 AI 분석</span><ul>{items}</ul></div>',
+        f'<div class="ai-insight"><span class="ai-label">🤖 AI Insight</span><ul>{items}</ul></div>',
         unsafe_allow_html=True,
     )
 
