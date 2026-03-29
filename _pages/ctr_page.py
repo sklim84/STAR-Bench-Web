@@ -36,7 +36,7 @@ def render():
     with c1:
         _metric_card("High-Value Transactions", f"{summary['고액거래건수']:,}", "Over 10M KRW")
     with c2:
-        _metric_card("High-Value Total Amount", f"{summary['고액거래총액']:,.0f} KRW")
+        _metric_card("High-Value Total Amount", f"{summary['고액거래총액']:,.0f} KRW", "Cumulative amount")
     with c3:
         _metric_card("Structuring Suspects", f"{summary['분할거래의심건수']:,}", "Account-day basis")
 

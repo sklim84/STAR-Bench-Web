@@ -40,11 +40,11 @@ def render():
         summary = get_monitoring_summary()
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        _metric_card("Total Transactions", f"{summary['총거래건수']:,}")
+        _metric_card("Total Transactions", f"{summary['총거래건수']:,}", "All records")
     with c2:
-        _metric_card("Nighttime Transactions", f"{summary['심야거래건수']:,}")
+        _metric_card("Nighttime Transactions", f"{summary['심야거래건수']:,}", "22:00–06:00")
     with c3:
-        _metric_card("Nighttime Ratio", f"{summary['심야거래비율']:.2f}%")
+        _metric_card("Nighttime Ratio", f"{summary['심야거래비율']:.2f}%", "Of total txns")
     with c4:
         _metric_card("High-Frequency Days", f"{summary['고빈도거래일수']:,}", "10+ txns/day")
 
