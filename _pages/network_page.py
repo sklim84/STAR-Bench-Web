@@ -305,15 +305,15 @@ def _render_tab_fraud_account_network():
         _metric_card("Avg Connections", f"{avg_degree:.1f}", "Per account average")
 
     # 커뮤니티 탐지
-    st.markdown('<p class="section-header">커뮤니티 탐지</p>', unsafe_allow_html=True)
+    st.markdown('<p class="section-header">Community Detection</p>', unsafe_allow_html=True)
 
-    show_communities = st.checkbox("커뮤니티별 색상 구분 표시", value=True, key="show_community")
+    show_communities = st.checkbox("Color by community", value=True, key="show_community")
 
     community_map = None
     community_df = pd.DataFrame()
 
     if show_communities:
-        with st.spinner("커뮤니티 탐지 중..."):
+        with st.spinner("Detecting communities..."):
             community_df = detect_communities(fraud_G)
 
         if len(community_df) > 0:
@@ -328,13 +328,13 @@ def _render_tab_fraud_account_network():
 
     _plot_network(
         fraud_G,
-        f"이상거래 계좌 네트워크 (상위 {limit}개 연결)",
+        f"Fraud Account Network (top {limit} links)",
         community_map=community_map,
     )
 
     # 커뮤니티별 통계 테이블
     if show_communities and len(community_df) > 0:
-        st.markdown('<p class="section-header">커뮤니티별 통계</p>', unsafe_allow_html=True)
+        st.markdown('<p class="section-header">Community Statistics</p>', unsafe_allow_html=True)
 
         # 커뮤니티별 노드 수와 이상거래 비율 계산
         # fraud_df에서 이상거래유형 매핑을 활용
@@ -368,7 +368,7 @@ def _render_tab_fraud_account_network():
             _render_dark_table(comm_stats_df, max_rows=20)
 
     # 이상거래 유형별 연결 상세
-    with st.expander("이상거래 유형별 연결"):
+    with st.expander("Fraud Type Connections"):
         display_df = fraud_df[["source", "target", "거래횟수", "총금액", "이상거래유형", "이상거래설명"]].head(50)
         _render_dark_table(display_df, max_rows=50)
 
@@ -379,52 +379,52 @@ def _render_tab_fraud_account_network():
 
 def _render_tab_account_explorer():
     """특정 계좌 탐색 탭을 렌더링한다."""
-    st.markdown("특정 계좌의 거래 네트워크를 탐색합니다.")
+    st.markdown("Explore the transaction network of a specific account.")
 
-    with st.spinner("계좌 목록 불러오는 중..."):
+    with st.spinner("Loading account list..."):
         fraud_accounts = get_fraud_accounts()
         account_list = fraud_accounts["계좌"].tolist()
 
     selected = st.selectbox(
-        "이상거래 관련 계좌 선택",
+        "Select fraud-related account",
         options=account_list[:100],
         format_func=lambda x: f"{x}",
         key="account_select",
     )
 
-    hops = st.slider("탐색 범위 (hop)", 1, 5, 2, key="hop_select")
+    hops = st.slider("Exploration range (hops)", 1, 5, 2, key="hop_select")
 
     # hops > 2 인 경우 Memgraph 필요 안내
     if hops > 2:
         memgraph_ok = graph_db.is_available()
         if not memgraph_ok:
             st.info(
-                "3-hop 이상 탐색에는 Memgraph가 필요합니다. "
-                "Memgraph 미실행 시 최대 2-hop까지 DuckDB 폴백으로 탐색합니다."
+                "3+ hop exploration requires Memgraph. "
+                "Without Memgraph, DuckDB fallback supports up to 2 hops."
             )
 
     if selected:
-        with st.spinner(f"계좌 {selected}의 {hops}-hop 네트워크 탐색 중..."):
+        with st.spinner(f"Exploring {hops}-hop network for account {selected}..."):
             if hops > 2:
                 ego_df = get_account_ego_network_deep(selected, hops=hops)
             else:
                 ego_df = get_account_ego_network(selected, hops=hops)
 
         if len(ego_df) == 0:
-            st.warning("해당 계좌의 거래 데이터가 없습니다.")
+            st.warning("No transaction data for this account.")
             return
 
         ego_G = build_account_graph(ego_df)
 
         c1, c2 = st.columns(2)
         with c1:
-            _metric_card("연결된 계좌 수", f"{len(ego_G.nodes()) - 1}", f"{hops}-hop 범위 내 계좌")
+            _metric_card("Connected Accounts", f"{len(ego_G.nodes()) - 1}", f"Within {hops}-hop range")
         with c2:
-            _metric_card("거래 연결 수", f"{len(ego_G.edges())}", "고유 거래 경로")
+            _metric_card("Transaction Links", f"{len(ego_G.edges())}", "Unique transaction paths")
 
         _plot_network(ego_G, f"계좌 {selected}의 {hops}-hop 네트워크", center_node=str(selected))
 
-        with st.expander("거래 상세"):
+        with st.expander("Transaction Details"):
             _render_dark_table(ego_df, max_rows=50)
 
 
@@ -434,13 +434,13 @@ def _render_tab_account_explorer():
 
 def _render_tab_fraud_flow():
     """금융회사 간 이상거래 흐름 매트릭스 탭을 렌더링한다."""
-    st.markdown('<p class="section-header">금융회사 간 이상거래 흐름</p>', unsafe_allow_html=True)
+    st.markdown('<p class="section-header">Inter-Institution Fraud Flow</p>', unsafe_allow_html=True)
 
-    with st.spinner("이상거래 흐름 데이터 조회 중..."):
+    with st.spinner("Loading fraud flow data..."):
         flow_df = get_fraud_flow_matrix()
 
     if len(flow_df) == 0:
-        st.info("이상거래 흐름 데이터가 없습니다.")
+        st.info("No fraud flow data available.")
         return
 
     # 요약 메트릭 카드
