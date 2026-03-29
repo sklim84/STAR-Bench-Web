@@ -309,28 +309,28 @@ _paper/results/
 | **단일 tool-call 제한** — Llama-3.2 계열이 multi-tool call 미지원 (`This model only supports single tool-calls at once!`) | Llama-3.2-1B/3B의 multi_tool 카테고리 | **모델 한계 (수정 불가)** — 논문에서 "Llama-3.2 계열은 병렬 tool calling을 지원하지 않아 multi-tool 케이스에서 체계적 실패 발생"으로 기술 | ✅ 모델 한계 |
 | **Kanana 1.5 파서 불일치** — KR은 functionary, EN은 hermes 파서 사용 | Kanana 1.5 3종 한/영 비교 공정성 | KR을 hermes 파서로 재실행하여 통일 | ✅ 완료 |
 
-### 2. 영문 Ablation 실험 (KR 54 / EN 54 모델 완료)
+### 2. 영문 Ablation 실험 (KR 51 / EN 51 모델 완료)
 
 동일 1,258건 벤치마크 케이스를 영어로 번역하여, 질문 언어(한국어↔영어)에 따른 tool-calling 정확도 차이를 분석하는 단일변수 실험.
 
 - **번역 완료**: GPT-4o-mini로 24개 케이스 파일 전체 영문 번역 (`_paper/benchmarks_en/`)
 - **`benchmark.py` 수정 완료**: `--cases-dir` 옵션 추가로 한/영 데이터셋 전환 가능
-- **결과 (2026-03-22)**: KR 54개 모델 / EN 54개 모델 × 1,258건 완료
-- **모델 계열**: Qwen3/3.5, Mistral, Llama, EXAONE, Kanana 1.5/2, SKT A.X, xLAM, GLM, gpt-oss, DeepSeek-R1, OLMo, Granite, Command-R, Scout
+- **결과 (2026-03-22)**: KR 51개 모델 / EN 51개 모델 × 1,258건 완료
+- **모델 계열**: Qwen3/3.5, Mistral, Llama, EXAONE, Kanana 1.5/2, SKT A.X, xLAM, GLM, gpt-oss, OLMo, Granite, Command-R, Scout
 
 ### 3. 재현성 검증 — 5회 반복 실험 (표준편차/신뢰구간 보고용)
 
-전체 54개 모델 × 1,258건 × 5회 반복 실행으로 결과 분산(variance), 표준편차, 95% 신뢰구간을 측정.
+전체 51개 모델 × 1,258건 × 5회 반복 실행으로 결과 분산(variance), 표준편차, 95% 신뢰구간을 측정.
 
 | 라운드 | 디렉토리 | 상태 |
 |--------|---------|------|
-| Round 1 (본실험) | `_paper/results/` | ✅ 완료 (54개 모델) |
+| Round 1 (본실험) | `_paper/results/` | ✅ 완료 (51개 모델) |
 | Round 2 | `_paper/results_repro/` | ⏳ TP=2 모델 진행 중 (45/54 eval) |
 | Round 3 | `_paper/results_repro/round3/` | ⬜ Round 2 완료 후 자동 시작 |
 | Round 4 | `_paper/results_repro/round4/` | ⬜ Round 3 완료 후 자동 시작 |
 | Round 5 | `_paper/results_repro/round5/` | ⬜ Round 4 완료 후 자동 시작 |
 
-**라운드별 구성**: vLLM 단일GPU 모델 48개 (GPU0+1 병렬) + TP=2 모델 6개 (순차). 상용 API 모델(gpt-4o-mini, claude-haiku)은 제외.
+**라운드별 구성**: vLLM 단일GPU 모델 48개 (GPU0+1 병렬) + TP=2 모델 6개 (순차). 상용 API 모델은 제외.
 **1라운드 예상 소요**: ~20시간 (단일GPU ~14시간 + TP=2 ~6시간)
 **전체 예상 완료**: ~2026-03-25
 
