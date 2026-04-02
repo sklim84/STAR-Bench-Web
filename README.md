@@ -140,9 +140,12 @@ app.py                          # 라우팅 + 글로벌 CSS 주입
 - 이상거래유형: 자금세탁, 신규거래처, 대포통장, 보이스피싱, 불법도박, 유사수신, 기타
 - 상세 스키마: `_datasets/HOFINET.MD` 참조
 
-## 벤치마크 (`_paper/`)
+## 벤치마크
 
 논문 작성 목적의 에이전트 행위능력 벤치마크입니다. AML 도메인 특화 23개 도구에 대해 LLM의 도구 선택(tool selection) 및 파라미터 추출(parameter extraction) 능력을 평가합니다.
+
+- **벤치마크 데이터**: `_paper/` (git submodule, [KA-001-AML-paper](https://github.com/sklim84/KA-001-AML-paper) repo)
+- **실행 스크립트 & 결과**: `_experiments/` (본 repo)
 
 ### 벤치마크 데이터셋 구성
 
@@ -197,104 +200,53 @@ app.py                          # 라우팅 + 글로벌 CSS 주입
 
 **평가 메트릭**: 종합점수(0~1), 도구 선택 정확도(primary_tool_hit_rate), 파라미터 추출 정확도(param_accuracy), 에러 유형별 분포(wrong_func, wrong_params, missing_params, connection_error)
 
-### 실험 결과 (18개 모델, 2026-03-06)
+### 실험 결과 (44개 모델, 14개 계열)
 
-| 모델 | 파라미터 | 종합점수 | 도구정확도 | 파라미터정확도 |
-|------|---------|---------|----------|-------------|
-| Qwen3-4B-Thinking (think) | 4B | 0.927 | 94.7% | 90.0% |
-| Qwen3-4B-Thinking (nothink) | 4B | 0.927 | 94.7% | 90.1% |
-| gpt-oss-120b (think) | 120B | 0.912 | 92.3% | 92.5% |
-| gpt-oss-120b (nothink) | 120B | 0.909 | 92.1% | 92.0% |
-| Mistral-Small-3.2-24B | 24B | 0.900 | 89.5% | 89.5% |
-| gpt-oss-20b (nothink) | 20B | 0.892 | 89.6% | 88.4% |
-| gpt-oss-20b (think) | 20B | 0.891 | 89.5% | 88.4% |
-| Qwen3-4B-Instruct | 4B | 0.887 | 90.5% | 88.1% |
-| Llama-3.1-8B-Instruct | 8B | 0.809 | 81.9% | 79.1% |
-| Kanana-1.5-8B | 8B | 0.771 | 74.6% | 73.0% |
-| Kanana-1.5-15.7B | 15.7B (3B active) | 0.717 | 66.2% | 68.5% |
-| Granite-3.1-8B | 8B | 0.326 | 12.9% | 23.4% |
-| EXAONE-3.5-7.8B | 7.8B | 0.325 | 12.6% | 23.4% |
-| Gemma-3-12B | 12B | 0.325 | 12.6% | 23.4% |
-| Gemma-3-27B | 27B | 0.325 | 12.6% | 23.4% |
-| Phi-4-mini | 14B | 0.225 | 8.3% | 13.8% |
-| Kanana-1.5-2.1B | 2.1B | 0.224 | 22.1% | 21.4% |
-| EXAONE-3.5-32B | 32B | 0.072 | 2.1% | 6.5% |
+상세 결과는 [`_paper/README.md`](_paper/README.md) 참조.
 
-> Granite, EXAONE, Gemma 등 하위 모델은 vLLM tool-call parser 호환 문제로 도구 호출 추출이 실패한 케이스가 대부분이며, 파서 변경 재실험 진행 중.
+#### 싱글턴 Tool Calling (KR, 1,258건 × 44 모델, Top 10)
 
-#### 종합 성능 비교
+| 순위 | 모델 | 파라미터 | 종합점수 | 도구정확도 | 파라미터정확도 |
+|------|------|---------|---------|----------|-------------|
+| 1 | Qwen3.5-27B (think) | 27B | 0.942±0.018 | 95.4% | 95.4% |
+| 2 | Qwen3.5-27B (nothink) | 27B | 0.936±0.002 | 94.8% | 94.7% |
+| 3 | Qwen3.5-9B (nothink) | 9B | 0.932±0.001 | 95.5% | 95.0% |
+| 4 | xLAM-2-32b | 32B | 0.933±0.000 | 93.8% | 91.6% |
+| 5 | Qwen3-30B-Thinking (think) | 30B | 0.931±0.001 | 94.5% | 92.6% |
+| 6 | Qwen3-30B-Thinking (nothink) | 30B | 0.930±0.001 | 94.5% | 92.5% |
+| 7 | Ministral-3-14B | 14B | 0.927±0.002 | 93.2% | 92.1% |
+| 8 | Qwen3-8B | 8B | 0.920±0.002 | 92.8% | 91.1% |
+| 9 | Qwen3.5-4B (nothink) | 4B | 0.920±0.002 | 94.2% | 92.2% |
+| 10 | Qwen3.5-4B (think) | 4B | 0.919±0.006 | 95.0% | 93.9% |
 
-<img src="_paper/results/figures/fig1_overall_performance.png" width="700" alt="Overall Performance">
+> **전체 평균**: KR 0.845 / EN 0.802. 한국어가 89%의 모델에서 우세 (mean delta +0.042).
 
-#### 도구 선택 vs 파라미터 추출 정확도
+#### 멀티턴 STR (50 시나리오 × 44 모델, Top 5)
 
-<img src="_paper/results/figures/fig5_tool_vs_param.png" width="600" alt="Tool vs Param">
+| 순위 | 모델 | avg_score | 시나리오 완료율 |
+|------|------|-----------|--------------|
+| 1 | xLAM-2-70b | 0.802 | 50.0% |
+| 2 | kanana-2-30b-thinking (think) | 0.796 | 44.0% |
+| 3 | kanana-2-30b-thinking (nothink) | 0.791 | 36.0% |
+| 4 | xLAM-2-32b | 0.786 | 38.0% |
+| 5 | xLAM-2-8b | 0.766 | 36.0% |
 
-#### 난이도별 성능 히트맵
+> Mistral 전 모델이 멀티턴에서 complete rate 0% — 싱글턴 상위 모델이 멀티턴에서 하위로 역전되는 현상 관찰.
 
-<img src="_paper/results/figures/fig4_difficulty_heatmap.png" width="700" alt="Difficulty Heatmap">
-
-#### 카테고리별 레이더 차트 (상위 6개 모델)
-
-<img src="_paper/results/figures/fig2_radar_chart.png" width="700" alt="Radar Chart">
-
-#### 에러 유형 분포
-
-<img src="_paper/results/figures/fig3_error_distribution.png" width="700" alt="Error Distribution">
-
-#### 카테고리 × 모델 히트맵
-
-<img src="_paper/results/figures/fig6_category_heatmap.png" width="800" alt="Category Heatmap">
-
-### 비교 대상 모델 (8개 계열, 20개 구성)
+### 비교 대상 모델 (14개 계열, 44개 구성)
 
 | 계열 | 모델 | 파라미터 | 실행 환경 |
 |------|------|---------|---------|
-| GPT-OSS | gpt-oss-20b, gpt-oss-120b | 20B, 120B | vLLM |
-| Qwen3 | Qwen3-4B-Instruct, Qwen3-4B-Thinking | 4B | vLLM |
-| Mistral | Mistral-Small-3.2-24B-Instruct | 24B | vLLM |
-| Llama | Llama-3.1-8B-Instruct | 8B | vLLM |
-| Kanana | kanana-1.5-2.1b, 8b, 15.7b-a3b | 2.1B~15.7B | vLLM (커스텀 파서) |
-| EXAONE | EXAONE-3.5-7.8B, 32B | 7.8B, 32B | vLLM |
-| Gemma | gemma-3-12b-it, 27b-it | 12B, 27B | vLLM |
-| Granite | granite-3.1-8b | 8B | vLLM |
-
-### 실행 방법
-
-```bash
-# 단일 모델 벤치마크
-python _paper/benchmarks/run_multi_model.py \
-    --models gpt-4o-mini --checkpoint --output _paper/results/
-
-# 기존 결과로 비교 리포트만
-python _paper/benchmarks/run_multi_model.py \
-    --comparison-only --output _paper/results/
-
-# vLLM 기반 로컬 모델 자동화 (GPU 서버)
-bash _paper/benchmarks/scripts/run_all_models.sh
-```
-
-### 결과 디렉토리 구조
-
-```
-_paper/results/
-├── eval/              # 모델별 평가 결과 JSON (eval_<model>_<timestamp>.json)
-├── checkpoint/        # 케이스별 체크포인트 JSONL (재실행 시 완료건 스킵)
-├── logs/
-│   ├── bench/         # 벤치마크 실행 로그
-│   └── vllm/          # vLLM 서버 로그
-├── figures/           # 시각화 PNG (visualize_results.py로 생성)
-│   ├── fig1_overall_performance.png   # 모델별 종합 성능 비교
-│   ├── fig2_radar_chart.png           # 카테고리별 레이더 차트
-│   ├── fig3_error_distribution.png    # 에러 유형 분포
-│   ├── fig4_difficulty_heatmap.png    # 난이도별 성능 히트맵
-│   ├── fig5_tool_vs_param.png         # 도구정확도 vs 파라미터정확도
-│   └── fig6_category_heatmap.png      # 카테고리 × 모델 히트맵
-├── visualize_results.py               # 시각화 생성 스크립트
-└── comparison_*.xlsx                  # 다중 모델 비교 리포트
-```
-
-지원 프로바이더: OpenAI, Anthropic, vLLM (로컬 모델)
+| Qwen 3/3.5 | Qwen3-4B~30B, Qwen3.5-0.8B~27B (think/nothink) | 0.8B~30B | vLLM |
+| Salesforce xLAM | xLAM-2-1b~70b | 1B~70B | vLLM |
+| Kakao kanana | kanana-2-30b-instruct, thinking | 30B | vLLM |
+| Meta Llama | Llama-3.2-1B/3B, 3.1-8B, 3.3-70B | 1B~70B | vLLM |
+| Mistral | Ministral-3-3B/8B/14B, Mistral-Small-24B, Nemo-12B | 3B~24B | vLLM |
+| LG AI EXAONE | EXAONE-4.0-1.2B, 32B | 1.2B~32B | vLLM |
+| OpenAI gpt-oss | gpt-oss-20b (think/nothink) | 20B | vLLM |
+| SKT A.X | A.X-4.0, A.X-4.0-Light | - | vLLM |
+| Zhipu GLM | GLM-4.7-Flash | - | vLLM |
+| NousResearch | Hermes-3-Llama-3.1-8B | 8B | vLLM |
 
 ## TODO
 
@@ -309,54 +261,61 @@ _paper/results/
 | **단일 tool-call 제한** — Llama-3.2 계열이 multi-tool call 미지원 (`This model only supports single tool-calls at once!`) | Llama-3.2-1B/3B의 multi_tool 카테고리 | **모델 한계 (수정 불가)** — 논문에서 "Llama-3.2 계열은 병렬 tool calling을 지원하지 않아 multi-tool 케이스에서 체계적 실패 발생"으로 기술 | ✅ 모델 한계 |
 | **Kanana 1.5 파서 불일치** — KR은 functionary, EN은 hermes 파서 사용 | Kanana 1.5 3종 한/영 비교 공정성 | KR을 hermes 파서로 재실행하여 통일 | ✅ 완료 |
 
-### 2. 영문 Ablation 실험 (KR 51 / EN 51 모델 완료)
+### 2. 영문 Ablation 실험 (완료)
 
-동일 1,258건 벤치마크 케이스를 영어로 번역하여, 질문 언어(한국어↔영어)에 따른 tool-calling 정확도 차이를 분석하는 단일변수 실험.
+- **결과**: KR 평균 0.845 / EN 평균 0.802. 한국어 > 영어인 모델 **89% (39/44)**. Mean delta **+0.042**.
 
-- **번역 완료**: GPT-4o-mini로 24개 케이스 파일 전체 영문 번역 (`_paper/benchmarks_en/`)
-- **`benchmark.py` 수정 완료**: `--cases-dir` 옵션 추가로 한/영 데이터셋 전환 가능
-- **결과 (2026-03-22)**: KR 51개 모델 / EN 51개 모델 × 1,258건 완료
-- **모델 계열**: Qwen3/3.5, Mistral, Llama, EXAONE, Kanana 1.5/2, SKT A.X, xLAM, GLM, gpt-oss, OLMo, Granite, Command-R, Scout
+### 3. 재현성 검증
 
-### 3. 재현성 검증 — 5회 반복 실험 (표준편차/신뢰구간 보고용)
+| 실험 | Round 1 | Round 2 | Round 3 | 상태 |
+|------|---------|---------|---------|------|
+| 싱글턴 KR (44 models) | ✅ | ✅ | ✅ | 완료 |
+| 싱글턴 EN (44 models) | ✅ | ⏳ | ⬜ | EN Round 2 진행 중 |
+| 멀티턴 (44 models) | ✅ | ✅ | ✅ | 완료 |
 
-전체 51개 모델 × 1,258건 × 5회 반복 실행으로 결과 분산(variance), 표준편차, 95% 신뢰구간을 측정.
+### 4. 멀티턴 STR 벤치마크 (완료)
 
-| 라운드 | 디렉토리 | 상태 |
-|--------|---------|------|
-| Round 1 (본실험) | `_paper/results/` | ✅ 완료 (51개 모델) |
-| Round 2 | `_paper/results_repro/` | ⏳ TP=2 모델 진행 중 (45/54 eval) |
-| Round 3 | `_paper/results_repro/round3/` | ⬜ Round 2 완료 후 자동 시작 |
-| Round 4 | `_paper/results_repro/round4/` | ⬜ Round 3 완료 후 자동 시작 |
-| Round 5 | `_paper/results_repro/round5/` | ⬜ Round 4 완료 후 자동 시작 |
+50개 시나리오 × 44개 모델 × 3회 반복. Mistral 계열 멀티턴 붕괴(complete 0%), xLAM 계열 멀티턴 강세(Top 5) 등 싱글턴-멀티턴 역전 발견.
 
-**라운드별 구성**: vLLM 단일GPU 모델 48개 (GPU0+1 병렬) + TP=2 모델 6개 (순차). 상용 API 모델은 제외.
-**1라운드 예상 소요**: ~20시간 (단일GPU ~14시간 + TP=2 ~6시간)
-**전체 예상 완료**: ~2026-03-25
-
-### 5. 제외 모델 (vLLM 미지원 / OOM)
+### 5. 제외 모델
 
 | 모델 | 사유 |
 |------|------|
-| gpt-oss-120b | OOM (bf16 240GB, FP8도 crash) |
-| Qwen3.5-27B (단일 GPU) | Mamba hybrid cuda graph crash → TP=2+enforce-eager로 성공 |
-| HyperCLOVAX-SEED-Think-14B/32B | `HCXVisionV2ForCausalLM` 아키텍처 미지원 |
-| Solar-Open-100B | bf16 205GB → TP=2 불가, INT4는 공정 비교 불가 |
-| Llama-4-Scout-17B (bf16) | bf16 218GB → FP8 양자화로 TP=2 성공 |
+| gpt-oss-120b | OOM (bf16 240GB, 2×H100 초과) |
+| HyperCLOVAX-SEED-Think-14B/32B | `HCXVisionV2ForCausalLM` 미지원 |
+| Solar-Open-100B | bf16 205GB → TP=2 불가 |
+| Llama-4-Scout-17B-16E | MoE ~218GB bf16, bitsandbytes TP=2 비호환 |
 
 ### 6. 분석 & 시각화
 
-- [ ] 한/영 결과 비교 분석 (Korean vs English accuracy delta, paired t-test)
-- [ ] Think vs NoThink 분석 (10+ 모델 비교)
+- [ ] 한/영 결과 비교 분석 (paired t-test)
+- [ ] Think vs NoThink 분석
 - [ ] 파라미터 효율성 분석 (모델 크기 vs 종합점수)
-- [ ] 국산 모델 특집 분석 (Kanana 1.5→2 세대 비교, EXAONE, A.X)
-- [ ] 비교 시각화 재생성 (fig 추가)
+- [ ] 국산 모델 특집 분석 (Kanana 2, EXAONE, A.X)
+- [ ] 싱글턴 vs 멀티턴 역전 분석
+- [ ] Mistral 멀티턴 붕괴 원인 분석 (Turn별 hit rate 급락)
 
-### 7. 코드 정리
+### 실험 디렉토리 구조
 
-- [ ] `benchmark.py`: VLLM_BASE_URL 상수 추출, 미사용 openpyxl import lazy화
-- [ ] `evaluator.py`: _safe_json_load(), _check_keywords() 헬퍼 추출, 108줄 거대함수 분리
-- [x] KR eval 중복 파일 정리 완료 (28개 삭제, 2026-03-18)
-- [x] visualize_results.py 중복 제거 (symlink 전환, 2026-03-17)
-- [x] 로그 파일 git 제외 (.gitignore 추가, 2026-03-20)
-- [x] 오래된 comparison 파일 정리 (최신 1개만 유지, 2026-03-20)
+```
+_experiments/
+├── scripts/                          # 벤치마크 실행 코드
+│   ├── benchmark.py                  # 싱글턴 벤치마크 엔진
+│   ├── benchmark_multiturn.py        # 멀티턴 STR 벤치마크
+│   ├── evaluator.py                  # 평가 로직
+│   └── vllm_benchmark.sh             # vLLM 서버 관리 + 자동화
+├── results/                          # 싱글턴 결과
+│   ├── round1/eval/                  # KR Round 1 (44 models)
+│   ├── round1_en/eval/               # EN Round 1 (44 models)
+│   ├── round2/eval/                  # KR Round 2
+│   ├── round2_en/eval/               # EN Round 2 (진행 중)
+│   ├── round3/eval/                  # KR Round 3
+│   ├── comparison_kr.xlsx            # KR 비교 리포트
+│   ├── comparison_en.xlsx            # EN 비교 리포트
+│   └── repro_mean_std.json           # 재현성 mean±std
+└── results_multiturn/                # 멀티턴 결과
+    ├── round1/eval/                  # Round 1 (44 models)
+    ├── round2/eval/                  # Round 2
+    ├── round3/eval/                  # Round 3
+    └── multiturn_comparison_round1-3.xlsx
+```
