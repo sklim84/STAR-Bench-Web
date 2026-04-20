@@ -28,6 +28,8 @@ Thumbs.db
 _datasets/*.parquet
 _datasets/*.duckdb
 _datasets/*.duckdb.wal
+_datasets/*.csv
+_datasets/original/
 
 # Trained models
 _models/*.pkl
