@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 # ------------------------------------------------------------------
-# 라이트 테마 CSS (assets/style.css)
+# Load Global CSS (assets/style.css)
 # ------------------------------------------------------------------
 @st.cache_data(ttl=3600, show_spinner=False)
 def _load_css_content() -> str:
@@ -29,9 +29,9 @@ _load_css()
 
 @st.cache_resource
 def init_database():
-    """앱 시작 시 DuckDB를 초기화하고 데이터를 적재한다."""
+    """Initializes DuckDB and loads data on app startup."""
     conn = db.get_connection()
-    # db.py 내부에서 직접 연결을 사용하는 것은 허용된 패턴
+    # Direct execution of count query to verify data integrity
     count = conn.execute("SELECT count(*) FROM hofinet").fetchone()[0]
     return count
 
@@ -39,7 +39,7 @@ def init_database():
 init_database()
 
 # ------------------------------------------------------------------
-# 상단 가로 메뉴
+# Top Navigation Menu
 # ------------------------------------------------------------------
 selected = option_menu(
     menu_title=None,
@@ -94,7 +94,7 @@ selected = option_menu(
 )
 
 # ------------------------------------------------------------------
-# 선택된 메뉴에 따라 페이지 렌더링
+# Page Routing Logic
 # ------------------------------------------------------------------
 if selected == "Home":
     st.markdown('<p class="page-title page-title-lg">AML Assistant Platform</p>', unsafe_allow_html=True)
@@ -102,7 +102,7 @@ if selected == "Home":
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Summary metric cards (using dashboard.get_summary())
+    # Summary metric cards
     from src.features.dashboard import get_summary
     with st.spinner("Loading data..."):
         summary = get_summary()
@@ -111,10 +111,10 @@ if selected == "Home":
         st.stop()
     row = summary.iloc[0]
 
-    total = int(row['총거래'])
-    fraud = int(row['이상거래'])
+    total = int(row['total_txns'])
+    fraud = int(row['fraud_txns'])
     fraud_rate = fraud / total * 100 if total > 0 else 0
-    banks_count = int(row['출금금융회사수']) + int(row['입금금융회사수'])
+    banks_count = int(row['sender_banks']) + int(row['receiver_banks'])
 
     c1, c2, c3, c4 = st.columns(4)
     with c1:
@@ -132,7 +132,7 @@ if selected == "Home":
     with c3:
         st.markdown(f"""<div class="metric-card">
             <div class="label">Sender Accounts</div>
-            <div class="value">{int(row['출금계좌수']):,}</div>
+            <div class="value">{int(row['sender_accounts']):,}</div>
             <div class="sub">Unique accounts</div>
         </div>""", unsafe_allow_html=True)
     with c4:
@@ -143,7 +143,7 @@ if selected == "Home":
         </div>""", unsafe_allow_html=True)
 
     # Feature guide card grid
-    st.markdown('<p class="section-header">Features</p>', unsafe_allow_html=True)
+    st.markdown('<p class="section-header">Integrated Features</p>', unsafe_allow_html=True)
     st.markdown("""
     <div class="feature-grid">
         <div class="feature-card">

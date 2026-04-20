@@ -1,4 +1,4 @@
-"""기능7: 거래 모니터링 규칙 탐지 페이지."""
+"""Feature 7: Transaction Monitoring Rule Detection Page."""
 
 import streamlit as st
 import plotly.express as px
@@ -12,7 +12,9 @@ from src.features.monitoring import (
     detect_pattern_change,
     run_all_rules,
     get_monitoring_summary,
+    detect_dormant_reactivation,
 )
+from src.features.aml_reference import FRAUD_TYPE_MAP
 from src.ui.chart_utils import (
     BAR_COLOR, LINE_COLOR, ACCENT_COLOR, MINT_COLOR,
     apply_dark as _apply_dark,
@@ -28,31 +30,46 @@ def _metric_card(label, value, sub="", white=False):
     </div>""", unsafe_allow_html=True)
 
 
+def _render_dark_table(df):
+    """Renders a dark-styled HTML table for the dataframe."""
+    cols = df.columns.tolist()
+    header_html = "".join([f"<th>{c}</th>" for c in cols])
+    
+    rows_html = ""
+    for _, row in df.iterrows():
+        row_html = "".join([f"<td>{row[c]}</td>" for c in cols])
+        rows_html += f"<tr>{row_html}</tr>"
+        
+    st.markdown(f"""<table class="dark-table">
+        <thead><tr>{header_html}</tr></thead>
+        <tbody>{rows_html}</tbody>
+    </table>""", unsafe_allow_html=True)
+
+
 def render():
     st.markdown('<p class="page-title">Transaction Monitoring</p>', unsafe_allow_html=True)
     st.markdown(
-        '<p class="page-subtitle">Rule-based suspicious transaction monitoring (R001~R005)</p>',
+        '<p class="page-subtitle">Rule-based suspicious transaction monitoring (R001~R006)</p>',
         unsafe_allow_html=True,
     )
 
     # --- Summary statistics ---
+    filters = {"date_from": 20240101, "date_to": 20241231}
     with st.spinner("Loading data..."):
-        summary = get_monitoring_summary()
-    c1, c2, c3, c4 = st.columns(4)
+        summary = get_monitoring_summary(filters)
+    c1, c2, c3 = st.columns(3)
     with c1:
-        _metric_card("Total Transactions", f"{summary['총거래건수']:,}", "All records")
+        _metric_card("Total Multi-Day Transacting Accounts", f"{summary['high_freq_tx_count']:,}", "Rapid-fire suspects")
     with c2:
-        _metric_card("Nighttime Transactions", f"{summary['심야거래건수']:,}", "22:00–06:00")
+        _metric_card("Late-night Transaction Count", f"{summary['night_tx_count']:,}", f"{summary['night_tx_ratio']}% of total")
     with c3:
-        _metric_card("Nighttime Ratio", f"{summary['심야거래비율']:.2f}%", "Of total txns")
-    with c4:
-        _metric_card("High-Frequency Days", f"{summary['고빈도거래일수']:,}", "10+ txns/day")
+        _metric_card("Total Filtered Transactions", f"{summary['total_tx_count']:,}", "Within selected date range")
 
     # --- Tabs ---
     tabs = st.tabs(["Overview Dashboard", "R001 Nighttime Bulk", "R002 Rapid-Fire", "R003 Round Amounts", "R004 Institution Concentration", "R005 Pattern Change"])
 
     # ------------------------------------------------------------------
-    # 탭0: 종합 대시보드
+    # Tab 0: Overview Dashboard
     # ------------------------------------------------------------------
     with tabs[0]:
         st.markdown('<p class="section-header">All Rules Execution Results</p>', unsafe_allow_html=True)
@@ -64,29 +81,62 @@ def render():
 
         if st.button("Run All Rules", type="primary", key="mon_run_all"):
             with st.spinner("Running all rules..."):
-                results = run_all_rules(date_from=all_from, date_to=all_to)
+                all_res = run_all_rules(all_from, all_to)
+                st.session_state["mon_all_results"] = all_res
+        
+        all_res = st.session_state.get("mon_all_results")
+        if all_res:
+            col_left, col_right = st.columns(2)
+            
+            with col_left:
+                st.markdown('<p class="section-header">Rule Violations (Summary)</p>', unsafe_allow_html=True)
+                rule_counts = pd.DataFrame([
+                    {"Rule": k, "Violations": v["count"]} for k, v in all_res.items()
+                ])
+                fig_rules = px.bar(rule_counts, x="Violations", y="Rule", orientation="h",
+                                   color="Violations", color_continuous_scale="Viridis")
+                _apply_dark(fig_rules, height=350)
+                st.plotly_chart(fig_rules, use_container_width=True)
 
-            rule_counts = {k: v["건수"] for k, v in results.items()}
-            count_df = pd.DataFrame(
-                [{"Rule": k, "Detections": v} for k, v in rule_counts.items()]
-            )
-            fig = px.bar(
-                count_df, x="Rule", y="Detections",
-                color_discrete_sequence=[BAR_COLOR], text="Detections",
-            )
-            fig.update_layout(title="Detection Count by Rule")
-            _apply_dark(fig)
-            st.plotly_chart(fig, width='stretch')
-
-            for rule_name, data in results.items():
-                with st.expander(f"{rule_name} ({data['건수']} cases)"):
-                    if data["상위"]:
-                        st.dataframe(pd.DataFrame(data["상위"]), width='stretch')
-                    else:
-                        st.info("No detections found.")
+            st.markdown('<p class="section-header">Detailed Violation Logs</p>', unsafe_allow_html=True)
+            t1, t2, t3, t4, t5 = st.tabs([
+                "Night Bulk (R001)", "Rapid Fire (R002)", "Round Amount (R003)",
+                "Concentration (R004)", "Pattern Change (R005)"
+            ])
+            
+            with t1:
+                df1 = pd.DataFrame(all_res["R001_Nighttime_Bulk"]["top"])
+                if not df1.empty:
+                    df1.columns = ["Date", "Time", "Sender Acc", "Receiver Acc", "Sender Bank", "Receiver Bank", "Amount", "Is Fraud", "Fraud Type"]
+                    _render_dark_table(df1)
+                else: st.info("No violations found.")
+            with t2:
+                df2 = pd.DataFrame(all_res["R002_Rapid_Fire"]["top"])
+                if not df2.empty:
+                    df2.columns = ["Account ID", "Date", "Tx Count", "Total Amount", "Fraud Count"]
+                    _render_dark_table(df2)
+                else: st.info("No violations found.")
+            with t3:
+                df3 = pd.DataFrame(all_res["R003_Round_Amount"]["top"])
+                if not df3.empty:
+                    df3.columns = ["Account ID", "Round Tx Count", "Total Amount", "Distinct Amount Count"]
+                    _render_dark_table(df3)
+                else: st.info("No violations found.")
+            with t4:
+                df4 = pd.DataFrame(all_res["R004_Concentrated_Bank"]["top"])
+                if not df4.empty:
+                    df4.columns = ["Account ID", "Total Count", "Max Bank Count", "Ratio", "Bank ID"]
+                    _render_dark_table(df4)
+                else: st.info("No violations found.")
+            with t5:
+                df5 = pd.DataFrame(all_res["R005_Pattern_Change"]["top"])
+                if not df5.empty:
+                    df5.columns = ["Account ID", "Base Count", "Comp Count", "Count Ratio", "Base Amount", "Comp Amount", "Amount Ratio"]
+                    _render_dark_table(df5)
+                else: st.info("No violations found.")
 
     # ------------------------------------------------------------------
-    # Tab1: R001 Nighttime Bulk Transactions
+    # Tab 1: R001 Nighttime Bulk Transactions
     # ------------------------------------------------------------------
     with tabs[1]:
         st.markdown('<p class="section-header">R001: Nighttime Bulk Transactions</p>', unsafe_allow_html=True)
@@ -103,15 +153,17 @@ def render():
             if df.empty:
                 st.info("No detections found.")
             else:
+                if not df.empty:
+                    df["fraud_type"] = df["fraud_type"].map(FRAUD_TYPE_MAP).fillna("Other")
                 st.markdown(f"Detection results: **{len(df):,} cases**")
-                fig = px.histogram(df, x="거래금액", nbins=30, color_discrete_sequence=[LINE_COLOR])
+                fig = px.histogram(df, x="amount", nbins=30, color_discrete_sequence=[LINE_COLOR])
                 fig.update_layout(title="Nighttime Bulk Transaction Amount Distribution")
                 _apply_dark(fig)
-                st.plotly_chart(fig, width='stretch')
-                st.dataframe(df, width='stretch', height=400)
+                st.plotly_chart(fig, use_container_width=True)
+                st.dataframe(df, use_container_width=True, height=400)
 
     # ------------------------------------------------------------------
-    # 탭2: R002 동일일 다건거래
+    # Tab 2: R002 Rapid-Fire Transactions
     # ------------------------------------------------------------------
     with tabs[2]:
         st.markdown('<p class="section-header">R002: Same-Day Rapid-Fire Transactions</p>', unsafe_allow_html=True)
@@ -130,17 +182,17 @@ def render():
             else:
                 st.markdown(f"Detection results: **{len(df):,} cases**")
                 fig = px.scatter(
-                    df, x="거래건수", y="합산금액",
+                    df, x="tx_count", y="total_amount",
                     color_discrete_sequence=[ACCENT_COLOR],
-                    hover_data=["출금계좌일련번호"],
+                    hover_data=["sender_acc"],
                 )
                 fig.update_layout(title="Rapid-Fire: Count vs Total Amount")
                 _apply_dark(fig)
-                st.plotly_chart(fig, width='stretch')
-                st.dataframe(df, width='stretch', height=400)
+                st.plotly_chart(fig, use_container_width=True)
+                st.dataframe(df, use_container_width=True, height=400)
 
     # ------------------------------------------------------------------
-    # 탭3: R003 정액거래 패턴
+    # Tab 3: R003 Round Amount Pattern
     # ------------------------------------------------------------------
     with tabs[3]:
         st.markdown('<p class="section-header">R003: Round Amount Pattern</p>', unsafe_allow_html=True)
@@ -161,10 +213,10 @@ def render():
                 st.info("No detections found.")
             else:
                 st.markdown(f"Detection results: **{len(df):,} cases**")
-                st.dataframe(df, width='stretch', height=400)
+                st.dataframe(df, use_container_width=True, height=400)
 
     # ------------------------------------------------------------------
-    # 탭4: R004 기관집중거래
+    # Tab 4: R004 Institution Concentration
     # ------------------------------------------------------------------
     with tabs[4]:
         st.markdown('<p class="section-header">R004: Institution Concentration</p>', unsafe_allow_html=True)
@@ -183,17 +235,17 @@ def render():
             else:
                 st.markdown(f"Detection results: **{len(df):,} cases**")
                 fig = px.bar(
-                    df.head(20), x="출금계좌일련번호", y="집중비율",
-                    color_discrete_sequence=[MINT_COLOR], text="집중비율",
+                    df.head(20), x="sender_acc", y="concentration_ratio",
+                    color_discrete_sequence=[MINT_COLOR], text="concentration_ratio",
                 )
                 fig.update_layout(title="Institution Concentration Ratio")
                 fig.update_xaxes(type="category")
                 _apply_dark(fig)
-                st.plotly_chart(fig, width='stretch')
-                st.dataframe(df, width='stretch', height=400)
+                st.plotly_chart(fig, use_container_width=True)
+                st.dataframe(df, use_container_width=True, height=400)
 
     # ------------------------------------------------------------------
-    # 탭5: R005 거래패턴 급변
+    # Tab 5: R005 Transaction Pattern Change
     # ------------------------------------------------------------------
     with tabs[5]:
         st.markdown('<p class="section-header">R005: Transaction Pattern Change</p>', unsafe_allow_html=True)
@@ -220,12 +272,12 @@ def render():
             else:
                 st.markdown(f"Detection results: **{len(df):,} cases**")
                 fig = px.scatter(
-                    df, x="기준기간건수", y="비교기간건수",
-                    size="건수변화배율", color="건수변화배율",
+                    df, x="base_period_count", y="comp_period_count",
+                    size="count_change_ratio", color="count_change_ratio",
                     color_continuous_scale=[[0, "#1A1F2E"], [0.5, "#2A6B65"], [1, "#E15759"]],
-                    hover_data=["출금계좌일련번호"],
+                    hover_data=["sender_acc"],
                 )
                 fig.update_layout(title="Transaction Pattern Change: Baseline vs Comparison")
                 _apply_dark(fig, height=420)
-                st.plotly_chart(fig, width='stretch')
-                st.dataframe(df, width='stretch', height=400)
+                st.plotly_chart(fig, use_container_width=True)
+                st.dataframe(df, use_container_width=True, height=400)

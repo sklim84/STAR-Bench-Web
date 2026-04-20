@@ -1,7 +1,7 @@
-"""HOFINET 데이터 로딩 및 Parquet 변환 모듈.
+"""HOFINET Data Loading and Parquet Conversion Module.
 
-CSV → Parquet 변환으로 로딩 속도를 최적화하고,
-DuckDB 테이블로 적재하여 병렬 분석 쿼리를 지원한다.
+Optimizes loading speed via CSV to Parquet conversion and
+supports parallel analysis queries by loading into DuckDB tables.
 """
 
 import time
@@ -14,20 +14,21 @@ import config
 
 
 SCHEMA = pa.schema([
-    ("거래일자", pa.int32()),
-    ("거래시간대", pa.int8()),
-    ("출금금융회사일련번호", pa.int16()),
-    ("출금계좌일련번호", pa.int64()),
-    ("입금금융회사일련번호", pa.int16()),
-    ("입금계좌일련번호", pa.int64()),
-    ("자금구분", pa.int8()),
-    ("매체구분", pa.int8()),
-    ("거래금액", pa.int64()),
-    ("이상거래여부", pa.int8()),
-    ("이상거래유형", pa.float32()),
-    ("이상거래설명", pa.utf8()),
+    ("date", pa.int32()),
+    ("time_slot", pa.int8()),
+    ("sender_bank", pa.int16()),
+    ("sender_acc", pa.int64()),
+    ("receiver_bank", pa.int16()),
+    ("receiver_acc", pa.int64()),
+    ("fund_type", pa.int8()),
+    ("media_type", pa.int8()),
+    ("amount", pa.int64()),
+    ("is_fraud", pa.int8()),
+    ("fraud_type", pa.float32()),
+    ("fraud_description", pa.utf8()),
 ])
 
+# Mapping for the original HOFINET CSV columns (in Korean) to PyArrow types
 CONVERT_OPTIONS = pcsv.ConvertOptions(
     column_types={
         "거래일자": pa.int32(),
@@ -47,14 +48,14 @@ CONVERT_OPTIONS = pcsv.ConvertOptions(
 
 
 def csv_to_parquet(csv_path=None, parquet_path=None, force=False):
-    """CSV 파일을 Parquet으로 변환한다.
+    """Converts CSV to Parquet format for optimized performance.
 
-    - PyArrow의 멀티스레드 CSV 리더로 병렬 파싱
-    - 최적 타입 캐스팅으로 메모리 절감 (int64 → int8/int16/int32)
-    - Snappy 압축으로 디스크 I/O 최소화
+    - Parallel parsing with PyArrow multi-threaded CSV reader
+    - Memory reduction via optimal type casting (int64 → int8/16/32)
+    - Minimized disk I/O with Snappy compression
 
     Returns:
-        변환 소요 시간(초)
+        float: Elapsed time in seconds
     """
     csv_path = csv_path or config.CSV_PATH
     parquet_path = parquet_path or config.PARQUET_PATH
@@ -67,23 +68,31 @@ def csv_to_parquet(csv_path=None, parquet_path=None, force=False):
         str(csv_path),
         convert_options=CONVERT_OPTIONS,
     )
-    # 이상거래유형: float32(NaN 포함) → nullable int8로 변환
-    col = table.column("이상거래유형")
+    # Rename original Korean columns to English schema (HOFINET.csv order)
+    table = table.rename_columns([
+        "date", "time_slot", "sender_bank", "sender_acc", "receiver_bank",
+        "receiver_acc", "fund_type", "media_type", "amount", "is_fraud",
+        "fraud_type", "fraud_description"
+    ])
+
+    # Cast fraud_type: float32(NaN) -> nullable int8
+    col = table.column("fraud_type")
     col_int = pc.cast(col, pa.int8(), safe=False)
-    idx = table.schema.get_field_index("이상거래유형")
-    table = table.set_column(idx, pa.field("이상거래유형", pa.int8()), col_int)
+    idx = table.schema.get_field_index("fraud_type")
+    table = table.set_column(idx, pa.field("fraud_type", pa.int8()), col_int)
+
     pq.write_table(
         table,
         str(parquet_path),
         compression="snappy",
-        use_dictionary=["이상거래설명", "자금구분", "매체구분", "거래시간대"],
+        use_dictionary=["fraud_description", "fund_type", "media_type", "time_slot"],
     )
     elapsed = time.time() - start
     return elapsed
 
 
 def load_parquet(parquet_path=None):
-    """Parquet 파일을 PyArrow Table로 로드한다."""
+    """Loads a Parquet file into a PyArrow Table."""
     parquet_path = parquet_path or config.PARQUET_PATH
     return pq.read_table(str(parquet_path))
 
@@ -94,7 +103,7 @@ if __name__ == "__main__":
         parquet_size = config.PARQUET_PATH.stat().st_size / 1024 / 1024
         csv_size = config.CSV_PATH.stat().st_size / 1024 / 1024
         print(f"CSV ({csv_size:.0f}MB) -> Parquet ({parquet_size:.0f}MB)")
-        print(f"압축률: {parquet_size/csv_size*100:.1f}%")
-        print(f"변환 시간: {elapsed:.1f}초")
+        print(f"Compression Ratio: {parquet_size/csv_size*100:.1f}%")
+        print(f"Conversion Time: {elapsed:.1f}s")
     else:
-        print("Parquet 파일이 이미 존재합니다.")
+        print("Parquet file already exists.")

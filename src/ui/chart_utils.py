@@ -1,6 +1,6 @@
 # ------------------------------------------------------------------
-# Plotly 차트 공통 유틸리티
-# 모든 _pages/ 모듈에서 공유하는 색상 상수와 테마 헬퍼
+# Common Utilities for Plotly Charts
+# Shared color constants and theme helpers for all page modules.
 # ------------------------------------------------------------------
 
 BAR_COLOR = "#4E79A7"
@@ -17,7 +17,7 @@ COMMUNITY_COLORS = [
 
 
 def apply_theme(fig, height: int = 380, secondary_y: bool = False):
-    """Plotly figure에 라이트 테마를 적용한다."""
+    """Applies a light theme to a Plotly figure."""
     fig.update_layout(
         height=height,
         paper_bgcolor="#FFFFFF",
@@ -40,5 +40,5 @@ def apply_theme(fig, height: int = 380, secondary_y: bool = False):
     return fig
 
 
-# 후방 호환 별칭
+# Backward compatibility alias
 apply_dark = apply_theme

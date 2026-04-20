@@ -1,4 +1,4 @@
-"""기능6: 계좌 위험도 평가 페이지."""
+"""Feature 6: Account Risk Assessment Page."""
 
 import streamlit as st
 import plotly.express as px
@@ -13,6 +13,7 @@ from src.ui.chart_utils import (
 
 
 def _metric_card(label, value, sub="", white=False):
+    """Renders an HTML metric-card."""
     value_class = "value white" if white else "value"
     st.markdown(f"""<div class="metric-card">
         <div class="label">{label}</div>
@@ -21,145 +22,192 @@ def _metric_card(label, value, sub="", white=False):
     </div>""", unsafe_allow_html=True)
 
 
+def _render_dark_table(df):
+    """Renders a DataFrame as a styled HTML table."""
+    table_html = """<table class="dark-table">
+        <thead><tr>"""
+    for col in df.columns:
+        table_html += f"<th>{col}</th>"
+    table_html += "</tr></thead><tbody>"
+    for _, row in df.iterrows():
+        table_html += "<tr>"
+        for val in row:
+            if isinstance(val, (int, float)):
+                if abs(val) >= 1_000_000:
+                    table_html += f"<td>{val:,.0f}</td>"
+                elif isinstance(val, float):
+                    table_html += f"<td>{val:.2f}</td>"
+                else:
+                    table_html += f"<td>{val:,}</td>"
+            else:
+                table_html += f"<td>{val}</td>"
+        table_html += "</tr>"
+    table_html += "</tbody></table>"
+    st.markdown(table_html, unsafe_allow_html=True)
+
+
 def render():
     st.markdown('<p class="page-title">Account Risk Assessment</p>', unsafe_allow_html=True)
     st.markdown(
-        '<p class="page-subtitle">Account risk scoring (0~100) based on 5 behavioral indicators</p>',
+        '<p class="page-subtitle">Account risk scoring (0-100) based on 5 behavioral indicators</p>',
         unsafe_allow_html=True,
     )
 
     tab1, tab2 = st.tabs(["Individual Account Risk", "High-Risk Account Ranking"])
 
     # ------------------------------------------------------------------
-    # 탭1: 개별 계좌 위험도
+    # Tab 1: Individual Account Risk
     # ------------------------------------------------------------------
     with tab1:
-        st.markdown('<p class="section-header">Individual Account Risk Assessment</p>', unsafe_allow_html=True)
+        st.markdown('<p class="section-header">Individual Account Risk Profile</p>', unsafe_allow_html=True)
         account_id = st.number_input(
-            "Account ID (Sender Account)", value=0, key="risk_account"
+            "Enter Account ID to analyze", value=0, key="risk_account_id"
         )
 
-        if account_id > 0 and st.button("Evaluate Risk", key="risk_evaluate"):
-            with st.spinner("Evaluating..."):
-                result = score_account(account_id)
+        if account_id > 0:
+            if st.button("Evaluate Risk", key="risk_evaluate_btn"):
+                res = score_account(account_id)
+                if "error" in res:
+                    st.warning(res["error"])
+                else:
+                    score = res["total_score"]
+                    level = res["risk_level"]
+                    color = "#E15759" if level == "High" else "#F28E2B" if level == "Medium" else "#4ECDC4"
 
-            if "error" in result:
-                st.warning(result["error"])
-            else:
-                # 종합 점수 표시
-                score = result["종합점수"]
-                level = result["위험등급"]
-                level_en = (
-                    "High" if level == "높음" else
-                    "Medium" if level == "중간" else
-                    "Low"
-                )
-                color = (
-                    "#E15759" if level == "높음" else
-                    "#F28E2B" if level == "중간" else
-                    "#4ECDC4"
-                )
+                    c1, c2, c3 = st.columns(3)
+                    with c1:
+                        _metric_card("Outcome Score", f"{score}", "/ 100")
+                    with c2:
+                        st.markdown(f"""<div class="metric-card">
+                            <div class="label">Risk Level</div>
+                            <div class="value" style="color:{color}">{level}</div>
+                            <div class="sub">Classification</div>
+                        </div>""", unsafe_allow_html=True)
+                    with c3:
+                        _metric_card("Transactions", "Found history", "Active status")
 
-                c1, c2, c3 = st.columns(3)
-                with c1:
-                    _metric_card("Overall Risk Score", f"{score}", "/ 100")
-                with c2:
-                    st.markdown(f"""<div class="metric-card">
-                        <div class="label">Risk Level</div>
-                        <div class="value" style="color:{color}">{level_en}</div>
-                        <div class="sub">High(>=70) / Medium(>=40) / Low</div>
-                    </div>""", unsafe_allow_html=True)
-                with c3:
-                    _metric_card("Account ID", f"{result['account_id']}")
+                    col_chart1, col_chart2 = st.columns(2)
 
-                # 컴포넌트별 레이더 차트
-                st.markdown('<p class="section-header">Risk Factor Analysis</p>', unsafe_allow_html=True)
-                components = result["컴포넌트"]
-                weights = result["가중치"]
+                    with col_chart1:
+                        # Gauge Chart
+                        fig_gauge = go.Figure(go.Indicator(
+                            mode="gauge+number",
+                            value=score,
+                            domain={'x': [0, 1], 'y': [0, 1]},
+                            title={'text': f"Risk Score: {score} ({level})", 'font': {'size': 18, 'color': '#E0E0E0'}},
+                            gauge={
+                                'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': "#8B8FA3"},
+                                'bar': {'color': ACCENT_COLOR},
+                                'bgcolor': "#1A1F2E",
+                                'borderwidth': 2,
+                                'bordercolor': "#2A2F3E",
+                                'steps': [
+                                    {'range': [0, 40], 'color': '#1A2E28'},
+                                    {'range': [40, 70], 'color': '#2E2A1A'},
+                                    {'range': [70, 100], 'color': '#2E1A1A'}
+                                ],
+                            }
+                        ))
+                        _apply_dark(fig_gauge, height=350)
+                        st.plotly_chart(fig_gauge, use_container_width=True)
 
-                categories = list(components.keys())
-                values = [components[k] for k in categories]
+                    with col_chart2:
+                        # Radar Chart
+                        comp = res["components"]
+                        categories = ["Nighttime", "Amount Anomaly", "Diversity", "Velocity", "Fraud Hist"]
+                        # Mapping internal keys to display labels
+                        int_keys = ["nighttime_ratio", "amount_anomaly", "counterparty_diversity", "velocity_change", "fraud_history"]
+                        values = [comp[k] for k in int_keys]
 
-                fig = go.Figure()
-                fig.add_trace(go.Scatterpolar(
-                    r=values + [values[0]],
-                    theta=categories + [categories[0]],
-                    fill="toself",
-                    fillcolor="rgba(78, 205, 196, 0.2)",
-                    line=dict(color=MINT_COLOR, width=2),
-                    name="Risk Score",
-                ))
-                fig.update_layout(
-                    polar=dict(
-                        bgcolor="rgba(0,0,0,0)",
-                        radialaxis=dict(
-                            visible=True, range=[0, 1],
-                            gridcolor="#1E2333",
-                            tickfont=dict(color="#8B8FA3"),
-                        ),
-                        angularaxis=dict(
-                            tickfont=dict(color="#C0C4D0", size=12),
-                            gridcolor="#1E2333",
-                        ),
-                    ),
-                )
-                _apply_dark(fig, height=400)
-                st.plotly_chart(fig, width='stretch')
+                        fig_radar = go.Figure()
+                        fig_radar.add_trace(go.Scatterpolar(
+                            r=values + [values[0]],
+                            theta=categories + [categories[0]],
+                            fill="toself",
+                            fillcolor="rgba(78, 205, 196, 0.2)",
+                            line=dict(color=MINT_COLOR, width=2),
+                            name="Risk Component",
+                        ))
+                        fig_radar.update_layout(
+                            polar=dict(
+                                bgcolor="rgba(0,0,0,0)",
+                                radialaxis=dict(visible=True, range=[0, 1], gridcolor="#1E2333", tickfont=dict(color="#8B8FA3")),
+                                angularaxis=dict(tickfont=dict(color="#C0C4D0", size=12), gridcolor="#1E2333"),
+                            ),
+                            margin=dict(t=40, b=40, l=40, r=40),
+                        )
+                        _apply_dark(fig_radar, height=350)
+                        st.plotly_chart(fig_radar, use_container_width=True)
 
-                # 가중치별 기여도 바 차트
-                contrib_data = {
-                    "Indicator": categories,
-                    "Score": values,
-                    "Weight": [weights[k] for k in categories],
-                    "Contribution": [round(v * weights[k] * 100, 1)
-                              for k, v in zip(categories, values)],
-                }
-                contrib_df = pd.DataFrame(contrib_data)
-
-                fig2 = px.bar(
-                    contrib_df, x="Indicator", y="Contribution",
-                    color_discrete_sequence=[BAR_COLOR],
-                    text="Contribution",
-                )
-                fig2.update_layout(title="Risk Factor Contribution (Weighted Score)")
-                _apply_dark(fig2)
-                st.plotly_chart(fig2, width='stretch')
+                    st.markdown('<p class="section-header">Risk Factor Contribution</p>', unsafe_allow_html=True)
+                    weights = res["weights"]
+                    contrib_data = []
+                    for i, k in enumerate(int_keys):
+                        v = comp[k]
+                        w = weights[k]
+                        contrib_data.append({
+                            "Indicator": categories[i],
+                            "Score": round(v, 4),
+                            "Weight": w,
+                            "Contribution": round(v * w * 100, 1)
+                        })
+                    
+                    contrib_df = pd.DataFrame(contrib_data)
+                    fig_contrib = px.bar(
+                        contrib_df, x="Indicator", y="Contribution",
+                        color_discrete_sequence=[BAR_COLOR],
+                        text="Contribution",
+                    )
+                    fig_contrib.update_layout(yaxis_title="Weighted Score Contribution")
+                    _apply_dark(fig_contrib, height=350)
+                    st.plotly_chart(fig_contrib, use_container_width=True)
 
     # ------------------------------------------------------------------
-    # 탭2: 고위험 계좌 랭킹
+    # Tab 2: High-Risk Ranking
     # ------------------------------------------------------------------
     with tab2:
-        st.markdown('<p class="section-header">High-Risk Account TOP-K</p>', unsafe_allow_html=True)
+        st.markdown('<p class="section-header">Top 20 High-Risk Accounts</p>', unsafe_allow_html=True)
+        col_ctrl1, col_ctrl2 = st.columns(2)
+        with col_ctrl1:
+            top_k = st.slider("Show Top", 5, 50, 20)
+        with col_ctrl2:
+            min_tx = st.number_input("Min Transactions", 1, 100, 10)
 
-        col1, col2 = st.columns(2)
-        with col1:
-            top_k = st.slider("Top K accounts", 5, 100, 20, key="risk_top_k")
-        with col2:
-            min_tx = st.number_input(
-                "Minimum transactions", value=10, min_value=1, key="risk_min_tx"
+        with st.spinner("Ranking accounts..."):
+            rank_df = rank_risky_accounts(top_k=top_k, min_transactions=min_tx)
+        
+        if rank_df.empty:
+            st.info("No accounts found matching the criteria.")
+        else:
+            avg_risk = rank_df["risk_score_simple"].mean()
+            max_risk = rank_df["risk_score_simple"].max()
+            high_count = len(rank_df[rank_df["risk_score_simple"] >= 15])
+
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                _metric_card("Avg Risk Score", f"{avg_risk:.1f}", "Top subset avg")
+            with c2:
+                _metric_card("Highest Score", f"{max_risk:.1f}", "Maximum detected")
+            with c3:
+                _metric_card("Critical Accounts", f"{high_count}", "Score >= 15")
+
+            # Bar chart of ranking
+            fig_rank = px.bar(
+                rank_df, x="account_id", y="risk_score_simple",
+                title="High-Risk Account Ranking",
+                color="risk_score_simple",
+                color_continuous_scale=[[0, "#1A2E28"], [0.5, "#2E2A1A"], [1, "#2E1A1A"]],
+                labels={"account_id": "Account ID", "risk_score_simple": "Risk Score"}
             )
+            fig_rank.update_xaxes(type="category")
+            _apply_dark(fig_rank, height=400)
+            st.plotly_chart(fig_rank, use_container_width=True)
 
-        if st.button("Get Ranking", key="risk_rank"):
-            with st.spinner("Loading..."):
-                df = rank_risky_accounts(top_k=top_k, min_transactions=min_tx)
-
-            if df.empty:
-                st.info("No accounts found matching the criteria.")
-            else:
-                st.markdown(
-                    f'<p class="section-header">Results: {len(df):,} accounts</p>',
-                    unsafe_allow_html=True,
-                )
-
-                fig = px.bar(
-                    df.head(20), x="account_id", y="위험점수_간이",
-                    color="이상거래비율",
-                    color_continuous_scale=[[0, "#1A1F2E"], [0.5, "#2A6B65"], [1, "#4ECDC4"]],
-                    text="위험점수_간이",
-                )
-                fig.update_layout(title="High-Risk Account Ranking")
-                fig.update_xaxes(type="category")
-                _apply_dark(fig, height=420)
-                st.plotly_chart(fig, width='stretch')
-
-                st.dataframe(df, width='stretch', height=400)
+            # Detail data table
+            st.markdown('<p class="section-header">Ranking Details</p>', unsafe_allow_html=True)
+            display_df = rank_df.copy()
+            display_df.columns = [
+                "Account ID", "Tx Count", "Total Amount", "Fraud Count",
+                "Fraud %", "Night %", "Counterparties", "Risk Score"
+            ]
+            _render_dark_table(display_df)

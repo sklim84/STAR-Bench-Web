@@ -1,4 +1,4 @@
-"""기능4: AI 에이전트 대화형 분석 + STR 작성 페이지."""
+"""Feature 4: AI Agent Interactive Analysis & STR Generation Page."""
 
 import json
 from datetime import date
@@ -10,7 +10,7 @@ from src.features.agent import chat
 
 
 # ---------------------------------------------------------------------------
-# 도구 이름 한글 레이블
+# Tool Name Labels
 # ---------------------------------------------------------------------------
 
 _TOOL_LABELS = {
@@ -20,6 +20,23 @@ _TOOL_LABELS = {
     "analyze_network": "Network Analysis",
     "get_statistics": "Summary Statistics",
     "detect_aml_patterns": "AML Pattern Detection",
+    "get_account_profile": "Account Profile",
+    "get_fraud_type_summary": "Fraud Type Summary",
+    "compare_periods": "Period Comparison",
+    "get_institution_report": "Institution Report",
+    "rank_risky_transactions": "Risk Ranking",
+    "detect_ctr_candidates": "CTR/Structuring Detection",
+    "score_account_risk": "Risk Scoring",
+    "detect_monitoring_alerts": "Monitoring Alerts",
+    "detect_dormant_reactivation": "Dormant Reactivation",
+    "detect_smurfing_network": "Smurfing Detection",
+    "get_trend_analysis": "Trend Analysis",
+    "analyze_channel_risk": "Channel Risk Analysis",
+    "get_receiving_account_profile": "Receiving Profile Analysis",
+    "analyze_cross_institution_flow": "Cross-Institution Flow",
+    "lookup_fiu_reference_types": "FIU Typology Lookup",
+    "validate_str_fields": "STR Validation",
+    "get_aml_glossary": "AML Glossary",
 }
 
 _TOOL_ICONS = {
@@ -29,6 +46,8 @@ _TOOL_ICONS = {
     "analyze_network": "🔗",
     "get_statistics": "📊",
     "detect_aml_patterns": "⚠️",
+    "score_account_risk": "🛡️",
+    "detect_monitoring_alerts": "🚨",
 }
 
 
@@ -39,11 +58,11 @@ def _tool_label(name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 도구 이벤트 expander 렌더링
+# Tool Event Expander Rendering
 # ---------------------------------------------------------------------------
 
 def _render_tool_event(event: dict, index: int) -> None:
-    """단일 도구 호출 이벤트를 expander로 렌더링한다."""
+    """Renders a single tool call event as an expander."""
     tool_name = event.get("name", "unknown")
     label = f"Tool Call {index + 1}: {_tool_label(tool_name)}"
 
@@ -75,11 +94,11 @@ def _render_tool_event(event: dict, index: int) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 대화 내보내기
+# Conversation Export
 # ---------------------------------------------------------------------------
 
 def _build_export_json(messages: list[dict]) -> str:
-    """user/assistant 메시지만 포함하는 JSON 문자열을 반환한다."""
+    """Returns a JSON string containing only user/assistant messages."""
     exportable = [
         {"role": m["role"], "content": m.get("content", "")}
         for m in messages
@@ -94,7 +113,7 @@ def _build_export_json(messages: list[dict]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 메인 render 함수
+# Main Render Function
 # ---------------------------------------------------------------------------
 
 def render() -> None:
@@ -105,24 +124,24 @@ def render() -> None:
         st.error("OPENAI_API_KEY is not configured. Please check your `.env` file.")
         st.stop()
 
-    # 세션 초기화
+    # Session Initialization
     if "messages" not in st.session_state:
         st.session_state.messages = []
     if "pending_prompt" not in st.session_state:
         st.session_state.pending_prompt = None
-    # 도구 이벤트는 메시지 인덱스를 키로 저장: {assistant_msg_index: [events]}
+    # Tool events mapped by assistant message index: {assistant_msg_index: [events]}
     if "tool_events_map" not in st.session_state:
         st.session_state.tool_events_map = {}
 
     # ------------------------------------------------------------------
-    # 툴바: 대화 초기화 / 내보내기 + 대화 상태 (항상 표시)
+    # Toolbar: Reset / Export + Stats
     # ------------------------------------------------------------------
     messages = st.session_state.messages
     turn_count = sum(1 for m in messages if m.get("role") == "user")
 
     btn_c1, btn_c2, info_c = st.columns([1, 1, 4])
     with btn_c1:
-        if st.button("Reset Chat", width='stretch'):
+        if st.button("Reset Chat", use_container_width=True):
             st.session_state.messages = []
             st.session_state.pending_prompt = None
             st.session_state.tool_events_map = {}
@@ -136,10 +155,10 @@ def render() -> None:
                 data=export_data,
                 file_name=filename,
                 mime="application/json",
-                width='stretch',
+                use_container_width=True,
             )
         else:
-            st.button("Export Chat", disabled=True, width='stretch')
+            st.button("Export Chat", disabled=True, use_container_width=True)
     with info_c:
         if turn_count > 0:
             st.markdown(
@@ -148,7 +167,7 @@ def render() -> None:
             )
 
     # ------------------------------------------------------------------
-    # 기능 안내 및 예시 질문
+    # Agent Guide & Example Questions
     # ------------------------------------------------------------------
     with st.expander("Agent Features & Example Questions"):
         col_info, col_examples = st.columns(2)
@@ -183,12 +202,12 @@ def render() -> None:
                     st.rerun()
 
     # ------------------------------------------------------------------
-    # 대화 히스토리 표시
+    # Conversation History Display
     # ------------------------------------------------------------------
-    # user/assistant 메시지 순서대로 표시하되,
-    # assistant 직전에 해당 응답에서 사용된 도구 이벤트를 함께 표시한다.
+    # Display user/assistant messages in order.
+    # Tool events used for a response are displayed right before the assistant message.
 
-    assistant_index = 0  # assistant 메시지 누적 카운터
+    assistant_index = 0  # Accrued counter for assistant messages
     for msg in st.session_state.messages:
         role = msg.get("role")
 
@@ -198,7 +217,7 @@ def render() -> None:
 
         elif role == "assistant":
             with st.chat_message("assistant"):
-                # 이 assistant 응답에 연결된 도구 이벤트 표시
+                # Display tool events linked to this assistant response
                 events = st.session_state.tool_events_map.get(assistant_index, [])
                 if events:
                     for i, event in enumerate(events):
@@ -207,10 +226,10 @@ def render() -> None:
                 st.markdown(msg.get("content", ""))
             assistant_index += 1
 
-        # tool/function 메시지는 화면에 직접 표시하지 않음 (expander로 대체)
+        # tool/function messages are not displayed directly (replaced by expander)
 
     # ------------------------------------------------------------------
-    # 사용자 입력 처리
+    # User Input Processing
     # ------------------------------------------------------------------
     prompt = st.chat_input("Enter your transaction analysis question...")
 
@@ -224,13 +243,12 @@ def render() -> None:
             st.markdown(prompt)
 
         with st.chat_message("assistant"):
-            # 도구 호출 중 상태 표시 (st.status)
+            # Display status while analyzing (st.status)
             with st.status("Agent analyzing...", expanded=True) as status:
                 st.write("Selecting tools and querying data...")
                 try:
-                    # session_state.messages에는 이미 user 메시지가 포함되어 있음
+                    # chat function returns the final response and updated message history
                     response, updated, tool_events = chat(st.session_state.messages)
-                    # messages를 갱신 (chat 함수가 반환한 updated가 최신 상태)
                     st.session_state.messages = updated
 
                     if tool_events:
@@ -242,7 +260,7 @@ def render() -> None:
                     response = None
                     tool_events = []
 
-            # 도구 이벤트를 현재 assistant 인덱스에 저장
+            # Store tool events for the current assistant index
             if tool_events:
                 current_assistant_index = sum(
                     1 for m in st.session_state.messages
@@ -251,7 +269,7 @@ def render() -> None:
                 if current_assistant_index >= 0:
                     st.session_state.tool_events_map[current_assistant_index] = tool_events
 
-                # 도구 이벤트 expander 즉시 표시
+                # Immediately render tool event expanders
                 for i, event in enumerate(tool_events):
                     _render_tool_event(event, i)
 

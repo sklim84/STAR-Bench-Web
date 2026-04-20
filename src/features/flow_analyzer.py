@@ -1,7 +1,7 @@
-"""자금 흐름 분석 모듈.
+"""Fund Flow Analysis Module.
 
-자금 수집/분산 패턴(Smurfing Network) 탐지 및
-기관 간 자금 흐름(Cross-Institution Flow) 분석.
+Detects fund collection/distribution patterns (Smurfing Network) and
+analyzes fund flow between financial institutions (Cross-Institution Flow).
 """
 
 import pandas as pd
@@ -11,7 +11,7 @@ from src.data.db import query
 
 
 # ------------------------------------------------------------------
-# 자금 수집/분산 패턴 탐지 (Smurfing Network)
+# Smurfing Network Detection
 # ------------------------------------------------------------------
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -21,37 +21,37 @@ def detect_smurfing_network(account_id: int | None = None,
                             date_from: int | None = None,
                             date_to: int | None = None,
                             limit: int = 50) -> pd.DataFrame:
-    """자금 수집(inbound) 또는 분산(outbound) 패턴을 탐지한다.
+    """Detects fund collection (inbound) or distribution (outbound) patterns.
 
     Args:
-        account_id: 특정 계좌 한정 (None이면 전체 스캔)
-        direction: 'inbound'(다수→1 수집) 또는 'outbound'(1→다수 분산)
-        min_counterparts: 최소 거래 상대 계좌 수
-        date_from: 시작일 (YYYYMMDD)
-        date_to: 종료일 (YYYYMMDD)
-        limit: 최대 결과 수
+        account_id: Limit to a specific account (None for all scan)
+        direction: 'inbound' (many→1 collection) or 'outbound' (1→many dispersion)
+        min_counterparts: Minimum number of counterparty accounts
+        date_from: Start date (YYYYMMDD)
+        date_to: End date (YYYYMMDD)
+        limit: Max results
 
     Returns:
-        DataFrame with 계좌, 거래상대수, 총거래건수, 총거래금액, 이상거래건수
+        DataFrame with account, counterparty_count, total_tx_count, total_amount, fraud_count
     """
     min_counterparts = int(min_counterparts)
     limit = int(limit)
     conditions = []
     if date_from is not None:
-        conditions.append(f"거래일자 >= {int(date_from)}")
+        conditions.append(f"date >= {int(date_from)}")
     if date_to is not None:
-        conditions.append(f"거래일자 <= {int(date_to)}")
+        conditions.append(f"date <= {int(date_to)}")
 
     if direction == "inbound":
-        # 다수 출금계좌 → 1 입금계좌 (자금 수집 / funnel)
-        target_col = "입금계좌일련번호"
-        counter_col = "출금계좌일련번호"
-        label = "수집대상계좌"
+        # Many sender_acc → 1 receiver_acc (Fund collection / funnel)
+        target_col = "receiver_acc"
+        counter_col = "sender_acc"
+        label = "target_account"
     else:
-        # 1 출금계좌 → 다수 입금계좌 (자금 분산 / dispersion)
-        target_col = "출금계좌일련번호"
-        counter_col = "입금계좌일련번호"
-        label = "분산원천계좌"
+        # 1 sender_acc → many receiver_acc (Fund distribution / dispersion)
+        target_col = "sender_acc"
+        counter_col = "receiver_acc"
+        label = "source_account"
 
     if account_id is not None:
         conditions.append(f"{target_col} = {int(account_id)}")
@@ -61,22 +61,22 @@ def detect_smurfing_network(account_id: int | None = None,
     return query(f"""
         SELECT
             {target_col} AS {label},
-            COUNT(DISTINCT {counter_col}) AS 거래상대수,
-            COUNT(*) AS 총거래건수,
-            SUM(거래금액) AS 총거래금액,
-            SUM(이상거래여부) AS 이상거래건수,
-            ROUND(AVG(거래금액), 0) AS 평균거래금액
+            COUNT(DISTINCT {counter_col}) AS counterparty_count,
+            COUNT(*) AS total_tx_count,
+            SUM(amount) AS total_amount,
+            SUM(is_fraud) AS fraud_count,
+            ROUND(AVG(amount), 0) AS avg_amount
         FROM hofinet
         {where}
         GROUP BY {target_col}
         HAVING COUNT(DISTINCT {counter_col}) >= {min_counterparts}
-        ORDER BY 거래상대수 DESC, 총거래금액 DESC
+        ORDER BY counterparty_count DESC, total_amount DESC
         LIMIT {limit}
     """)
 
 
 # ------------------------------------------------------------------
-# 기관 간 자금 흐름 분석 (Cross-Institution Flow)
+# Cross-Institution Flow Analysis
 # ------------------------------------------------------------------
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -84,41 +84,41 @@ def analyze_cross_institution_flow(date_from: int | None = None,
                                    date_to: int | None = None,
                                    min_transactions: int = 10,
                                    limit: int = 50) -> pd.DataFrame:
-    """기관 쌍(출금기관→입금기관) 간 자금 흐름을 분석한다.
+    """Analyzes fund flow between institution pairs (sender_bank → receiver_bank).
 
     Args:
-        date_from: 시작일 (YYYYMMDD)
-        date_to: 종료일 (YYYYMMDD)
-        min_transactions: 최소 거래 건수
-        limit: 최대 결과 수
+        date_from: Start date (YYYYMMDD)
+        date_to: End date (YYYYMMDD)
+        min_transactions: Minimum transaction count
+        limit: Max results
 
     Returns:
-        DataFrame with 기관쌍별 거래건수, 이상거래건수, 이상거래비율, 총거래금액
+        DataFrame with tx_count, fraud_count, fraud_ratio, total_amount by institution pair
     """
     min_transactions = int(min_transactions)
     limit = int(limit)
     conditions = []
     if date_from is not None:
-        conditions.append(f"거래일자 >= {int(date_from)}")
+        conditions.append(f"date >= {int(date_from)}")
     if date_to is not None:
-        conditions.append(f"거래일자 <= {int(date_to)}")
+        conditions.append(f"date <= {int(date_to)}")
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     return query(f"""
         SELECT
-            출금금융회사일련번호 AS 출금기관,
-            입금금융회사일련번호 AS 입금기관,
-            COUNT(*) AS 거래건수,
-            SUM(이상거래여부) AS 이상거래건수,
-            ROUND(SUM(이상거래여부) * 100.0 / COUNT(*), 4) AS 이상거래비율,
-            SUM(거래금액) AS 총거래금액,
-            ROUND(AVG(거래금액), 0) AS 평균거래금액,
-            COUNT(DISTINCT 출금계좌일련번호) AS 출금계좌수,
-            COUNT(DISTINCT 입금계좌일련번호) AS 입금계좌수
+            sender_bank AS sender_institution,
+            receiver_bank AS receiver_institution,
+            COUNT(*) AS tx_count,
+            SUM(is_fraud) AS fraud_count,
+            ROUND(SUM(is_fraud) * 100.0 / COUNT(*), 4) AS fraud_ratio,
+            SUM(amount) AS total_amount,
+            ROUND(AVG(amount), 0) AS avg_amount,
+            COUNT(DISTINCT sender_acc) AS sender_count,
+            COUNT(DISTINCT receiver_acc) AS receiver_count
         FROM hofinet
         {where}
-        GROUP BY 출금금융회사일련번호, 입금금융회사일련번호
+        GROUP BY sender_bank, receiver_bank
         HAVING COUNT(*) >= {min_transactions}
-        ORDER BY 이상거래비율 DESC, 거래건수 DESC
+        ORDER BY fraud_ratio DESC, tx_count DESC
         LIMIT {limit}
     """)

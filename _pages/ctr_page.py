@@ -1,4 +1,4 @@
-"""기능5: CTR 모니터링 페이지."""
+"""Feature 5: CTR Monitoring Page."""
 
 import streamlit as st
 import plotly.express as px
@@ -14,6 +14,7 @@ from src.ui.chart_utils import BAR_COLOR, ACCENT_COLOR, MINT_COLOR, apply_dark a
 
 
 def _metric_card(label, value, sub="", white=False):
+    """Renders an HTML metric-card."""
     value_class = "value white" if white else "value"
     st.markdown(f"""<div class="metric-card">
         <div class="label">{label}</div>
@@ -29,19 +30,19 @@ def render():
         unsafe_allow_html=True,
     )
 
-    # --- Summary statistics ---
+    # --- Summary Statistics ---
     with st.spinner("Loading data..."):
         summary = get_ctr_summary()
     c1, c2, c3 = st.columns(3)
     with c1:
-        _metric_card("High-Value Transactions", f"{summary['고액거래건수']:,}", "Over 10M KRW")
+        _metric_card("High-Value Transactions", f"{summary['high_value_count']:,}", "Over 10M KRW")
     with c2:
-        _metric_card("High-Value Total Amount", f"{summary['고액거래총액']:,.0f} KRW", "Cumulative amount")
+        _metric_card("High-Value Total Amount", f"{summary['high_value_total']:,.0f} KRW", "Cumulative amount")
     with c3:
-        _metric_card("Structuring Suspects", f"{summary['분할거래의심건수']:,}", "Account-day basis")
+        _metric_card("Structuring Suspects", f"{summary['structuring_suspect_count']:,}", "Account-day basis")
 
-    # --- Tabs (lazy loading - query only on selected tab) ---
-    tab_names = ["CTR High-Value Transactions", "Structuring Suspects", "Account Analysis"]
+    # --- Tabs Configuration (lazy loading) ---
+    tab_names = ["CTR High-Value Transactions", "Structuring Suspects", "Account Pattern Analysis"]
     selected_tab = st.radio(
         "Analysis Type",
         tab_names,
@@ -52,7 +53,7 @@ def render():
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ------------------------------------------------------------------
-    # 탭1: 고액거래
+    # Tab 1: High-Value
     # ------------------------------------------------------------------
     if selected_tab == tab_names[0]:
         st.markdown('<p class="section-header">High-Value Transactions (Over 10M KRW)</p>', unsafe_allow_html=True)
@@ -71,16 +72,15 @@ def render():
         else:
             st.markdown(f'<p class="section-header">Results: {len(df):,} transactions</p>', unsafe_allow_html=True)
 
-            # Amount distribution histogram
-            fig = px.histogram(df, x="거래금액", nbins=30, color_discrete_sequence=[BAR_COLOR])
+            fig = px.histogram(df, x="amount", nbins=30, color_discrete_sequence=[BAR_COLOR])
             fig.update_layout(title="High-Value Transaction Amount Distribution")
             _apply_dark(fig)
-            st.plotly_chart(fig, width='stretch')
+            st.plotly_chart(fig, use_container_width=True)
 
-            st.dataframe(df, width='stretch', height=400)
+            st.dataframe(df, use_container_width=True, height=400)
 
     # ------------------------------------------------------------------
-    # 탭2: 분할거래
+    # Tab 2: Structuring
     # ------------------------------------------------------------------
     elif selected_tab == tab_names[1]:
         st.markdown('<p class="section-header">Structuring Suspect Detection</p>', unsafe_allow_html=True)
@@ -114,18 +114,18 @@ def render():
             )
 
             fig = px.scatter(
-                struct_df, x="거래건수", y="합산금액",
-                size="합산금액", color_discrete_sequence=[ACCENT_COLOR],
-                hover_data=["출금계좌일련번호", "거래일자"],
+                struct_df, x="tx_count", y="total_amount",
+                size="total_amount", color_discrete_sequence=[ACCENT_COLOR],
+                hover_data=["sender_acc", "date"],
             )
             fig.update_layout(title="Structuring Suspects: Count vs Total Amount")
             _apply_dark(fig)
-            st.plotly_chart(fig, width='stretch')
+            st.plotly_chart(fig, use_container_width=True)
 
-            st.dataframe(struct_df, width='stretch', height=400)
+            st.dataframe(struct_df, use_container_width=True, height=400)
 
     # ------------------------------------------------------------------
-    # 탭3: 계좌별 분석
+    # Tab 3: Account Analysis
     # ------------------------------------------------------------------
     elif selected_tab == tab_names[2]:
         st.markdown('<p class="section-header">Account Structuring Pattern Analysis</p>', unsafe_allow_html=True)
@@ -135,19 +135,19 @@ def render():
             with st.spinner("Analyzing..."):
                 result = assess_account_structuring(account_id)
 
-            if result.get("총거래건수", 0) == 0:
+            if result.get("total_tx_count", 0) == 0:
                 st.warning("No transaction history found for this account.")
             else:
                 c1, c2, c3 = st.columns(3)
                 with c1:
-                    _metric_card("Total Transactions", f"{result['총거래건수']:,}")
+                    _metric_card("Total Transactions", f"{result['total_tx_count']:,}")
                 with c2:
-                    _metric_card("Total Amount", f"{result['총거래금액']:,} KRW")
+                    _metric_card("Total Amount", f"{result['total_amount']:,} KRW")
                 with c3:
-                    _metric_card("Structuring Suspect Days", f"{result['분할거래의심일수']:,}")
+                    _metric_card("Structuring Suspect Days", f"{result['structuring_suspect_days']:,}")
 
-                if result["분할거래상세"]:
-                    detail_df = pd.DataFrame(result["분할거래상세"])
-                    st.dataframe(detail_df, width='stretch')
+                if result["structuring_details"]:
+                    detail_df = pd.DataFrame(result["structuring_details"])
+                    st.dataframe(detail_df, use_container_width=True)
                 else:
-                    st.success("No structuring patterns detected.")
+                    st.success("No structuring patterns detected for this account.")

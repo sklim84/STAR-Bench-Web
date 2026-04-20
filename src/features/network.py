@@ -1,4 +1,4 @@
-"""기능2: 네트워크(그래프) 분석 쿼리 및 그래프 생성 모듈."""
+"""Feature 2: Network (Graph) Analysis Query and Graph Construction Module."""
 
 import logging
 
@@ -8,168 +8,167 @@ import streamlit as st
 
 from src.data.db import query
 from src.data import graph_db
+from src.features.aml_reference import FRAUD_TYPE_MAP, FUND_TYPE_MAP
 
 logger = logging.getLogger(__name__)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_bank_network() -> pd.DataFrame:
-    """금융회사 간 거래 네트워크 데이터를 반환한다."""
+    """Returns inter-institution transaction network data."""
     return query("""
         SELECT
-            출금금융회사일련번호 as source,
-            입금금융회사일련번호 as target,
-            count(*) as 총거래,
-            sum(이상거래여부) as 이상거래,
-            sum(거래금액) as 총금액
+            sender_bank as source,
+            receiver_bank as target,
+            count(*) as total_txns,
+            sum(is_fraud) as fraud_txns,
+            sum(amount) as total_amount
         FROM hofinet
         GROUP BY source, target
-        ORDER BY 총거래 DESC
+        ORDER BY total_txns DESC
     """)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_fraud_account_network(limit: int = 500) -> pd.DataFrame:
-    """이상거래 관련 계좌 간 네트워크 데이터를 반환한다."""
-    # limit은 외부 입력이므로 int 형변환으로 안전하게 처리 (DuckDB는 LIMIT 파라미터 바인딩 미지원)
+    """Returns inter-account network data related to fraud."""
     limit = int(limit)
-    return query(f"""
+    df = query(f"""
         SELECT
-            출금계좌일련번호 as source,
-            입금계좌일련번호 as target,
-            count(*) as 거래횟수,
-            sum(거래금액) as 총금액,
-            max(이상거래유형) as 이상거래유형,
-            max(이상거래설명) as 이상거래설명
+            sender_acc as source,
+            receiver_acc as target,
+            count(*) as tx_count,
+            sum(amount) as total_amount,
+            max(fraud_type) as fraud_type
         FROM hofinet
-        WHERE 이상거래여부 = 1
+        WHERE is_fraud = 1
         GROUP BY source, target
-        ORDER BY 거래횟수 DESC
+        ORDER BY tx_count DESC
         LIMIT {limit}
     """)
+    if not df.empty:
+        df["fraud_desc"] = df["fraud_type"].map(FRAUD_TYPE_MAP).fillna("Other")
+    return df
 
 
 def get_account_ego_network(account_id: int, hops: int = 1) -> pd.DataFrame:
-    """특정 계좌의 ego 네트워크(n-hop 이웃)를 반환한다."""
-    # account_id는 int64 계좌 번호이므로 int 형변환으로 SQL 인젝션 방지
+    """Returns the ego network (n-hop neighbors) of a specific account."""
     account_id = int(account_id)
     if hops == 1:
         return query(
             """
             SELECT
-                출금계좌일련번호 as source,
-                입금계좌일련번호 as target,
-                count(*) as 거래횟수,
-                sum(거래금액) as 총금액,
-                max(이상거래여부) as 이상거래여부
+                sender_acc as source,
+                receiver_acc as target,
+                count(*) as tx_count,
+                sum(amount) as total_amount,
+                max(is_fraud) as is_fraud
             FROM hofinet
-            WHERE 출금계좌일련번호 = ?
-               OR 입금계좌일련번호 = ?
+            WHERE sender_acc = ?
+               OR receiver_acc = ?
             GROUP BY source, target
             """,
             [account_id, account_id],
         )
-    # 2-hop: 1-hop 이웃의 거래까지 포함
-    # DuckDB CTE에서는 파라미터가 여러 번 참조되므로 int 변수를 f-string으로 안전하게 삽입
+    # 2-hop: Includes transactions of 1-hop neighbors
     return query(f"""
         WITH hop1 AS (
             SELECT DISTINCT
-                CASE WHEN 출금계좌일련번호 = {account_id}
-                     THEN 입금계좌일련번호 ELSE 출금계좌일련번호 END as neighbor
+                CASE WHEN sender_acc = {account_id}
+                     THEN receiver_acc ELSE sender_acc END as neighbor
             FROM hofinet
-            WHERE 출금계좌일련번호 = {account_id}
-               OR 입금계좌일련번호 = {account_id}
+            WHERE sender_acc = {account_id}
+               OR receiver_acc = {account_id}
         )
         SELECT
-            출금계좌일련번호 as source,
-            입금계좌일련번호 as target,
-            count(*) as 거래횟수,
-            sum(거래금액) as 총금액,
-            max(이상거래여부) as 이상거래여부
+            sender_acc as source,
+            receiver_acc as target,
+            count(*) as tx_count,
+            sum(amount) as total_amount,
+            max(is_fraud) as is_fraud
         FROM hofinet
-        WHERE 출금계좌일련번호 = {account_id}
-           OR 입금계좌일련번호 = {account_id}
-           OR 출금계좌일련번호 IN (SELECT neighbor FROM hop1)
-           OR 입금계좌일련번호 IN (SELECT neighbor FROM hop1)
+        WHERE sender_acc = {account_id}
+           OR receiver_acc = {account_id}
+           OR sender_acc IN (SELECT neighbor FROM hop1)
+           OR receiver_acc IN (SELECT neighbor FROM hop1)
         GROUP BY source, target
     """)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_fraud_accounts() -> pd.DataFrame:
-    """이상거래에 관련된 출금 계좌 목록을 반환한다."""
+    """Returns a list of sender accounts involved in fraud."""
     return query("""
-        SELECT DISTINCT 출금계좌일련번호 as 계좌
+        SELECT DISTINCT sender_acc as account_id
         FROM hofinet
-        WHERE 이상거래여부 = 1
-        ORDER BY 계좌
+        WHERE is_fraud = 1
+        ORDER BY account_id
     """)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_bank_network_stats() -> pd.DataFrame:
-    """금융회사 네트워크 요약 통계를 반환한다."""
+    """Returns summary statistics for the institution network."""
     return query("""
         SELECT
-            count(DISTINCT 출금금융회사일련번호) as 출금금융회사수,
-            count(DISTINCT 입금금융회사일련번호) as 입금금융회사수,
-            count(DISTINCT (CAST(출금금융회사일련번호 AS INT) * 1000 + CAST(입금금융회사일련번호 AS INT))) as 연결수
+            count(DISTINCT sender_bank) as sender_banks,
+            count(DISTINCT receiver_bank) as receiver_banks,
+            count(DISTINCT (CAST(sender_bank AS INT) * 1000 + CAST(receiver_bank AS INT))) as connection_count
         FROM hofinet
     """)
 
 
-def build_bank_graph(df: pd.DataFrame) -> nx.Graph:
-    """DataFrame으로부터 금융회사 간 네트워크 그래프를 생성한다."""
+def build_bank_graph(df: pd.DataFrame) -> nx.DiGraph:
+    """Creates an inter-institution network graph from a DataFrame."""
     G = nx.DiGraph()
     for _, row in df.iterrows():
         G.add_edge(
             str(int(row["source"])),
             str(int(row["target"])),
-            weight=int(row["총거래"]),
-            fraud=int(row["이상거래"]),
-            amount=float(row["총금액"]),
+            weight=int(row["total_txns"]),
+            fraud=int(row["fraud_txns"]),
+            amount=float(row["total_amount"]),
         )
     return G
 
 
 def build_account_graph(df: pd.DataFrame) -> nx.DiGraph:
-    """DataFrame으로부터 계좌 간 네트워크 그래프를 생성한다."""
+    """Creates an inter-account network graph from a DataFrame."""
     G = nx.DiGraph()
     for _, row in df.iterrows():
         G.add_edge(
             str(int(row["source"])),
             str(int(row["target"])),
-            weight=int(row["거래횟수"]),
-            amount=float(row["총금액"]),
+            weight=int(row["tx_count"]),
+            amount=float(row["total_amount"]),
         )
     return G
 
 
 # ------------------------------------------------------------------
-# 강화 기능: 중심성 지표 분석
+# Enhanced Feature: Centrality Metric Analysis
 # ------------------------------------------------------------------
 
-def compute_centrality_metrics(G: nx.Graph) -> dict:
-    """네트워크의 주요 중심성 지표를 계산하여 DataFrame으로 반환한다.
+def compute_centrality_metrics(G: nx.DiGraph) -> pd.DataFrame:
+    """Calculates major network centrality metrics and returns them as a DataFrame.
 
     Parameters
     ----------
     G : nx.DiGraph
-        분석 대상 방향 그래프
+        Target directed graph for analysis.
 
     Returns
     -------
     pd.DataFrame
-        컬럼: 노드, degree, betweenness, closeness, eigenvector
+        Columns: Node, degree, betweenness, closeness, eigenvector
     """
     if len(G.nodes()) == 0:
-        return pd.DataFrame(columns=["노드", "degree", "betweenness", "closeness", "eigenvector"])
+        return pd.DataFrame(columns=["Node", "degree", "betweenness", "closeness", "eigenvector"])
 
     degree = dict(G.degree())
     betweenness = nx.betweenness_centrality(G, weight="weight")
     closeness = nx.closeness_centrality(G)
 
-    # eigenvector centrality는 수렴하지 않을 수 있으므로 예외 처리
     try:
         eigenvector = nx.eigenvector_centrality(G, max_iter=300, weight="weight")
     except nx.PowerIterationFailedConvergence:
@@ -177,7 +176,7 @@ def compute_centrality_metrics(G: nx.Graph) -> dict:
 
     nodes = list(G.nodes())
     df = pd.DataFrame({
-        "노드": nodes,
+        "Node": nodes,
         "degree": [degree[n] for n in nodes],
         "betweenness": [round(betweenness[n], 6) for n in nodes],
         "closeness": [round(closeness[n], 6) for n in nodes],
@@ -187,27 +186,27 @@ def compute_centrality_metrics(G: nx.Graph) -> dict:
 
 
 # ------------------------------------------------------------------
-# 강화 기능: 커뮤니티 탐지
+# Enhanced Feature: Community Detection
 # ------------------------------------------------------------------
 
-def detect_communities(G: nx.Graph) -> dict:
-    """Greedy modularity 기반 커뮤니티 탐지를 수행한다.
+def detect_communities(G: nx.DiGraph) -> pd.DataFrame:
+    """Performs community detection based on greedy modularity.
 
-    DiGraph를 undirected로 변환한 뒤 greedy_modularity_communities를 적용하고,
-    각 노드에 커뮤니티 레이블을 부여한 DataFrame을 반환한다.
+    Converts DiGraph to undirected, applies greedy_modularity_communities,
+    and returns a DataFrame with community labels for each node.
 
     Parameters
     ----------
     G : nx.DiGraph
-        분석 대상 방향 그래프
+        Target directed graph for analysis.
 
     Returns
     -------
     pd.DataFrame
-        컬럼: 노드, 커뮤니티
+        Columns: Node, Community
     """
     if len(G.nodes()) == 0:
-        return pd.DataFrame(columns=["노드", "커뮤니티"])
+        return pd.DataFrame(columns=["Node", "Community"])
 
     G_undirected = G.to_undirected()
     communities = nx.community.greedy_modularity_communities(G_undirected, weight="weight")
@@ -218,128 +217,125 @@ def detect_communities(G: nx.Graph) -> dict:
             node_community[node] = idx
 
     df = pd.DataFrame({
-        "노드": list(node_community.keys()),
-        "커뮤니티": list(node_community.values()),
+        "Node": list(node_community.keys()),
+        "Community": list(node_community.values()),
     })
-    return df.sort_values("커뮤니티").reset_index(drop=True)
+    return df.sort_values("Community").reset_index(drop=True)
 
 
 # ------------------------------------------------------------------
-# 강화 기능: 금융회사 간 이상거래 흐름 매트릭스
+# Enhanced Feature: Inter-institution Fraud Flow Matrix
 # ------------------------------------------------------------------
 
 @st.cache_data(ttl=300, show_spinner=False)
 def get_fraud_flow_matrix() -> pd.DataFrame:
-    """금융회사 간 이상거래 흐름 매트릭스 데이터를 반환한다.
+    """Returns inter-institution fraud flow matrix data.
 
     Returns
     -------
     pd.DataFrame
-        컬럼: source, target, 이상거래건수, 이상거래금액
+        Columns: source, target, fraud_count, fraud_amount
     """
     return query("""
         SELECT
-            출금금융회사일련번호 as source,
-            입금금융회사일련번호 as target,
-            sum(이상거래여부) as 이상거래건수,
-            sum(거래금액) as 이상거래금액
+            sender_bank as source,
+            receiver_bank as target,
+            sum(is_fraud) as fraud_count,
+            sum(amount) as fraud_amount
         FROM hofinet
-        WHERE 이상거래여부 = 1
+        WHERE is_fraud = 1
         GROUP BY source, target
-        HAVING 이상거래건수 > 0
-        ORDER BY 이상거래건수 DESC
+        HAVING fraud_count > 0
+        ORDER BY fraud_count DESC
     """)
 
 
 # ------------------------------------------------------------------
-# 강화 기능: 네트워크 통계 확장
+# Enhanced Feature: Extended Network Statistics
 # ------------------------------------------------------------------
 
-def get_extended_network_stats(G: nx.Graph) -> dict:
-    """네트워크의 확장 통계를 계산하여 딕셔너리로 반환한다.
+def get_extended_network_stats(G: nx.DiGraph) -> dict:
+    """Calculates extended network statistics and returns them as a dictionary.
 
     Parameters
     ----------
     G : nx.DiGraph
-        분석 대상 방향 그래프
+        Target directed graph for analysis.
 
     Returns
     -------
     dict
-        밀도, 평균 클러스터링 계수, 허브 노드 등의 통계
+        Density, average clustering coefficient, hub node, etc.
     """
     if len(G.nodes()) == 0:
         return {
-            "노드수": 0,
-            "엣지수": 0,
-            "밀도": 0.0,
-            "평균클러스터링계수": 0.0,
-            "허브노드": "-",
-            "허브연결수": 0,
+            "node_count": 0,
+            "edge_count": 0,
+            "density": 0.0,
+            "avg_clustering": 0.0,
+            "hub_node": "-",
+            "hub_degree": 0,
         }
 
     density = nx.density(G)
 
-    # 클러스터링 계수는 undirected 변환 후 계산
     G_undirected = G.to_undirected()
     avg_clustering = nx.average_clustering(G_undirected, weight="weight")
 
-    # 가장 연결이 많은 노드 (허브)
     degree_dict = dict(G.degree())
     hub_node = max(degree_dict, key=degree_dict.get)
     hub_degree = degree_dict[hub_node]
 
     return {
-        "노드수": len(G.nodes()),
-        "엣지수": len(G.edges()),
-        "밀도": round(density, 4),
-        "평균클러스터링계수": round(avg_clustering, 4),
-        "허브노드": hub_node,
-        "허브연결수": hub_degree,
+        "node_count": len(G.nodes()),
+        "edge_count": len(G.edges()),
+        "density": round(density, 4),
+        "avg_clustering": round(avg_clustering, 4),
+        "hub_node": hub_node,
+        "hub_degree": hub_degree,
     }
 
 
 # ==================================================================
-# Memgraph Cypher 기반 AML 패턴 탐지 함수
+# Memgraph Cypher-based AML Pattern Detection Functions
 # ==================================================================
-# Memgraph 미실행 시 graceful degradation: 빈 DataFrame/dict 반환 + 경고 로그
-# TRANSFER 엣지 속성: 거래일자, 거래시간대, 자금구분, 매체구분, 거래금액,
-#                     이상거래여부, 이상거래유형
-# Account 노드 속성: id, company_id
+# Graceful degradation if Memgraph is not running: returns empty DF/dict + warning log.
+# TRANSFER edge attributes: date, time_slot, fund_type, medium_type, amount,
+#                           is_fraud, fraud_type
+# Account node attributes: id, company_id
 # ------------------------------------------------------------------
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def detect_ring_transactions(min_len: int = 3, max_len: int = 6, min_amount: int = 0, limit: int = 100) -> pd.DataFrame:
-    """순환거래(ring) 사이클을 탐지한다.
+    """Detects circular fund transfer patterns (rings).
 
-    자금세탁의 핵심 패턴인 A->B->C->...->A 순환 거래를 그래프 탐색으로 찾는다.
-    이상거래로 표시된 관계만 탐색 대상으로 삼는다.
+    Searches for A->B->C->...->A circular transaction patterns, a core money laundering pattern,
+    using graph traversal. Only relations marked as fraud are explored.
 
     Parameters
     ----------
     min_len : int
-        순환 경로의 최소 길이 (기본 3)
+        Minimum length of the circular path (default 3).
     max_len : int
-        순환 경로의 최대 길이 (기본 6)
+        Maximum length of the circular path (default 6).
     min_amount : int
-        순환 내 총 거래금액 최소 필터 (기본 0)
+        Minimum total transaction amount filter within the ring (default 0).
     limit : int
-        반환할 최대 결과 수 (기본 100)
+        Maximum number of results to return (default 100).
 
     Returns
     -------
     pd.DataFrame
-        컬럼: ring_accounts, ring_size, total_amount, dates
-        Memgraph 미실행 시 빈 DataFrame
+        Columns: ring_accounts, ring_size, total_amount, dates
+        Returns empty DataFrame if Memgraph is not running.
     """
     empty = pd.DataFrame(columns=["ring_accounts", "ring_size", "total_amount", "dates"])
 
     if not graph_db.is_available():
-        logger.warning("Memgraph 미실행으로 순환거래 탐지 불가")
+        logger.warning("Unable to detect ring transactions as Memgraph is not running.")
         return empty
 
-    # Memgraph는 LIMIT에 파라미터 바인딩 불가 -> int() 변환 후 f-string 삽입
     min_len = int(min_len)
     max_len = int(max_len)
     min_amount = int(min_amount)
@@ -347,12 +343,12 @@ def detect_ring_transactions(min_len: int = 3, max_len: int = 6, min_amount: int
 
     cypher = f"""
         MATCH p=(a:Account)-[:TRANSFER*{min_len}..{max_len}]->(a)
-        WHERE ALL(r IN relationships(p) WHERE r.이상거래여부 = 1)
+        WHERE ALL(r IN relationships(p) WHERE r.is_fraud = 1)
         WITH [n IN nodes(p) | n.id] AS ring_accounts,
-             [r IN relationships(p) | r.거래금액] AS amounts,
-             [r IN relationships(p) | r.거래일자] AS dates,
+             [r IN relationships(p) | r.amount] AS amounts,
+             [r IN relationships(p) | r.date] AS dates,
              size(relationships(p)) AS ring_size,
-             reduce(s = 0, r IN relationships(p) | s + r.거래금액) AS total_amount
+             reduce(s = 0, r IN relationships(p) | s + r.amount) AS total_amount
         WHERE total_amount >= {min_amount}
         RETURN ring_accounts, ring_size, total_amount, dates
         ORDER BY total_amount DESC
@@ -376,24 +372,24 @@ def detect_ring_transactions(min_len: int = 3, max_len: int = 6, min_amount: int
 
 @st.cache_data(ttl=300, show_spinner=False)
 def detect_layering_patterns(min_layers: int = 3, limit: int = 100) -> pd.DataFrame:
-    """다단계 레이어링 패턴을 탐지한다.
+    """Detects multi-stage layering patterns.
 
-    출발 계좌에서 중개 계좌를 거쳐 도착 계좌에 이르는
-    A->B->C->...->Z 형태의 다단계 자금 이동 패턴을 찾는다.
-    이상거래로 표시된 관계만 탐색 대상으로 삼는다.
+    Searches for multi-stage fund movement patterns from a source account through 
+    intermediaries to a destination account (A->B->C->...->Z).
+    Only relations marked as fraud are explored.
 
     Parameters
     ----------
     min_layers : int
-        최소 레이어(중간 경유) 수 (기본 3)
+        Minimum number of layers (intermediate steps) (default 3).
     limit : int
-        반환할 최대 결과 수 (기본 100)
+        Maximum number of results to return (default 100).
 
     Returns
     -------
     pd.DataFrame
-        컬럼: source_account, destination_account, path_accounts, layers, total_amount
-        Memgraph 미실행 시 빈 DataFrame
+        Columns: source_account, destination_account, path_accounts, layers, total_amount
+        Returns empty DataFrame if Memgraph is not running.
     """
     empty = pd.DataFrame(columns=[
         "source_account", "destination_account", "path_accounts",
@@ -401,7 +397,7 @@ def detect_layering_patterns(min_layers: int = 3, limit: int = 100) -> pd.DataFr
     ])
 
     if not graph_db.is_available():
-        logger.warning("Memgraph 미실행으로 레이어링 패턴 탐지 불가")
+        logger.warning("Unable to detect layering patterns as Memgraph is not running.")
         return empty
 
     min_layers = int(min_layers)
@@ -410,11 +406,11 @@ def detect_layering_patterns(min_layers: int = 3, limit: int = 100) -> pd.DataFr
     cypher = f"""
         MATCH p=(src:Account)-[:TRANSFER*{min_layers}..]->(dst:Account)
         WHERE src <> dst
-          AND ALL(r IN relationships(p) WHERE r.이상거래여부 = 1)
+          AND ALL(r IN relationships(p) WHERE r.is_fraud = 1)
         WITH src, dst,
              [n IN nodes(p) | n.id] AS path_accounts,
              size(relationships(p)) AS layers,
-             reduce(s = 0, r IN relationships(p) | s + r.거래금액) AS total_amount
+             reduce(s = 0, r IN relationships(p) | s + r.amount) AS total_amount
         WHERE layers >= {min_layers}
         RETURN src.id AS source_account,
                dst.id AS destination_account,
@@ -443,26 +439,26 @@ def detect_layering_patterns(min_layers: int = 3, limit: int = 100) -> pd.DataFr
 
 @st.cache_data(ttl=300, show_spinner=False)
 def detect_funnel_accounts(min_inflow: int = 10, max_outflow: int = 3, limit: int = 100) -> pd.DataFrame:
-    """대포통장(funnel) 패턴을 탐지한다.
+    """Detects primary account (funnel) patterns.
 
-    다수의 계좌로부터 입금을 받고(inflow) 소수의 계좌로 출금하는(outflow)
-    대포통장 의심 계좌를 찾는다. funnel_ratio가 높을수록 의심도가 높다.
+    Searches for suspicious accounts that receive deposits from many accounts (inflow) 
+    and withdraw to a few accounts (outflow). A higher funnel_ratio indicates higher suspicion.
 
     Parameters
     ----------
     min_inflow : int
-        최소 입금 계좌 수 (기본 10)
+        Minimum number of inflow accounts (default 10).
     max_outflow : int
-        최대 출금 계좌 수 (기본 3)
+        Maximum number of outflow accounts (default 3).
     limit : int
-        반환할 최대 결과 수 (기본 100)
+        Maximum number of results to return (default 100).
 
     Returns
     -------
     pd.DataFrame
-        컬럼: account_id, inflow_count, inflow_amount, outflow_count,
+        Columns: account_id, inflow_count, inflow_amount, outflow_count,
               outflow_amount, funnel_ratio
-        Memgraph 미실행 시 빈 DataFrame
+        Returns empty DataFrame if Memgraph is not running.
     """
     empty = pd.DataFrame(columns=[
         "account_id", "inflow_count", "inflow_amount",
@@ -470,7 +466,7 @@ def detect_funnel_accounts(min_inflow: int = 10, max_outflow: int = 3, limit: in
     ])
 
     if not graph_db.is_available():
-        logger.warning("Memgraph 미실행으로 대포통장 패턴 탐지 불가")
+        logger.warning("Unable to detect funnel patterns as Memgraph is not running.")
         return empty
 
     min_inflow = int(min_inflow)
@@ -481,12 +477,12 @@ def detect_funnel_accounts(min_inflow: int = 10, max_outflow: int = 3, limit: in
         MATCH (s:Account)-[r1:TRANSFER]->(funnel:Account)
         WITH funnel,
              count(DISTINCT s) AS inflow_count,
-             sum(r1.거래금액) AS inflow_amount
+             sum(r1.amount) AS inflow_amount
         WHERE inflow_count >= {min_inflow}
         OPTIONAL MATCH (funnel)-[r2:TRANSFER]->(d:Account)
         WITH funnel, inflow_count, inflow_amount,
              count(DISTINCT d) AS outflow_count,
-             coalesce(sum(r2.거래금액), 0) AS outflow_amount
+             coalesce(sum(r2.amount), 0) AS outflow_amount
         WHERE outflow_count <= {max_outflow}
         RETURN funnel.id AS account_id,
                inflow_count,
@@ -517,34 +513,33 @@ def detect_funnel_accounts(min_inflow: int = 10, max_outflow: int = 3, limit: in
 
 
 def get_account_ego_network_deep(account_id: int, hops: int = 3) -> pd.DataFrame:
-    """N-hop 심층 ego 네트워크를 Memgraph에서 추출한다.
+    """Extracts a deep ego network from Memgraph.
 
-    지정된 계좌를 중심으로 hops 단계까지의 이웃 계좌와 그들 사이의
-    거래 관계를 서브그래프로 추출한다. 기존 get_account_ego_network보다
-    더 깊은 탐색이 가능하다 (최대 5-hop).
+    Extracts a subgraph consisting of neighbor accounts up to N hops centered on a 
+    specified account, along with their transaction relationships. 
+    Allows deeper exploration than get_account_ego_network (up to 5 hops).
 
-    Memgraph 미실행 시 기존 get_account_ego_network를 폴백으로 호출한다
-    (DuckDB 기반, 최대 2-hop까지 지원).
+    Falls back to get_account_ego_network (DuckDB-based, up to 2 hops) if Memgraph is not running.
 
     Parameters
     ----------
     account_id : int
-        중심 계좌 ID
+        Center account ID.
     hops : int
-        탐색 깊이 (기본 3, 최대 5)
+        Exploration depth (default 3, max 5).
 
     Returns
     -------
     pd.DataFrame
-        컬럼: source, target, 거래횟수, 총금액, 이상거래여부
-        기존 get_account_ego_network과 동일한 스키마
+        Columns: source, target, tx_count, total_amount, is_fraud
+        Same schema as get_account_ego_network.
     """
     account_id = int(account_id)
     hops = min(int(hops), 5)
 
     if not graph_db.is_available():
         logger.warning(
-            "Memgraph 미실행으로 심층 ego 네트워크 탐색 불가 (DuckDB 폴백, 최대 2-hop)"
+            "Deep ego network exploration unavailable as Memgraph is not running (falling back to DuckDB, max 2 hops)."
         )
         fallback_hops = min(hops, 2)
         return get_account_ego_network(account_id, hops=fallback_hops)
@@ -561,47 +556,45 @@ def get_account_ego_network_deep(account_id: int, hops: int = 3) -> pd.DataFrame
         WHERE m IN all_nodes
         RETURN startNode(r).id AS source,
                endNode(r).id AS target,
-               count(r) AS 거래횟수,
-               sum(r.거래금액) AS 총금액,
-               max(r.이상거래여부) AS 이상거래여부
+               count(r) AS tx_count,
+               sum(r.amount) AS total_amount,
+               max(r.is_fraud) AS is_fraud
     """
 
     df = graph_db.execute_df(cypher, {"account_id": account_id})
     if df.empty:
-        # Memgraph에 데이터가 없을 수 있음 -> DuckDB 폴백
-        logger.info("Memgraph 결과 비어있음, DuckDB 폴백 사용")
+        logger.info("Memgraph results empty, falling back to DuckDB.")
         fallback_hops = min(hops, 2)
         return get_account_ego_network(account_id, hops=fallback_hops)
 
     return df
 
 
-def find_shortest_path(account_a: int, account_b: int) -> pd.DataFrame:
-    """두 계좌 간 최단 거래 경로를 찾는다.
+def find_shortest_path(account_a: int, account_b: int) -> dict:
+    """Finds the shortest transaction path between two accounts.
 
-    Memgraph의 shortestPath 알고리즘을 사용하여 두 계좌를 잇는
-    최소 홉(hop) 수의 경로를 탐색한다.
+    Uses Memgraph's shortestPath algorithm to find the path with the minimum number of hops.
 
     Parameters
     ----------
     account_a : int
-        출발 계좌 ID
+        Source account ID.
     account_b : int
-        도착 계좌 ID
+        Destination account ID.
 
     Returns
     -------
     dict
-        {"path": [계좌ID, ...], "hops": int, "amounts": [...], "dates": [...]}
-        Memgraph 미실행 시: {"error": "Memgraph 미실행으로 최단경로 탐색 불가"}
-        경로 없을 시: {"path": [], "hops": 0, "amounts": [], "dates": []}
+        {"path": [AccountID, ...], "hops": int, "amounts": [...], "dates": [...]}
+        If Memgraph is not running: {"error": "..."}
+        If no path exists: {"path": [], "hops": 0, "amounts": [], "dates": []}
     """
     account_a = int(account_a)
     account_b = int(account_b)
 
     if not graph_db.is_available():
-        logger.warning("Memgraph 미실행으로 최단경로 탐색 불가")
-        return {"error": "Memgraph 미실행으로 최단경로 탐색 불가"}
+        logger.warning("Unable to find shortest path as Memgraph is not running.")
+        return {"error": "Unable to find shortest path as Memgraph is not running."}
 
     cypher = """
         MATCH p=shortestPath(
@@ -609,8 +602,8 @@ def find_shortest_path(account_a: int, account_b: int) -> pd.DataFrame:
         )
         RETURN [n IN nodes(p) | n.id] AS path,
                size(relationships(p)) AS hops,
-               [r IN relationships(p) | r.거래금액] AS amounts,
-               [r IN relationships(p) | r.거래일자] AS dates
+               [r IN relationships(p) | r.amount] AS amounts,
+               [r IN relationships(p) | r.date] AS dates
     """
 
     records = graph_db.execute(cypher, {
@@ -631,47 +624,45 @@ def find_shortest_path(account_a: int, account_b: int) -> pd.DataFrame:
 
 
 def get_temporal_network(start_date: int, end_date: int, fraud_only: bool = True) -> pd.DataFrame:
-    """시간 윈도우 내 거래 네트워크를 추출한다.
+    """Extracts the transaction network within a time window.
 
-    지정된 기간 내의 거래만으로 구성된 네트워크를 Memgraph에서 추출한다.
-    fraud_only=True이면 이상거래만 포함한다.
+    Extracts a network composed only of transactions within a specified period from Memgraph.
 
     Parameters
     ----------
     start_date : int
-        시작 거래일자 (예: 20210101)
+        Start transaction date (e.g., 20210101).
     end_date : int
-        종료 거래일자 (예: 20241231)
+        End transaction date (e.g., 20241231).
     fraud_only : bool
-        이상거래만 필터할지 여부 (기본 True)
+        Whether to filter only fraud transactions (default True).
 
     Returns
     -------
     pd.DataFrame
-        컬럼: source, target, 거래횟수, 총금액, 이상거래여부
-        Memgraph 미실행 시 빈 DataFrame
+        Columns: source, target, tx_count, total_amount, is_fraud
+        Returns empty DataFrame if Memgraph is not running.
     """
-    empty = pd.DataFrame(columns=["source", "target", "거래횟수", "총금액", "이상거래여부"])
+    empty = pd.DataFrame(columns=["source", "target", "tx_count", "total_amount", "is_fraud"])
 
     if not graph_db.is_available():
-        logger.warning("Memgraph 미실행으로 시간 윈도우 네트워크 추출 불가")
+        logger.warning("Unable to extract temporal network as Memgraph is not running.")
         return empty
 
     start_date = int(start_date)
     end_date = int(end_date)
 
-    # fraud_only 조건을 Cypher 문자열로 분기 (파라미터 바인딩은 boolean 지원)
-    fraud_filter = "AND r.이상거래여부 = 1" if fraud_only else ""
+    fraud_filter = "AND r.is_fraud = 1" if fraud_only else ""
 
     cypher = f"""
         MATCH (a:Account)-[r:TRANSFER]->(b:Account)
-        WHERE r.거래일자 >= $start_date AND r.거래일자 <= $end_date
+        WHERE r.date >= $start_date AND r.date <= $end_date
               {fraud_filter}
         RETURN a.id AS source, b.id AS target,
-               count(r) AS 거래횟수,
-               sum(r.거래금액) AS 총금액,
-               max(r.이상거래여부) AS 이상거래여부
-        ORDER BY 거래횟수 DESC
+               count(r) AS tx_count,
+               sum(r.amount) AS total_amount,
+               max(r.is_fraud) AS is_fraud
+        ORDER BY tx_count DESC
         LIMIT 1000
     """
 
@@ -687,26 +678,26 @@ def get_temporal_network(start_date: int, end_date: int, fraud_only: bool = True
 
 
 def compute_risk_score(account_id: int) -> dict:
-    """그래프 기반 복합 위험 점수를 계산한다.
+    """Calculates a composite graph-based risk score.
 
-    여러 그래프 지표를 종합하여 특정 계좌의 AML 위험 점수(0.0~1.0)를
-    산출한다. 가중치 구성:
-    - 0.4: 직접 이상거래 비율
-    - 0.3: 이웃 계좌의 이상거래 비율
-    - 0.2: 사이클 참여 점수
-    - 0.1: 입출금 집중도
+    Computes an AML risk score (0.0 to 1.0) for a specific account by synthesizing 
+    various graph metrics. Weight composition:
+    - 0.4: Direct fraud ratio
+    - 0.3: Neighbor fraud ratio
+    - 0.2: Cycle participation score
+    - 0.1: Inflow/outflow concentration
 
     Parameters
     ----------
     account_id : int
-        분석 대상 계좌 ID
+        Account ID to analyze.
 
     Returns
     -------
     dict
         {
             "account_id": int,
-            "risk_score": float (0.0~1.0),
+            "risk_score": float (0.0 to 1.0),
             "components": {
                 "fraud_ratio": float,
                 "neighbor_fraud_ratio": float,
@@ -714,19 +705,19 @@ def compute_risk_score(account_id: int) -> dict:
                 "concentration_score": float,
             }
         }
-        Memgraph 미실행 시: {"account_id": ..., "risk_score": 0.0, "error": "Memgraph 미실행"}
+        If Memgraph is not running: {"risk_score": 0.0, "error": "..."}
     """
     account_id = int(account_id)
 
     if not graph_db.is_available():
-        logger.warning("Memgraph 미실행으로 위험 점수 계산 불가")
-        return {"account_id": account_id, "risk_score": 0.0, "error": "Memgraph 미실행"}
+        logger.warning("Unable to calculate risk score as Memgraph is not running.")
+        return {"account_id": account_id, "risk_score": 0.0, "error": "Memgraph not running"}
 
-    # 1) 직접 이상거래 비율
+    # 1) Direct fraud ratio
     cypher_fraud = """
         MATCH (a:Account {id: $account_id})-[r:TRANSFER]-()
         WITH count(r) AS total_txn,
-             sum(CASE WHEN r.이상거래여부 = 1 THEN 1 ELSE 0 END) AS fraud_txn
+             sum(CASE WHEN r.is_fraud = 1 THEN 1 ELSE 0 END) AS fraud_txn
         RETURN total_txn, fraud_txn,
                CASE WHEN total_txn = 0 THEN 0.0
                     ELSE fraud_txn * 1.0 / total_txn END AS fraud_ratio
@@ -747,14 +738,14 @@ def compute_risk_score(account_id: int) -> dict:
 
     fraud_ratio = float(fraud_records[0].get("fraud_ratio", 0.0))
 
-    # 2) 이웃 계좌의 이상거래 비율
+    # 2) Neighbor fraud ratio
     cypher_neighbor = """
         MATCH (a:Account {id: $account_id})-[:TRANSFER]-(neighbor:Account)
         WITH collect(DISTINCT neighbor) AS neighbors
         UNWIND neighbors AS nb
         MATCH (nb)-[r:TRANSFER]-()
         WITH count(r) AS neighbor_total,
-             sum(CASE WHEN r.이상거래여부 = 1 THEN 1 ELSE 0 END) AS neighbor_fraud
+             sum(CASE WHEN r.is_fraud = 1 THEN 1 ELSE 0 END) AS neighbor_fraud
         RETURN CASE WHEN neighbor_total = 0 THEN 0.0
                     ELSE neighbor_fraud * 1.0 / neighbor_total END AS neighbor_fraud_ratio
     """
@@ -765,7 +756,7 @@ def compute_risk_score(account_id: int) -> dict:
             neighbor_records[0].get("neighbor_fraud_ratio", 0.0)
         )
 
-    # 3) 사이클 참여 여부 (짧은 사이클 3~4-hop 존재 여부)
+    # 3) Cycle participation score
     cypher_cycle = """
         MATCH p=(a:Account {id: $account_id})-[:TRANSFER*3..4]->(a)
         RETURN count(p) AS cycle_count
@@ -774,10 +765,9 @@ def compute_risk_score(account_id: int) -> dict:
     cycle_count = 0
     if cycle_records:
         cycle_count = int(cycle_records[0].get("cycle_count", 0))
-    # 사이클 점수: 1개 이상 참여 시 0.5, 5개 이상이면 1.0
     cycle_score = min(cycle_count / 5.0, 1.0) if cycle_count > 0 else 0.0
 
-    # 4) 입출금 집중도 (inflow/outflow 비율 불균형)
+    # 4) Concentration score
     cypher_concentration = """
         MATCH (a:Account {id: $account_id})
         OPTIONAL MATCH (a)<-[r_in:TRANSFER]-()
@@ -794,18 +784,16 @@ def compute_risk_score(account_id: int) -> dict:
     if conc_records:
         concentration_score = float(conc_records[0].get("concentration", 0.0))
 
-    # 가중 합산
     risk_score = (
         0.4 * fraud_ratio
         + 0.3 * neighbor_fraud_ratio
         + 0.2 * cycle_score
         + 0.1 * concentration_score
     )
-    risk_score = round(min(max(risk_score, 0.0), 1.0), 4)
 
     return {
         "account_id": account_id,
-        "risk_score": risk_score,
+        "risk_score": round(risk_score, 4),
         "components": {
             "fraud_ratio": round(fraud_ratio, 4),
             "neighbor_fraud_ratio": round(neighbor_fraud_ratio, 4),

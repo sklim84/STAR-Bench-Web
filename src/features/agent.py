@@ -1,7 +1,7 @@
-"""기능4: AI 분석 에이전트 모듈.
+"""Feature 4: AI Analysis Agent Module.
 
-OpenAI function calling을 활용하여 기능1~3을 도구로 등록하고,
-대화를 통해 자금세탁의심거래를 분석하고 STR을 작성한다.
+Registers Features 1-3 as tools using OpenAI function calling,
+analyzes suspicious transactions through conversation, and generates STR drafts.
 """
 
 import json
@@ -62,10 +62,10 @@ TOOLS = [
         "function": {
             "name": "query_transactions",
             "description": (
-                "HOFINET 데이터베이스에 SQL 쿼리를 실행하여 거래 데이터를 조회한다. "
-                "테이블명은 hofinet이고 컬럼은 거래일자, 거래시간대, 출금금융회사일련번호, "
-                "출금계좌일련번호, 입금금융회사일련번호, 입금계좌일련번호, 자금구분, 매체구분, "
-                "거래금액, 이상거래여부, 이상거래유형, 이상거래설명이다."
+                "Executes SQL queries on the HOFINET database to retrieve transaction data. "
+                "The table name is 'hofinet' and columns are: date, time_slot, sender_bank, "
+                "sender_acc, receiver_bank, receiver_acc, fund_type, media_type, "
+                "amount, is_fraud, fraud_type, fraud_description."
             ),
             "parameters": {
                 "type": "object",
@@ -73,8 +73,8 @@ TOOLS = [
                     "sql": {
                         "type": "string",
                         "description": (
-                            "실행할 SELECT SQL 쿼리. hofinet 테이블에 대해 "
-                            "집계, 필터링, 그룹핑 등을 수행한다."
+                            "SELECT SQL query to execute. Perform aggregation, filtering, "
+                            "and grouping on the 'hofinet' table."
                         ),
                     }
                 },
@@ -86,36 +86,36 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "predict_fraud",
-            "description": "학습된 XGBoost 모델로 거래의 이상거래 확률을 예측한다. 거래 정보를 입력하면 0~1 사이의 확률을 반환한다.",
+            "description": "Predicts the probability of fraud for a transaction using the trained XGBoost model. Returns a probability between 0 and 1.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "거래시간대": {
+                    "time_slot": {
                         "type": "integer",
-                        "description": "3시간 단위 (0, 3, 6, 9, 12, 15, 18, 21 중 하나)",
+                        "description": "3-hour interval (one of 0, 3, 6, 9, 12, 15, 18, 21)",
                     },
-                    "출금금융회사일련번호": {"type": "integer"},
-                    "입금금융회사일련번호": {"type": "integer"},
-                    "자금구분": {
+                    "sender_bank": {"type": "integer"},
+                    "receiver_bank": {"type": "integer"},
+                    "fund_type": {
                         "type": "integer",
-                        "description": "0, 1, 3, 4 중 하나",
+                        "description": "One of 0, 1, 3, 4",
                     },
-                    "매체구분": {
+                    "media_type": {
                         "type": "integer",
-                        "description": "1~7 중 하나",
+                        "description": "One of 1-7",
                     },
-                    "거래금액": {
+                    "amount": {
                         "type": "integer",
-                        "description": "원 단위 금액 (양의 정수)",
+                        "description": "Amount in KRW (positive integer)",
                     },
                 },
                 "required": [
-                    "거래시간대",
-                    "출금금융회사일련번호",
-                    "입금금융회사일련번호",
-                    "자금구분",
-                    "매체구분",
-                    "거래금액",
+                    "time_slot",
+                    "sender_bank",
+                    "receiver_bank",
+                    "fund_type",
+                    "media_type",
+                    "amount",
                 ],
             },
         },
@@ -125,54 +125,53 @@ TOOLS = [
         "function": {
             "name": "generate_str",
             "description": (
-                "분석 결과를 기반으로 의심거래보고서(STR) 공식 양식(I~VII섹션)에 맞게 작성한다. "
-                "STR 작성 전에 반드시 query_transactions로 관련 거래 데이터를 먼저 조회하고, "
-                "조회한 거래 레코드를 transactions 파라미터에 포함하여 호출할 것."
+                "Generates a Suspicious Transaction Report (STR) in the official format (Sections I-VII) based on analysis results. "
+                "Always query related transaction data with 'query_transactions' first and include the records in the 'transactions' parameter."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "summary": {
                         "type": "string",
-                        "description": "분석 결과 요약 및 혐의 판단 사유 (의심 사유, 거래 패턴, 수치 등 구체적으로 기술)",
+                        "description": "Summary of analysis results and grounds for suspicion (describe patterns, metrics, etc. concretely)",
                     },
                     "fraud_type": {
                         "type": "string",
-                        "description": "HOFINET 이상거래유형 분류",
-                        "enum": ["자금세탁", "대포통장", "보이스피싱", "불법도박", "유사수신", "신규거래처", "기타"],
+                        "description": "HOFINET fraud type classification",
+                        "enum": ["Money Laundering", "Mule Account", "Voice Phishing", "Illegal Gambling", "Illegal Private Finance", "New Customer", "Other"],
                     },
                     "transactions": {
                         "type": "array",
-                        "description": "query_transactions 결과에서 가져온 관련 거래 레코드 목록. 계좌·금액·날짜·채널 자동 추출에 사용됨.",
+                        "description": "List of related transaction records from query_transactions results. Used for automatic extraction of accounts, amounts, dates, and channels.",
                         "items": {
                             "type": "object",
                             "properties": {
-                                "거래일자": {"type": "integer"},
-                                "거래시간대": {"type": "integer"},
-                                "출금금융회사일련번호": {"type": "integer"},
-                                "출금계좌일련번호": {"type": "integer"},
-                                "입금금융회사일련번호": {"type": "integer"},
-                                "입금계좌일련번호": {"type": "integer"},
-                                "자금구분": {"type": "integer"},
-                                "매체구분": {"type": "integer"},
-                                "거래금액": {"type": "integer"},
-                                "이상거래유형": {"type": "integer"},
+                                "date": {"type": "integer"},
+                                "time_slot": {"type": "integer"},
+                                "sender_bank": {"type": "integer"},
+                                "sender_acc": {"type": "integer"},
+                                "receiver_bank": {"type": "integer"},
+                                "receiver_acc": {"type": "integer"},
+                                "fund_type": {"type": "integer"},
+                                "media_type": {"type": "integer"},
+                                "amount": {"type": "integer"},
+                                "fraud_type": {"type": "integer"},
                             },
                         },
                     },
                     "fraud_probability": {
                         "type": "number",
-                        "description": "predict_fraud 도구로 예측한 이상거래 확률 (0.0~1.0). 의심 강도(1~5) 산출에 사용됨.",
+                        "description": "Fraud probability predicted by predict_fraud (0.0-1.0). Used for calculating suspicion intensity (1-5).",
                     },
                     "aml_patterns": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "detect_aml_patterns로 탐지된 AML 패턴 목록 (예: ['순환거래', '레이어링'])",
+                        "description": "List of AML patterns detected (e.g., ['Ring', 'Layering'])",
                     },
                     "tools_used": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "분석에 사용된 도구 목록 (예: ['query_transactions', 'predict_fraud', 'analyze_network'])",
+                        "description": "List of tools used for analysis (e.g., ['query_transactions', 'predict_fraud'])",
                     },
                 },
                 "required": ["summary"],
@@ -183,17 +182,17 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "analyze_network",
-            "description": "특정 계좌의 거래 네트워크를 분석한다. 계좌 번호를 입력하면 연결된 계좌 수, 거래 횟수, 이상거래 관련 여부를 반환한다.",
+            "description": "Analyzes the transaction network of a specific account. Returns connected account count, transaction frequency, and fraud association.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "account_id": {
                         "type": "integer",
-                        "description": "분석할 계좌 번호 (출금계좌일련번호)",
+                        "description": "Account number to analyze (sender_acc)",
                     },
                     "hops": {
                         "type": "integer",
-                        "description": "탐색 범위 (1~5). 기본값은 1. 3 이상은 Memgraph 필요.",
+                        "description": "Search depth (1-5). Default is 1. Hops >= 3 requires Memgraph.",
                         "default": 1,
                     },
                 },
@@ -205,7 +204,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_statistics",
-            "description": "대시보드 요약 통계를 조회한다. 전체 거래 건수, 이상거래 건수/비율, 이상거래 유형별 분포 등 기본 통계를 반환한다.",
+            "description": "Retrieves dashboard summary statistics. Returns basic stats including total transaction count, fraud count/ratio, and distribution by fraud type.",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -218,16 +217,16 @@ TOOLS = [
         "function": {
             "name": "get_account_profile",
             "description": (
-                "특정 계좌의 거래 통계 프로파일을 조회한다. "
-                "총 거래 건수/금액, 이상거래 건수/비율, 주요 거래 시간대, "
-                "주 사용 매체, 상위 거래 상대 계좌 5개를 반환한다."
+                "Retrieves the transaction profile for a specific account. "
+                "Returns total transaction count/amount, fraud count/ratio, primary transaction hours, "
+                "main channels used, and top 5 counterparties."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "account_id": {
                         "type": "integer",
-                        "description": "조회할 계좌 번호 (출금계좌일련번호 기준)",
+                        "description": "Account number to query (sender_acc)",
                     }
                 },
                 "required": ["account_id"],
@@ -239,21 +238,21 @@ TOOLS = [
         "function": {
             "name": "get_fraud_type_summary",
             "description": (
-                "이상거래 유형별(자금세탁/보이스피싱/대포통장 등) 현황을 조회한다. "
-                "유형 이름 또는 코드(1~7)로 필터하면 건수·금액 통계와 상위 금융회사를 반환한다. "
-                "코드 매핑: 1=자금세탁, 2=신규거래처, 3=대포통장, 4=보이스피싱, 5=불법도박, 6=유사수신, 7=기타"
+                "Retrieves details by fraud type (Money Laundering, Voice Phishing, Mule Account, etc.). "
+                "Returns count/amount statistics and top associated institutions. "
+                "Code mapping: 1=Money Laundering, 2=New Counterparty, 3=Mule Account, 4=Voice Phishing, 5=Illegal Gambling, 6=Illegal Private Finance, 7=Other"
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "fraud_type": {
                         "type": "integer",
-                        "description": "이상거래유형 코드 (1~7)",
+                        "description": "Fraud type code (1-7)",
                         "enum": [1, 2, 3, 4, 5, 6, 7],
                     },
                     "bank_id": {
                         "type": "integer",
-                        "description": "출금금융회사일련번호 필터 (선택). 지정 시 해당 금융회사의 거래만 조회.",
+                        "description": "Optional filter by sender bank ID.",
                     },
                 },
                 "required": ["fraud_type"],
@@ -265,28 +264,27 @@ TOOLS = [
         "function": {
             "name": "compare_periods",
             "description": (
-                "두 기간의 거래·이상거래 통계를 비교하고 변화율(delta)을 반환한다. "
-                "기간별 거래 건수, 이상거래 건수, 평균 거래금액과 증감률을 산출한다. "
-                "분기 비교, 월간 비교, 특정 이벤트 전후 비교에 활용한다."
+                "Compares transaction and fraud statistics between two periods and returns the growth rate (delta). "
+                "Calculates transaction count, fraud count, average amount, and rate of change."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "period1_start": {
                         "type": "integer",
-                        "description": "첫 번째 기간 시작일 (YYYYMMDD 정수, 예: 20240101)",
+                        "description": "Period 1 start date (YYYYMMDD integer)",
                     },
                     "period1_end": {
                         "type": "integer",
-                        "description": "첫 번째 기간 종료일 (YYYYMMDD 정수, 예: 20240331)",
+                        "description": "Period 1 end date (YYYYMMDD integer)",
                     },
                     "period2_start": {
                         "type": "integer",
-                        "description": "두 번째 기간 시작일 (YYYYMMDD 정수, 예: 20240401)",
+                        "description": "Period 2 start date (YYYYMMDD integer)",
                     },
                     "period2_end": {
                         "type": "integer",
-                        "description": "두 번째 기간 종료일 (YYYYMMDD 정수, 예: 20240630)",
+                        "description": "Period 2 end date (YYYYMMDD integer)",
                     },
                 },
                 "required": ["period1_start", "period1_end", "period2_start", "period2_end"],
@@ -298,16 +296,16 @@ TOOLS = [
         "function": {
             "name": "get_institution_report",
             "description": (
-                "특정 금융회사의 종합 현황을 보고한다. "
-                "거래 규모(건수·금액), 이상거래 비율, 상위 거래 상대 기관, "
-                "주요 이상거래 유형별 분포, 최근 분기 추이를 반환한다."
+                "Reports the comprehensive status of a specific financial institution. "
+                "Returns transaction scale (count/amount), fraud ratio, top counterparts, "
+                "distribution by fraud type, and quarterly trends."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "bank_id": {
                         "type": "integer",
-                        "description": "조회할 금융회사일련번호 (출금금융회사일련번호 기준)",
+                        "description": "Financial institution ID to query (sender_bank)",
                     }
                 },
                 "required": ["bank_id"],
@@ -319,21 +317,21 @@ TOOLS = [
         "function": {
             "name": "rank_risky_transactions",
             "description": (
-                "학습된 XGBoost 모델로 데이터베이스에서 샘플 거래를 일괄 예측하여 "
-                "위험도 상위 K건을 반환한다. 대규모 탐지 및 우선순위 설정에 활용한다. "
-                "모델이 없으면 오류를 반환한다."
+                "Predicts samples from the database using the trained XGBoost model "
+                "and returns the top-K high-risk ones. Useful for mass detection and prioritization. "
+                "Fails if no model is found."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "sample_size": {
                         "type": "integer",
-                        "description": "예측할 샘플 건수 (기본 1000, 최대 5000)",
+                        "description": "Number of samples to predict (default 1000, max 5000)",
                         "default": 1000,
                     },
                     "top_k": {
                         "type": "integer",
-                        "description": "반환할 상위 위험 거래 건수 (기본 20, 최대 100)",
+                        "description": "Number of high-risk transactions to return (default 20, max 100)",
                         "default": 20,
                     },
                 },
@@ -346,58 +344,58 @@ TOOLS = [
         "function": {
             "name": "detect_aml_patterns",
             "description": (
-                "Memgraph 그래프 DB를 활용하여 AML(자금세탁방지) 패턴을 탐지한다. "
-                "순환거래(ring), 다단계 레이어링, 대포통장(funnel) 패턴을 탐지하거나, "
-                "두 계좌 간 최단경로를 찾거나, 계좌의 위험도 점수를 산출한다."
+                "Detects AML (Anti-Money Laundering) patterns using Memgraph Graph DB. "
+                "Identifies ring transactions, layering, funnel (mule) patterns, "
+                "finds shortest paths between accounts, or calculates account risk scores."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "pattern_type": {
                         "type": "string",
-                        "description": "탐지할 패턴 유형",
+                        "description": "Pattern type to detect",
                         "enum": ["ring", "layering", "funnel", "shortest_path", "risk_score"],
                     },
                     "account_id": {
                         "type": "integer",
-                        "description": "분석 대상 계좌 번호 (risk_score 시 필수)",
+                        "description": "Target account ID (required for risk_score)",
                     },
                     "account_a": {
                         "type": "integer",
-                        "description": "출발 계좌 (shortest_path 시 필수)",
+                        "description": "Start account (required for shortest_path)",
                     },
                     "account_b": {
                         "type": "integer",
-                        "description": "도착 계좌 (shortest_path 시 필수)",
+                        "description": "End account (required for shortest_path)",
                     },
                     "min_len": {
                         "type": "integer",
-                        "description": "순환 최소 길이 (ring 시, 기본 3)",
+                        "description": "Minimum ring length (default 3)",
                         "default": 3,
                     },
                     "max_len": {
                         "type": "integer",
-                        "description": "순환 최대 길이 (ring 시, 기본 6)",
+                        "description": "Maximum ring length (default 6)",
                         "default": 6,
                     },
                     "min_layers": {
                         "type": "integer",
-                        "description": "최소 레이어 수 (layering 시, 기본 3)",
+                        "description": "Minimum layering steps (default 3)",
                         "default": 3,
                     },
                     "min_inflow": {
                         "type": "integer",
-                        "description": "최소 입금 계좌 수 (funnel 시, 기본 10)",
+                        "description": "Minimum funnel inflow count (default 10)",
                         "default": 10,
                     },
                     "max_outflow": {
                         "type": "integer",
-                        "description": "최대 출금 계좌 수 (funnel 시, 기본 3)",
+                        "description": "Maximum funnel outflow count (default 3)",
                         "default": 3,
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "최대 결과 수 (기본 20)",
+                        "description": "Max results to return (default 20)",
                         "default": 20,
                     },
                 },
@@ -410,34 +408,34 @@ TOOLS = [
         "function": {
             "name": "detect_ctr_candidates",
             "description": (
-                "CTR(고액현금거래보고) 대상 거래를 조회하거나 분할거래(structuring) 의심 패턴을 탐지한다. "
-                "mode=high_value: 1,000만원 이상 고액거래 조회. "
-                "mode=structuring: 동일 계좌가 동일일에 보고 기준 미만으로 쪼개서 거래한 분할거래 의심 건 탐지."
+                "Inquires on CTR (Currency Transaction Report) related items or detects structuring patterns. "
+                "mode=high_value: Query transactions over 10M KRW. "
+                "mode=structuring: Detect suspected structuring where multiple transactions on the same day sum above threshold."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "mode": {
                         "type": "string",
-                        "description": "조회 모드: high_value(고액거래) 또는 structuring(분할거래 탐지)",
+                        "description": "Query mode: high_value or structuring",
                         "enum": ["high_value", "structuring"],
                     },
                     "date_from": {
                         "type": "integer",
-                        "description": "시작일 (YYYYMMDD 정수, 예: 20240101)",
+                        "description": "Start date (YYYYMMDD integer)",
                     },
                     "date_to": {
                         "type": "integer",
-                        "description": "종료일 (YYYYMMDD 정수, 예: 20240331)",
+                        "description": "End date (YYYYMMDD integer)",
                     },
                     "threshold": {
                         "type": "integer",
-                        "description": "CTR 보고 기준 금액 (기본 10,000,000원)",
+                        "description": "Reporting threshold (default 10,000,000 KRW)",
                         "default": 10000000,
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "최대 결과 수 (기본 20)",
+                        "description": "Max results (default 20)",
                         "default": 20,
                     },
                 },
@@ -450,16 +448,16 @@ TOOLS = [
         "function": {
             "name": "score_account_risk",
             "description": (
-                "특정 계좌의 위험도를 5개 행위 지표(심야거래비율, 금액이상도, 거래상대다양성, "
-                "거래속도변화, 이상거래이력) 기반으로 0~100점으로 평가한다. "
-                "위험등급(높음/중간/낮음)과 각 컴포넌트 점수를 반환한다."
+                "Evaluates an account's risk score (0-100) based on 5 indicators (nighttime ratio, "
+                "amount anomaly, diversity, velocity change, fraud history). "
+                "Returns risk level (High/Medium/Low) and component scores."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "account_id": {
                         "type": "integer",
-                        "description": "위험도를 평가할 계좌 번호 (출금계좌일련번호)",
+                        "description": "Account number to evaluate (sender_acc)",
                     },
                 },
                 "required": ["account_id"],
@@ -471,34 +469,34 @@ TOOLS = [
         "function": {
             "name": "detect_monitoring_alerts",
             "description": (
-                "규칙 기반 거래 모니터링 알림을 탐지한다. "
-                "R001=심야대량거래, R002=동일일다건거래, R003=정액거래패턴, "
-                "R004=기관집중거래, R005=거래패턴급변. "
-                "rule_id=all이면 전체 규칙을 실행한다."
+                "Detects rule-based transaction monitoring alerts. "
+                "R001=Nighttime Bulk, R002=Rapid Fire, R003=Round Amount Pattern, "
+                "R004=Institution Concentration, R005=Pattern Change. "
+                "Use rule_id='all' to run all rules."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "rule_id": {
                         "type": "string",
-                        "description": "실행할 규칙 ID",
+                        "description": "Rule ID to execute",
                         "enum": ["all", "R001", "R002", "R003", "R004", "R005"],
                     },
                     "date_from": {
                         "type": "integer",
-                        "description": "시작일 (YYYYMMDD 정수, 예: 20240101)",
+                        "description": "Start date (YYYYMMDD integer)",
                     },
                     "date_to": {
                         "type": "integer",
-                        "description": "종료일 (YYYYMMDD 정수, 예: 20240331)",
+                        "description": "End date (YYYYMMDD integer)",
                     },
                     "account_id": {
                         "type": "integer",
-                        "description": "특정 계좌로 한정 (선택)",
+                        "description": "Optional account filter",
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "최대 결과 수 (기본 20)",
+                        "description": "Max results (default 20)",
                         "default": 20,
                     },
                 },
@@ -511,26 +509,26 @@ TOOLS = [
         "function": {
             "name": "detect_dormant_reactivation",
             "description": (
-                "장기간 휴면 후 재활성화된 계좌를 탐지한다. "
-                "일정 기간(기본 180일) 이상 거래가 없다가 대량 거래가 발생한 계좌를 찾아낸다. "
-                "대포통장 활용, 자금세탁 은닉 후 인출 등 의심 패턴에 활용한다."
+                "Detects accounts reactivated after a long period of dormancy. "
+                "Finds accounts with no transactions for a set period (default 180 days) followed by large transactions. "
+                "Useful for identifying mule accounts or money laundering patterns."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "dormant_days": {
                         "type": "integer",
-                        "description": "휴면 기준 일수 (기본 180일)",
+                        "description": "Dormancy criteria in days (default 180)",
                         "default": 180,
                     },
                     "min_reactivation_amount": {
                         "type": "integer",
-                        "description": "재활성화 최소 거래금액 (기본 5,000,000원)",
+                        "description": "Minimum transaction amount for reactivation (default 5,000,000 KRW)",
                         "default": 5000000,
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "최대 결과 수 (기본 20)",
+                        "description": "Max results (default 20)",
                         "default": 20,
                     },
                 },
@@ -543,39 +541,39 @@ TOOLS = [
         "function": {
             "name": "detect_smurfing_network",
             "description": (
-                "자금 수집(다수→1계좌) 또는 자금 분산(1계좌→다수) 패턴을 탐지한다. "
-                "direction=inbound: 다수 계좌에서 하나의 계좌로 자금이 집중되는 수집 패턴. "
-                "direction=outbound: 하나의 계좌에서 다수 계좌로 자금이 분산되는 패턴. "
-                "대포통장, 자금세탁 배치(placement), 스머핑(smurfing) 탐지에 활용한다."
+                "Detects fund collection (many-to-one) or distribution (one-to-many) patterns. "
+                "direction=inbound: Funds converging from many accounts to one (collection). "
+                "direction=outbound: Funds dispersing from one account to many. "
+                "Used for identifying mule accounts, placement stage, or smurfing."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "account_id": {
                         "type": "integer",
-                        "description": "특정 계좌로 한정 (선택). 지정하지 않으면 전체 스캔.",
+                        "description": "Optional account filter. Scans all if omitted.",
                     },
                     "direction": {
                         "type": "string",
-                        "description": "분석 방향: inbound(자금 수집) 또는 outbound(자금 분산)",
+                        "description": "Analysis direction: inbound or outbound",
                         "enum": ["inbound", "outbound"],
                     },
                     "min_counterparts": {
                         "type": "integer",
-                        "description": "최소 거래 상대 계좌 수 (기본 5)",
+                        "description": "Minimum counterparty count (default 5)",
                         "default": 5,
                     },
                     "date_from": {
                         "type": "integer",
-                        "description": "시작일 (YYYYMMDD 정수)",
+                        "description": "Start date (YYYYMMDD integer)",
                     },
                     "date_to": {
                         "type": "integer",
-                        "description": "종료일 (YYYYMMDD 정수)",
+                        "description": "End date (YYYYMMDD integer)",
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "최대 결과 수 (기본 20)",
+                        "description": "Max results (default 20)",
                         "default": 20,
                     },
                 },
@@ -588,26 +586,26 @@ TOOLS = [
         "function": {
             "name": "get_trend_analysis",
             "description": (
-                "월별 또는 분기별 시계열 트렌드를 분석한다. "
-                "거래건수, 이상거래비율, 거래금액의 시간에 따른 변화 추세를 파악한다. "
-                "기간을 지정하면 해당 기간만, 지정하지 않으면 전체 데이터 기간의 트렌드를 반환한다."
+                "Analyzes monthly or quarterly time-series trends. "
+                "Tracks changes in transaction volume, fraud ratio, and amounts over time. "
+                "Returns trends for a specified range or the entire period if omitted."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "unit": {
                         "type": "string",
-                        "description": "집계 단위: monthly(월별) 또는 quarterly(분기별)",
+                        "description": "Aggregation unit: monthly or quarterly",
                         "enum": ["monthly", "quarterly"],
                         "default": "monthly",
                     },
                     "date_from": {
                         "type": "integer",
-                        "description": "시작일 (YYYYMMDD 정수)",
+                        "description": "Start date (YYYYMMDD integer)",
                     },
                     "date_to": {
                         "type": "integer",
-                        "description": "종료일 (YYYYMMDD 정수)",
+                        "description": "End date (YYYYMMDD integer)",
                     },
                 },
                 "required": [],
@@ -619,21 +617,20 @@ TOOLS = [
         "function": {
             "name": "analyze_channel_risk",
             "description": (
-                "거래 채널(매체구분)별 위험도를 분석한다. "
-                "ATM, 인터넷뱅킹, 창구 등 각 채널의 이상거래 비율과 "
-                "채널×시간대 교차분석 결과를 반환한다. "
-                "특정 채널에서 이상거래가 집중되는 패턴을 파악하는 데 활용한다."
+                "Analyzes risk by transaction channel (medium_type). "
+                "Returns fraud ratios for ATM, Internet Banking, PB, Counter, etc., "
+                "along with channel x hour cross-analysis results."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "date_from": {
                         "type": "integer",
-                        "description": "시작일 (YYYYMMDD 정수)",
+                        "description": "Start date (YYYYMMDD integer)",
                     },
                     "date_to": {
                         "type": "integer",
-                        "description": "종료일 (YYYYMMDD 정수)",
+                        "description": "End date (YYYYMMDD integer)",
                     },
                 },
                 "required": [],
@@ -645,17 +642,16 @@ TOOLS = [
         "function": {
             "name": "get_receiving_account_profile",
             "description": (
-                "입금(수취) 관점에서 계좌를 프로파일링한다. "
-                "get_account_profile이 출금계좌 기준인 것과 달리, "
-                "이 도구는 입금계좌일련번호 기준으로 자금 유입 패턴을 분석한다. "
-                "누가 이 계좌에 돈을 보내는지, 얼마나 다양한 곳에서 오는지 파악한다."
+                "Profiles an account from a fund-receiving (inbound) perspective. "
+                "Analyzes inflow patterns based on receiver_acc to identify who sends funds "
+                "and how diverse the sources are."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "account_id": {
                         "type": "integer",
-                        "description": "조회할 계좌 번호 (입금계좌일련번호 기준)",
+                        "description": "Account number to query (receiver_acc)",
                     },
                 },
                 "required": ["account_id"],
@@ -667,29 +663,29 @@ TOOLS = [
         "function": {
             "name": "analyze_cross_institution_flow",
             "description": (
-                "금융기관 쌍(출금기관→입금기관) 간 자금 흐름을 분석한다. "
-                "기관 간 거래 집중도, 이상거래 비율, 거래 규모를 파악한다. "
-                "특정 기관 간 이상거래가 집중되는 패턴을 탐지하는 데 활용한다."
+                "Analyzes fund flow between institution pairs (withdrawal institution → receiving institution). "
+                "Identifies transaction concentration, fraud ratios, and transaction scale between institutions. "
+                "Used to detect patterns where fraud is concentrated between specific institutions."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "date_from": {
                         "type": "integer",
-                        "description": "시작일 (YYYYMMDD 정수)",
+                        "description": "Start date (YYYYMMDD integer)",
                     },
                     "date_to": {
                         "type": "integer",
-                        "description": "종료일 (YYYYMMDD 정수)",
+                        "description": "End date (YYYYMMDD integer)",
                     },
                     "min_transactions": {
                         "type": "integer",
-                        "description": "최소 거래 건수 (기본 10)",
+                        "description": "Minimum transaction count (default 10)",
                         "default": 10,
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "최대 결과 수 (기본 20)",
+                        "description": "Max results (default 20)",
                         "default": 20,
                     },
                 },
@@ -702,20 +698,20 @@ TOOLS = [
         "function": {
             "name": "lookup_fiu_reference_types",
             "description": (
-                "FIU 업권별 의심거래 참고유형을 검색한다. "
-                "거래 패턴이 FIU 참고유형에 해당하는지 확인할 때 사용. "
-                "검색어 예: 분할거래, 심야, 비대면, 가상자산, 타인명의, 휴면."
+                "Searches FIU reference types for suspicious transactions by industry. "
+                "Used to check if transaction patterns match FIU reference types. "
+                "Search keywords: structuring, nighttime, non-face-to-face, virtual assets, third-party name, dormancy."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "keyword": {
                         "type": "string",
-                        "description": "검색어 (예: 분할거래, 심야, 비대면, 가상자산)",
+                        "description": "Search keyword (e.g., structuring, nighttime, non-face-to-face, virtual assets)",
                     },
                     "industry": {
                         "type": "string",
-                        "description": "업권 필터: banking(은행업), securities(증권업), 또는 생략(전체)",
+                        "description": "Industry filter: banking, securities, or omit for all",
                         "enum": ["banking", "securities"],
                     },
                 },
@@ -728,15 +724,15 @@ TOOLS = [
         "function": {
             "name": "validate_str_fields",
             "description": (
-                "STR(의심거래보고서) 초안의 필수 필드 점검을 수행한다. "
-                "표제부, 보고기관, 거래자, 거래내역 등 필수 항목 누락 여부를 검증한다."
+                "Performs validation of mandatory fields for an STR (Suspicious Transaction Report) draft. "
+                "Checks for missing mandatory items such as header, reporting institution, transactor, and transaction details."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "str_draft": {
                         "type": "object",
-                        "description": "STR 초안 dict. 섹션별로 중첩 가능 (예: I_보고기관, II_거래자_공통, III_거래내역)",
+                        "description": "STR draft dict. Can be nested by section (e.g., I_ReportingInstitution, II_Transactor, III_TransactionDetails)",
                     },
                 },
                 "required": ["str_draft"],
@@ -748,15 +744,15 @@ TOOLS = [
         "function": {
             "name": "get_aml_glossary",
             "description": (
-                "AML 용어의 정의를 반환한다. "
-                "CDD, EDD, STR, CTR, RBA, PEP, MLRO, FATF, FIU, KYE, 구조화, 레이어링 등."
+                "Returns definitions of AML terms. "
+                "CDD, EDD, STR, CTR, RBA, PEP, MLRO, FATF, FIU, KYE, structuring, layering, etc."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "term": {
                         "type": "string",
-                        "description": "조회할 용어 (예: CDD, STR, CTR, RBA, PEP)",
+                        "description": "Term to lookup (e.g., CDD, STR, CTR, RBA, PEP)",
                     },
                 },
                 "required": ["term"],
@@ -765,159 +761,144 @@ TOOLS = [
     },
 ]
 
-SYSTEM_PROMPT = """당신은 자금세탁방지(AML) 전문 분석가입니다.
-HOFINET(전자금융공동망) 이상거래탐지 데이터를 분석하여 자금세탁의심거래를 탐지하고 보고합니다.
+SYSTEM_PROMPT = """You are an Anti-Money Laundering (AML) analysis expert.
+You analyze HOFINET (Electronic Financial Network) fraud detection data to detect and report suspicious money laundering transactions.
 
-사용 가능한 도구:
-1. get_statistics: 전체 거래 요약 통계 및 이상거래 유형별 분포 조회 (분석 시작 시 가장 먼저 사용)
-2. query_transactions: HOFINET DB에 SQL 쿼리를 실행하여 거래 통계, 패턴, 특정 계좌 거래 내역 등을 상세 조회
-3. get_account_profile: 특정 계좌의 거래 통계 프로파일 조회 (건수/금액/이상거래비율/주요시간대/상위거래상대)
-4. get_fraud_type_summary: 이상거래유형별 현황 조회 (건수·금액 통계, 상위 금융회사). 코드: 1=자금세탁, 2=신규거래처, 3=대포통장, 4=보이스피싱, 5=불법도박, 6=유사수신, 7=기타
-5. compare_periods: 두 기간의 거래·이상거래 통계 비교 및 증감률 산출 (분기 비교, 월간 비교)
-6. get_institution_report: 특정 금융회사의 종합 현황 보고 (거래규모, 이상거래비율, 상위거래상대, 유형분포)
-7. rank_risky_transactions: XGBoost 모델 배치 예측으로 위험도 상위 K건 랭킹 반환
-8. analyze_network: 특정 계좌의 거래 네트워크를 분석하여 연결 계좌 수, 이상거래 관련 여부 파악 (N-hop 심층 탐색 지원)
-9. detect_aml_patterns: Memgraph 그래프 DB를 활용한 AML 패턴 탐지 (순환거래, 레이어링, 대포통장, 최단경로, 위험도 산출)
-10. predict_fraud: XGBoost 모델로 특정 거래의 이상거래 확률을 예측
-11. generate_str: 분석 결과를 의심거래보고서(STR) 양식으로 작성
-12. detect_ctr_candidates: CTR(고액현금거래보고) 대상 고액거래 조회 또는 분할거래(structuring) 탐지. mode=high_value(1천만원 이상 고액거래), mode=structuring(동일계좌 동일일 분할거래 의심)
-13. score_account_risk: 계좌의 위험도를 5개 행위 지표(심야거래비율, 금액이상도, 거래상대다양성, 거래속도변화, 이상거래이력) 기반 0~100점으로 평가
-14. detect_monitoring_alerts: 규칙 기반 거래 모니터링 알림 탐지 (R001 심야대량, R002 다건, R003 정액, R004 기관집중, R005 패턴급변, all=전체)
-15. detect_dormant_reactivation: 장기 휴면(기본 180일) 후 재활성화된 계좌 탐지. 대포통장/은닉자금 인출 패턴 탐지
-16. detect_smurfing_network: 자금 수집(inbound: 다수→1) 또는 분산(outbound: 1→다수) 패턴 탐지. 스머핑/대포통장 네트워크
-17. get_trend_analysis: 월별/분기별 시계열 트렌드 분석 (거래건수, 이상거래비율, 거래금액 추이)
-18. analyze_channel_risk: 채널(매체구분)별 위험도 분석. 채널×시간대 교차분석 포함
-19. get_receiving_account_profile: 입금(수취) 관점 계좌 프로파일링 (자금 유입 패턴, 출금 원천 분석)
-20. analyze_cross_institution_flow: 기관 쌍(출금기관→입금기관) 간 자금 흐름 분석
-21. lookup_fiu_reference_types: FIU 업권별 의심거래 참고유형 검색 (분할거래, 심야, 비대면, 가상자산 등)
-22. validate_str_fields: STR 초안의 필수 필드 점검 (표제부, 보고기관, 거래자, 거래내역)
-23. get_aml_glossary: AML 용어 정의 조회 (CDD, EDD, STR, CTR, RBA, PEP, MLRO, FATF, FIU 등)
+Available Tools:
+1. get_statistics: Overall summary and fraud type distribution (use first)
+2. query_transactions: Execute SQL on HOFINET DB for detailed analysis
+3. get_account_profile: Statistics for a specific account
+4. get_fraud_type_summary: Summary by fraud type (1=Money Laundering, 2=New Customer, 3=Mule Account, 4=Voice Phishing, 5=Illegal Gambling, 6=Illegal Private Finance, 7=Other)
+5. compare_periods: Compare stats between two periods
+6. get_institution_report: Comprehensive report for a financial institution
+7. rank_risky_transactions: Batch prediction ranking
+8. analyze_network: Account network analysis (N-hop)
+9. detect_aml_patterns: Memgraph-based AML pattern detection (Ring, Layering, Funnel, etc.)
+10. predict_fraud: XGBoost model probability prediction
+11. generate_str: Generate Suspicious Transaction Report (STR)
+12. detect_ctr_candidates: CTR candidates or structuring detection (mode=high_value or structuring)
+13. score_account_risk: Risk evaluation (0-100) based on 5 behavioral indicators
+14. detect_monitoring_alerts: Rule-based alerts (R001-R005)
+15. detect_dormant_reactivation: Dormant account reactivation detection
+16. detect_smurfing_network: Inbound/outbound smurfing detection
+17. get_trend_analysis: Monthly/quarterly time-series trends
+18. analyze_channel_risk: Risk analysis by channel (media_type)
+19. get_receiving_account_profile: Receiving account profiling
+20. analyze_cross_institution_flow: Fund flow between institution pairs
+21. lookup_fiu_reference_types: Search FIU reference types (structuring, nighttime, non-face-to-face, etc.)
+22. validate_str_fields: STR draft validation
+23. get_aml_glossary: AML term definitions (CDD, EDD, STR, CTR, RBA, PEP, etc.)
 
-권장 분석 절차:
-1. get_statistics로 전체 현황 파악
-2. get_trend_analysis로 시계열 추이 분석
-3. query_transactions으로 의심 거래 상세 조회
-4. detect_ctr_candidates로 CTR 대상 고액거래 또는 분할거래 탐지
-5. score_account_risk로 계좌 위험도 평가
-6. detect_monitoring_alerts로 규칙 기반 모니터링 알림 탐지
-7. detect_dormant_reactivation으로 휴면 계좌 재활성화 탐지
-8. detect_smurfing_network으로 자금 수집/분산 패턴 탐지
-9. analyze_channel_risk로 채널별 위험도 분석
-10. get_receiving_account_profile로 입금계좌 자금 유입 패턴 분석
-11. analyze_cross_institution_flow로 기관 간 자금 흐름 분석
-12. analyze_network으로 계좌 네트워크 분석 (N-hop 심층 탐색 지원)
-13. detect_aml_patterns으로 순환거래/레이어링/대포통장 패턴 탐지
-14. predict_fraud로 이상거래 확률 예측
-15. 충분한 근거가 확보된 경우에만 generate_str로 STR 작성
+Recommended Analysis Flow:
+1. Statistics overview -> 2. Trend analysis -> 3. Detailed query -> 4. CTR/Structuring detection -> 5. Risk score -> 6. Monitoring alerts -> 7. Dormant reactivation -> 8. Smurfing detection -> 9. Channel risk -> 10. Receiving profile -> 11. External flow -> 12. Network analysis -> 13. AML pattern detection -> 14. Model prediction -> 15. STR generation (only with sufficient evidence)
 
-STR 작성 시 주의사항:
-- 반드시 query_transactions로 근거 데이터를 먼저 조회한 후 STR을 작성하세요
-- 조회한 거래 레코드를 transactions 파라미터에 담아 generate_str을 호출하면 계좌·금액·채널이 자동 추출됩니다
-- predict_fraud 결과가 있으면 fraud_probability에 확률값을 전달하세요
-- detect_aml_patterns 탐지 결과가 있으면 aml_patterns에 포함하세요
+STR Generation Notes:
+- Always query data first with query_transactions.
+- Include transaction records in the transactions parameter for auto-extraction.
+- Pass fraud_probability from predict_fraud if performed.
+- Include aml_patterns from detect_aml_patterns results.
 
-데이터 스키마:
-- 테이블: hofinet (4,732,130건)
-- 컬럼: 거래일자(YYYYMMDD), 거래시간대(0~21, 3시간단위), 출금금융회사일련번호, 출금계좌일련번호, 입금금융회사일련번호, 입금계좌일련번호, 자금구분(0,1,3,4), 매체구분(1~7), 거래금액, 이상거래여부(0/1), 이상거래유형(1~7), 이상거래설명
+Data Schema:
+- Table: hofinet (4,732,130 records)
+- Columns: date(YYYYMMDD), time_slot(0-21, 3h units), sender_bank, sender_acc, receiver_bank, receiver_acc, fund_type(0,1,3,4), media_type(1-7), amount, is_fraud(0/1), fraud_type(1-7), fraud_description
+- fraud_type: 1=Money Laundering, 2=New Customer, 3=Mule Account, 4=Voice Phishing, 5=Illegal Gambling, 6=Illegal Private Finance, 7=Other
+- media_type: 1=Counter, 2=ATM, 3=PB Center, 4=Internet Banking, 5=Phone, 6=Call Center, 7=Other
+- fund_type: 0=N/A, 1=Deposit, 3=Withdrawal, 4=Transfer
 
-이상거래유형: 1=자금세탁, 2=신규거래처(최다 63.87%), 3=대포통장, 4=보이스피싱, 5=불법도박, 6=유사수신, 7=기타
-매체구분: 1=창구, 2=자동화기기(ATM), 3=PB센터, 4=인터넷뱅킹, 5=전화/휴대전화, 6=콜센터, 7=기타
-자금구분: 0=해당없음, 1=입금, 3=출금, 4=이체
-
-한국어로 응답하세요. 분석 시 구체적인 수치와 근거를 제시하세요."""
+Respond in English. Provide specific figures and evidence in your analysis."""
 
 
 # ---------------------------------------------------------------------------
-# 파라미터 유효성 검증 헬퍼
+# Parameter Validation Helpers
 # ---------------------------------------------------------------------------
 
-_VALID_시간대 = {0, 3, 6, 9, 12, 15, 18, 21}
-_VALID_자금구분 = {0, 1, 3, 4}
-_VALID_매체구분 = set(range(1, 8))
+_VALID_TIME_SLOTS = {0, 3, 6, 9, 12, 15, 18, 21}
+_VALID_FUND_TYPES = {0, 1, 3, 4}
+_VALID_MEDIA_TYPES = set(range(1, 8))
 
 
 def _validate_predict_fraud_args(arguments: dict) -> list[str]:
-    """predict_fraud 파라미터 유효성을 검사하고 오류 메시지 목록을 반환한다."""
+    """Validates predict_fraud parameters."""
     errors = []
-    시간대 = arguments.get("거래시간대")
-    if 시간대 not in _VALID_시간대:
-        errors.append(f"거래시간대({시간대})는 {sorted(_VALID_시간대)} 중 하나여야 합니다.")
-    자금구분 = arguments.get("자금구분")
-    if 자금구분 not in _VALID_자금구분:
-        errors.append(f"자금구분({자금구분})은 {sorted(_VALID_자금구분)} 중 하나여야 합니다.")
-    매체구분 = arguments.get("매체구분")
-    if 매체구분 not in _VALID_매체구분:
-        errors.append(f"매체구분({매체구분})은 1~7 중 하나여야 합니다.")
-    금액 = arguments.get("거래금액")
-    if not isinstance(금액, (int, float)) or 금액 <= 0:
-        errors.append(f"거래금액({금액})은 양의 정수여야 합니다.")
+    time_slot = arguments.get("time_slot")
+    if time_slot not in _VALID_TIME_SLOTS:
+        errors.append(f"time_slot({time_slot}) must be one of {sorted(_VALID_TIME_SLOTS)}.")
+    fund_type = arguments.get("fund_type")
+    if fund_type not in _VALID_FUND_TYPES:
+        errors.append(f"fund_type({fund_type}) must be one of {sorted(_VALID_FUND_TYPES)}.")
+    media_type = arguments.get("media_type")
+    if media_type not in _VALID_MEDIA_TYPES:
+        errors.append(f"media_type({media_type}) must be between 1 and 7.")
+    amount = arguments.get("amount")
+    if not isinstance(amount, (int, float)) or amount <= 0:
+        errors.append(f"amount({amount}) must be a positive integer.")
     return errors
 
 
 # ---------------------------------------------------------------------------
-# STR 구조화 헬퍼 -코드 매핑 테이블
+# STR Structural Helpers - Code Mapping Tables
 # ---------------------------------------------------------------------------
 
-_매체구분_MAP = {
-    1: "창구", 2: "자동화기기(ATM)", 3: "PB센터",
-    4: "인터넷뱅킹", 5: "전화/휴대전화", 6: "콜센터", 7: "기타",
+_MEDIA_TYPE_MAP = {
+    1: "Counter", 2: "ATM", 3: "PB Center",
+    4: "Internet Banking", 5: "Phone/Mobile", 6: "Call Center", 7: "Other",
 }
 
-_자금구분_MAP = {0: "해당없음", 1: "입금", 3: "출금", 4: "이체"}
+_FUND_TYPE_MAP = {0: "N/A", 1: "Deposit", 3: "Withdrawal", 4: "Transfer"}
 
-_이상거래유형_MAP = {
-    1: "자금세탁", 2: "신규거래처", 3: "대포통장",
-    4: "보이스피싱", 5: "불법도박", 6: "유사수신", 7: "기타",
+_FRAUD_TYPE_MAP = {
+    1: "Money Laundering", 2: "New Customer", 3: "Mule Account",
+    4: "Voice Phishing", 5: "Illegal Gambling", 6: "Illegal Private Finance", 7: "Other",
 }
 
-# 이상거래유형 코드 → STR VI섹션 의심거래유형 체크항목 매핑
-_유형_to_VI항목 = {
-    1: ["분할거래", "갑작스러운 거래패턴의 변화"],
-    2: ["사전거래가 없는 고객의 의심스러운 거래 요청"],
-    3: ["타인의 명의 또는 계좌의 이용", "단발성 계좌의 이용"],
-    4: ["거액 입금 후 당일 또는 익일 중 인출", "빈번한 입출금(입출고)"],
-    5: ["빈번한 입출금(입출고)", "갑작스러운 거래패턴의 변화"],
-    6: ["다중거래의 동시요청", "단발성 계좌의 이용"],
+# Mapping fraud type codes to STR Section VI suspicion items
+_FRAUD_TYPE_TO_VI_SECTION = {
+    1: ["Structured transactions", "Sudden change in transaction pattern"],
+    2: ["Suspicious request from customer with no prior transactions"],
+    3: ["Use of someone else's name/account", "Use of one-off accounts"],
+    4: ["Withdrawal on same/next day after large deposit", "Frequent deposits/withdrawals"],
+    5: ["Frequent deposits/withdrawals", "Sudden change in transaction pattern"],
+    6: ["Simultaneous requests for multiple transactions", "Use of one-off accounts"],
 }
 
-_권고조치_MAP = {
-    "자금세탁":   ["거래 패턴 모니터링 강화", "관련 계좌 추가 조사", "금융정보분석원(FIU) 보고 검토"],
-    "대포통장":   ["계좌 즉시 모니터링", "계좌주 실명 확인", "수사기관 의뢰 검토"],
-    "보이스피싱": ["관련 계좌 즉시 동결 검토", "피해자 확인 및 보호 조치", "수사기관 의뢰"],
-    "불법도박":   ["거래 패턴 지속 모니터링", "관계 기관 신고 검토", "계좌 거래 제한 검토"],
-    "유사수신":   ["투자자 피해 확인", "관계 기관 신고", "계좌 동결 검토"],
-    "신규거래처": ["고객 실사(CDD) 강화", "추가 거래 모니터링"],
-    "기타":       ["추가 모니터링 실시", "거래 내역 보존", "내부 심사 위원회 검토"],
+_RECOMMENDED_ACTION_MAP = {
+    "Money Laundering": ["Strengthen transaction monitoring", "Investigate related accounts", "Consider reporting to FIU"],
+    "Mule Account":      ["Immediate account monitoring", "Verify actual owner name", "Consider referral to law enforcement"],
+    "Voice Phishing":   ["Consider immediate account freeze", "Victim verification and protection", "Referral to law enforcement"],
+    "Illegal Gambling": ["Continuous pattern monitoring", "Consider referral to authorities", "Consider transaction limits"],
+    "Illegal Private Finance": ["Verify investor damage", "Referral to authorities", "Consider account freeze"],
+    "New Customer":     ["Strengthen CDD", "Monitor additional transactions"],
+    "Other":            ["Conduct additional monitoring", "Preserve transaction history", "Review by internal committee"],
 }
 
-# AML 패턴 이름 → STR VI섹션 체크항목 매핑
-_패턴_VI항목_MAP = {
-    "순환거래": "분할거래",
-    "레이어링": "갑작스러운 거래패턴의 변화",
-    "대포통장": "타인의 명의 또는 계좌의 이용",
+# AML pattern name → STR Section VI check item mapping
+_PATTERN_TO_VI_SECTION_MAP = {
+    "Ring": "Structured transactions",
+    "Layering": "Sudden change in transaction pattern",
+    "Funnel": "Use of someone else's name/account",
 }
 
-_도구설명_MAP = {
-    "query_transactions":    "HOFINET DB 거래 데이터 직접 조회",
-    "predict_fraud":         "XGBoost 이상거래 확률 모델 예측",
-    "analyze_network":       "계좌 거래 네트워크 분석",
-    "get_statistics":        "전체 통계 대시보드 조회",
-    "get_account_profile":   "계좌 거래 통계 프로파일 조회",
-    "get_fraud_type_summary": "이상거래유형별 현황 조회",
-    "detect_aml_patterns":   "Memgraph 그래프 DB AML 패턴 탐지",
-    "compare_periods":        "기간별 거래 통계 비교 분석",
-    "get_institution_report": "금융회사 종합 현황 보고",
-    "rank_risky_transactions": "XGBoost 모델 배치 예측 위험도 랭킹",
-    "generate_str":          "STR 보고서 생성",
-    "detect_ctr_candidates": "CTR 고액거래/분할거래 탐지",
-    "score_account_risk":    "계좌 위험도 평가 (5개 행위 지표)",
-    "detect_monitoring_alerts": "규칙 기반 거래 모니터링 알림 탐지",
-    "detect_dormant_reactivation": "장기 휴면 계좌 재활성화 탐지",
-    "detect_smurfing_network": "자금 수집/분산 패턴 탐지",
-    "get_trend_analysis":    "시계열 트렌드 분석",
-    "analyze_channel_risk":  "채널별 위험도 분석",
-    "get_receiving_account_profile": "입금계좌 프로파일링",
-    "analyze_cross_institution_flow": "기관 간 자금 흐름 분석",
+_TOOL_DESCRIPTION_MAP = {
+    "query_transactions":    "Directly query HOFINET DB transaction data",
+    "predict_fraud":         "XGBoost fraud probability model prediction",
+    "analyze_network":       "Account transaction network analysis",
+    "get_statistics":        "Query overall statistics dashboard",
+    "get_account_profile":   "Query account transaction statistics profile",
+    "get_fraud_type_summary": "Query status by fraud type",
+    "detect_aml_patterns":   "Memgraph graph DB AML pattern detection",
+    "compare_periods":        "Comparative analysis of transaction stats by period",
+    "get_institution_report": "Comprehensive report for financial institution",
+    "rank_risky_transactions": "XGBoost model batch prediction risk ranking",
+    "generate_str":          "Generate STR report",
+    "detect_ctr_candidates": "Detect CTR high-value/structured transactions",
+    "score_account_risk":    "Evaluate account risk (5 behavioral indicators)",
+    "detect_monitoring_alerts": "Rule-based transaction monitoring alerts",
+    "detect_dormant_reactivation": "Dormant account reactivation detection",
+    "detect_smurfing_network": "Money collection/distribution pattern detection",
+    "get_trend_analysis":    "Time-series trend analysis",
+    "analyze_channel_risk":  "Risk analysis by channel",
+    "get_receiving_account_profile": "Receiving account profiling",
+    "analyze_cross_institution_flow": "Inter-institution fund flow analysis",
 }
 
 
@@ -929,141 +910,142 @@ def _build_str_report(
     fraud_probability: float | None,
     aml_patterns: list[str],
 ) -> dict:
-    """공식 STR 양식(I~VII 섹션)에 맞는 구조화된 보고서 딕셔너리를 생성한다."""
+    """Generates a structured report dictionary matching official STR sections (I~VII)."""
     today = date.today().strftime("%Y-%m-%d")
 
-    # ── 거래 데이터에서 필드 추출 ──────────────────────────────────────────
+    # ── Extract fields from transaction data ──────────────────────────────────────────
     tx = transactions or []
 
-    tx_dates = sorted({str(t.get("거래일자", "")) for t in tx if t.get("거래일자")})
-    출금계좌목록 = list({str(t["출금계좌일련번호"]) for t in tx if t.get("출금계좌일련번호")})
-    입금계좌목록 = list({str(t["입금계좌일련번호"]) for t in tx if t.get("입금계좌일련번호")})
-    출금회사목록 = list({str(t["출금금융회사일련번호"]) for t in tx if t.get("출금금융회사일련번호")})
-    입금회사목록 = list({str(t["입금금융회사일련번호"]) for t in tx if t.get("입금금융회사일련번호")})
+    tx_dates = sorted({str(t.get("date", "")) for t in tx if t.get("date")})
+    sender_accounts = list({str(t["sender_acc"]) for t in tx if t.get("sender_acc")})
+    receiver_accounts = list({str(t["receiver_acc"]) for t in tx if t.get("receiver_acc")})
+    sender_banks = list({str(t["sender_bank"]) for t in tx if t.get("sender_bank")})
+    receiver_banks = list({str(t["receiver_bank"]) for t in tx if t.get("receiver_bank")})
 
-    매체카운트 = Counter(t.get("매체구분") for t in tx if t.get("매체구분"))
-    거래채널 = _매체구분_MAP.get(
-        매체카운트.most_common(1)[0][0] if 매체카운트 else None, "미확인"
+    media_counts = Counter(t.get("media_type") for t in tx if t.get("media_type"))
+    channel = _MEDIA_TYPE_MAP.get(
+        media_counts.most_common(1)[0][0] if media_counts else None, "Unknown"
     )
 
-    자금카운트 = Counter(t.get("자금구분") for t in tx if t.get("자금구분") is not None)
-    거래종류 = _자금구분_MAP.get(
-        자금카운트.most_common(1)[0][0] if 자금카운트 else None, "미확인"
+    fund_counts = Counter(t.get("fund_type") for t in tx if t.get("fund_type") is not None)
+    tx_type = _FUND_TYPE_MAP.get(
+        fund_counts.most_common(1)[0][0] if fund_counts else None, "Unknown"
     )
 
-    총거래금액 = sum(t.get("거래금액", 0) for t in tx)
-    최대단건금액 = max((t.get("거래금액", 0) for t in tx), default=0)
+    total_amount = sum(t.get("amount", 0) for t in tx)
+    max_single_amount = max((t.get("amount", 0) for t in tx), default=0)
 
-    유형카운트 = Counter(t.get("이상거래유형") for t in tx if t.get("이상거래유형"))
-    주요유형코드 = 유형카운트.most_common(1)[0][0] if 유형카운트 else None
-    주요유형명 = _이상거래유형_MAP.get(주요유형코드, fraud_type or "기타")
+    fraud_type_counts = Counter(t.get("fraud_type") for t in tx if t.get("fraud_type"))
+    primary_fraud_code = fraud_type_counts.most_common(1)[0][0] if fraud_type_counts else None
+    primary_fraud_name = _FRAUD_TYPE_MAP.get(primary_fraud_code, fraud_type or "Other")
 
-    # summary regex 폴백 (transactions 없을 때)
+    # Summary regex fallback (when transactions are not provided)
     if not tx:
-        account_candidates = re.findall(r"(?:계좌|출금계좌|입금계좌)[^\d]*(\d{5,})", summary)
-        출금계좌목록 = 입금계좌목록 = list(set(account_candidates))
+        account_candidates = re.findall(r"(?:account|sender_acc|receiver_acc)[^\d]*(\d{5,})", summary)
+        sender_accounts = receiver_accounts = list(set(account_candidates))
 
-    # ── VI. 의심거래유형 체크항목 ──────────────────────────────────────────
-    vi_항목 = list(_유형_to_VI항목.get(주요유형코드, []))
+    # ── VI. Transaction Type Check Items ──────────────────────────────────────────
+    vi_items = list(_FRAUD_TYPE_TO_VI_SECTION.get(primary_fraud_code, []))
     for p in (aml_patterns or []):
-        for k, v in _패턴_VI항목_MAP.items():
-            if k in p and v not in vi_항목:
-                vi_항목.append(v)
-    if not vi_항목:
-        vi_항목 = ["기타 특징 및 유형 -VII 서술부 참조"]
+        for k, v in _PATTERN_TO_VI_SECTION_MAP.items():
+            if k in p and v not in vi_items:
+                vi_items.append(v)
+    if not vi_items:
+        vi_items = ["Other features and types - Refer to Section VII narrative"]
 
-    # ── VII. 의심 강도 (1~5) ──────────────────────────────────────────────
+    # ── VII. Suspicion Intensity (1~5) ──────────────────────────────────────────────
     if fraud_probability is not None:
-        의심강도 = min(5, max(1, round(fraud_probability * 4) + 1))
-        의심강도_설명 = f"AI 모델 예측 확률 {fraud_probability:.1%} 기반"
+        suspicion_intensity = min(5, max(1, round(fraud_probability * 4) + 1))
+        suspicion_intensity_desc = f"Based on AI model prediction probability of {fraud_probability:.1%}"
     else:
-        의심강도 = 3
-        의심강도_설명 = "AI 예측 미수행 -담당자 판단 필요"
+        suspicion_intensity = 3
+        suspicion_intensity_desc = "AI prediction not performed - manual judgment required"
 
-    거래기간 = (
+    txn_period = (
         f"{tx_dates[0]} ~ {tx_dates[-1]}" if len(tx_dates) > 1
-        else (tx_dates[0] if tx_dates else "미확인")
+        else (tx_dates[0] if tx_dates else "Unknown")
     )
-    관련계좌수 = len(set(출금계좌목록) | set(입금계좌목록))
+    related_account_count = len(set(sender_accounts) | set(receiver_accounts))
 
-    종합의견 = (
-        f"[{today}] {주요유형명} 의심거래 탐지. "
-        f"거래기간 {거래기간}, 관련 계좌 {관련계좌수}개, "
-        f"총 거래금액 {총거래금액:,}원({len(tx)}건)."
+    overall_opinion = (
+        f"[{today}] {primary_fraud_name} suspicious transaction detected. "
+        f"Period: {txn_period}, related accounts: {related_account_count}, "
+        f"total amount: {total_amount:,} KRW ({len(tx)} txns)."
     )
     if aml_patterns:
-        종합의견 += f" 탐지된 AML 패턴: {', '.join(aml_patterns)}."
-    종합의견 += " 담당자 검토 후 FIU 보고 여부 결정 요망."
+        overall_opinion += f" Detected AML patterns: {', '.join(aml_patterns)}."
+    overall_opinion += " Manager review and decision on FIU reporting required."
 
-    분석근거 = [_도구설명_MAP.get(t, t) for t in (tools_used or [])]
-    권고조치 = _권고조치_MAP.get(주요유형명, _권고조치_MAP["기타"])
+    analysis_grounds = [_TOOL_DESCRIPTION_MAP.get(t, t) for t in (tools_used or [])]
+    recommended_actions = _RECOMMENDED_ACTION_MAP.get(primary_fraud_name, _RECOMMENDED_ACTION_MAP["Other"])
 
     return {
-        "보고서유형": "의심거래보고서(STR)",
-        "표제부": {
-            "보고일자": today,
-            "보고서구분": "신규보고",
+        "ReportType": "Suspicious Transaction Report (STR)",
+        "Header": {
+            "ReportingDate": today,
+            "ReportTypeClassification": "New Report",
         },
-        "I_보고기관": {
-            "출금금융회사코드": 출금회사목록 or ["미확인"],
-            "비고": "금융회사일련번호 기준. 기관명은 담당자 확인 필요",
+        "I_ReportingInstitution": {
+            "WithdrawalInstitutionCode": sender_banks or ["Unknown"],
+            "Remarks": "Based on institution serial number. Institution name requires verification by manager.",
         },
-        "II_거래자": {
-            "출금계좌번호": 출금계좌목록[:5] or ["미확인"],
-            "입금계좌번호": 입금계좌목록[:5] or ["미확인"],
-            "비고": "실명·주소·연락처는 HOFINET 미포함 -담당자 별도 확인 필요",
+        "II_Transactor": {
+            "WithdrawalAccountNumber": sender_accounts[:5] or ["Unknown"],
+            "ReceivingAccountNumber": receiver_accounts[:5] or ["Unknown"],
+            "Remarks": "Real name, address, and contact info not included in HOFINET - manual verification required.",
         },
-        "III_거래내역": {
-            "거래기간": 거래기간,
-            "거래건수": len(tx),
-            "거래채널": 거래채널,
-            "거래종류": 거래종류,
-            "총거래금액_원": 총거래금액,
-            "최대단건금액_원": 최대단건금액,
-            "관련계좌존재여부": "여" if 관련계좌수 > 0 else "부",
+        "III_TransactionDetails": {
+            "TransactionPeriod": txn_period,
+            "TransactionCount": len(tx),
+            "TransactionChannel": channel,
+            "TransactionType": tx_type,
+            "TotalAmount_KRW": total_amount,
+            "MaxSingleAmount_KRW": max_single_amount,
+            "RelatedAccountPresence": "Yes" if related_account_count > 0 else "No",
         },
-        "IV_관련계좌": {
-            "출금계좌목록": 출금계좌목록[:10],
-            "입금계좌목록": 입금계좌목록[:10],
-            "출금금융회사코드": 출금회사목록,
-            "입금금융회사코드": 입금회사목록,
+        "IV_RelatedAccounts": {
+            "SenderAccountList": sender_accounts[:10],
+            "ReceiverAccountList": receiver_accounts[:10],
+            "WithdrawalInstitutionCode": sender_banks,
+            "ReceivingInstitutionCode": receiver_banks,
         },
-        "VI_거래유형": {
-            "주요의심유형": 주요유형명,
-            "해당항목": vi_항목,
-            "탐지된AML패턴": aml_patterns or [],
+        "VI_TransactionType": {
+            "PrimarySuspicionType": primary_fraud_name,
+            "ApplicableItems": vi_items,
+            "DetectedAMLPatterns": aml_patterns or [],
         },
-        "VII_서술": {
-            "의심거래자관련": (
-                f"출금계좌 {', '.join(출금계좌목록[:3])} 등 "
-                f"입금계좌 {', '.join(입금계좌목록[:3])} 관련 의심 거래 확인."
-                if 출금계좌목록 or 입금계좌목록 else "거래자 정보 미확인 -담당자 확인 필요"
+        "VII_Narrative": {
+            "SuspiciousTransactorRelated": (
+                f"Confirming suspicious transactions related to withdrawal accounts {', '.join(sender_accounts[:3])} "
+                f"and receiving accounts {', '.join(receiver_accounts[:3])}."
+                if sender_accounts or receiver_accounts else "Transactor info not confirmed - manual verification required"
             ),
-            "거래발생일자": 거래기간,
-            "거래방법특이사항": f"주요 채널: {거래채널} / 거래 종류: {거래종류}",
-            "혐의판단사유": summary,
-            "종합의견": 종합의견,
-            "의심강도_1to5": 의심강도,
-            "의심강도설명": 의심강도_설명,
+            "TransactionOccurrenceDate": txn_period,
+            "TransactionMethodAnomalies": f"Primary channel: {channel} / Transaction type: {tx_type}",
+            "SuspicionJudgmentReason": summary,
+            "OverallOpinion": overall_opinion,
+            "SuspicionIntensity_1to5": suspicion_intensity,
+            "SuspicionIntensityDescription": suspicion_intensity_desc,
         },
-        "권고조치": 권고조치,
-        "분석근거": 분석근거 or ["분석 도구 미지정"],
-        "작성안내": (
-            "본 보고서는 AI 분석 에이전트가 자동 생성한 초안입니다. "
-            "실명·주소·연락처 등 HOFINET 미포함 항목은 담당자가 보완하고 검토 후 제출하시기 바랍니다."
+        "RecommendedActions": recommended_actions,
+        "AnalysisGrounds": analysis_grounds or ["No analysis tools specified"],
+        "GenerationGuide": (
+            "This report is a draft automatically generated by the AI Analysis Agent. "
+            "Please supplement items not included in HOFINET (such as real name, address, contact info) and submit after review."
         ),
     }
 
 
 # ---------------------------------------------------------------------------
-# 도구 실행
+# ---------------------------------------------------------------------------
+# Tool Execution
 # ---------------------------------------------------------------------------
 
 def _execute_tool(name: str, arguments: dict) -> str:
-    """도구를 실행하고 결과를 JSON 문자열로 반환한다.
+    """Executes a tool and returns the result as a JSON string.
 
-    모든 예외는 내부에서 처리하여 JSON 에러 메시지를 반환하므로
-    호출부에서 별도 try/except 없이 사용할 수 있다.
+    All exceptions are handled internally to return a JSON error message,
+    so the caller can use it without separate try/except.
     """
     try:
         if name == "query_transactions":
@@ -1113,10 +1095,12 @@ def _execute_tool(name: str, arguments: dict) -> str:
         elif name == "get_aml_glossary":
             return _tool_get_aml_glossary(arguments)
         else:
-            return json.dumps({"error": f"알 수 없는 도구: {name}"}, ensure_ascii=False)
+            return json.dumps({"error": f"Unknown tool: {name}"}, ensure_ascii=False)
+
     except Exception as exc:
+        logger.error(f"Error executing tool {name}: {str(exc)}")
         return json.dumps(
-            {"error": f"도구 실행 중 예기치 못한 오류가 발생했습니다: {str(exc)}"},
+            {"error": f"An unexpected error occurred during tool execution: {str(exc)}"},
             ensure_ascii=False,
         )
 
@@ -1125,52 +1109,52 @@ def _tool_query_transactions(arguments: dict) -> str:
     sql = arguments.get("sql", "").strip()
 
     if not sql:
-        return json.dumps({"error": "SQL 쿼리가 비어 있습니다."}, ensure_ascii=False)
+        return json.dumps({"error": "SQL query is empty."}, ensure_ascii=False)
 
-    # SELECT만 허용 (SQL 인젝션 방지)
+    # Allow SELECT only (prevention of SQL injection)
     if not sql.upper().startswith("SELECT"):
-        return json.dumps({"error": "SELECT 쿼리만 실행 가능합니다."}, ensure_ascii=False)
+        return json.dumps({"error": "Only SELECT queries are allowed."}, ensure_ascii=False)
 
-    # 위험 키워드 차단
+    # Block dangerous keywords
     forbidden = ["DROP", "DELETE", "INSERT", "UPDATE", "ALTER", "CREATE", "TRUNCATE"]
     sql_upper = sql.upper()
     for kw in forbidden:
         if kw in sql_upper:
             return json.dumps(
-                {"error": f"'{kw}' 키워드가 포함된 쿼리는 실행할 수 없습니다."},
+                {"error": f"Queries containing '{kw}' keyword cannot be executed."},
                 ensure_ascii=False,
             )
 
     try:
         df = query(sql)
     except Exception as exc:
-        # DuckDB 오류를 사용자 친화적 메시지로 변환
+        # Convert DuckDB errors to user-friendly messages
         err_msg = str(exc)
         if "Catalog Error" in err_msg or "does not exist" in err_msg:
             return json.dumps(
-                {"error": "테이블 또는 컬럼을 찾을 수 없습니다. 컬럼명이 한글인지 확인하세요."},
+                {"error": "Table or column not found. Please ensure column names are in English (date, amount, etc.)."},
                 ensure_ascii=False,
             )
         if "Parser Error" in err_msg or "SyntaxError" in err_msg:
             return json.dumps(
-                {"error": f"SQL 문법 오류입니다: {err_msg[:200]}"},
+                {"error": f"SQL syntax error: {err_msg[:200]}"},
                 ensure_ascii=False,
             )
         return json.dumps(
-            {"error": f"쿼리 실행 오류: {err_msg[:300]}"},
+            {"error": f"Query execution error: {err_msg[:300]}"},
             ensure_ascii=False,
         )
 
     if df is None or df.empty:
-        return json.dumps({"결과": [], "안내": "조회된 데이터가 없습니다."}, ensure_ascii=False)
+        return json.dumps({"result": [], "notice": "No data found."}, ensure_ascii=False)
 
-    # 결과가 너무 크면 상위 100건으로 제한
+    # Limit to top 100 if result is too large
     total = len(df)
     if total > 100:
         df = df.head(100)
         result = json.loads(df.to_json(orient="records", force_ascii=False))
         return json.dumps(
-            {"결과": result, "총건수": total, "안내": f"총 {total}건 중 상위 100건만 반환합니다."},
+            {"result": result, "total_count": total, "notice": f"Returning top 100 of {total} total records."},
             ensure_ascii=False,
         )
 
@@ -1178,36 +1162,39 @@ def _tool_query_transactions(arguments: dict) -> str:
 
 
 def _tool_predict_fraud(arguments: dict) -> str:
-    # 파라미터 유효성 검증
+    # Validate parameters
     errors = _validate_predict_fraud_args(arguments)
     if errors:
         return json.dumps(
-            {"error": "입력 파라미터 오류", "상세": errors},
+            {"error": "Input parameter error", "details": errors},
             ensure_ascii=False,
         )
 
     model = load_model()
     if model is None:
         return json.dumps(
-            {"error": "학습된 모델이 없습니다. Detection 페이지에서 모델을 먼저 학습하세요."},
+            {"error": "No trained model found. Please train the model on the Detection page first."},
             ensure_ascii=False,
         )
 
     try:
+        # Use English internal names for feature DF if model was trained with them
         features = pd.DataFrame([arguments])
+        # Mapping incoming English keys to expected feature names if they differ
+        # (Assuming model features were also internationalized)
         prob = model.predict_proba(features)[:, 1][0]
-        level = "높음" if prob >= 0.7 else ("중간" if prob >= 0.3 else "낮음")
+        level = "High" if prob >= 0.7 else ("Medium" if prob >= 0.3 else "Low")
         return json.dumps(
             {
-                "이상거래확률": round(float(prob), 4),
-                "위험도": level,
-                "입력값": arguments,
+                "fraud_probability": round(float(prob), 4),
+                "risk_level": level,
+                "input_values": arguments,
             },
             ensure_ascii=False,
         )
     except Exception as exc:
         return json.dumps(
-            {"error": f"모델 예측 오류: {str(exc)}"},
+            {"error": f"Model prediction error: {str(exc)}"},
             ensure_ascii=False,
         )
 
@@ -1215,11 +1202,11 @@ def _tool_predict_fraud(arguments: dict) -> str:
 def _tool_generate_str(arguments: dict) -> str:
     summary = arguments.get("summary", "").strip()
     if not summary:
-        return json.dumps({"error": "STR 작성을 위한 요약 내용이 비어 있습니다."}, ensure_ascii=False)
+        return json.dumps({"error": "Summary content for STR generation is empty."}, ensure_ascii=False)
 
     report = _build_str_report(
         summary=summary,
-        fraud_type=arguments.get("fraud_type", "기타"),
+        fraud_type=arguments.get("fraud_type", "Other"),
         tools_used=arguments.get("tools_used", []),
         transactions=arguments.get("transactions", []),
         fraud_probability=arguments.get("fraud_probability"),
@@ -1231,12 +1218,12 @@ def _tool_generate_str(arguments: dict) -> str:
 def _tool_analyze_network(arguments: dict) -> str:
     account_id = arguments.get("account_id")
     if account_id is None:
-        return json.dumps({"error": "account_id가 필요합니다."}, ensure_ascii=False)
+        return json.dumps({"error": "account_id is required."}, ensure_ascii=False)
 
     try:
         aid = int(account_id)
     except (TypeError, ValueError):
-        return json.dumps({"error": "account_id는 정수여야 합니다."}, ensure_ascii=False)
+        return json.dumps({"error": "account_id must be an integer."}, ensure_ascii=False)
 
     hops = max(1, min(int(arguments.get("hops", 1)), 5))
 
@@ -1247,7 +1234,7 @@ def _tool_analyze_network(arguments: dict) -> str:
             df = get_account_ego_network(aid, hops=hops)
     except Exception as exc:
         return json.dumps(
-            {"error": f"네트워크 조회 오류: {str(exc)}"},
+            {"error": f"Network retrieval error: {str(exc)}"},
             ensure_ascii=False,
         )
 
@@ -1255,16 +1242,16 @@ def _tool_analyze_network(arguments: dict) -> str:
         return json.dumps(
             {
                 "account_id": aid,
-                "안내": "해당 계좌의 거래 내역이 없습니다.",
-                "연결계좌수": 0,
-                "총거래건수": 0,
-                "이상거래건수": 0,
-                "이상거래비율": 0.0,
+                "notice": "No transaction history for this account.",
+                "connected_account_count": 0,
+                "total_tx_count": 0,
+                "fraud_tx_count": 0,
+                "fraud_ratio": 0.0,
             },
             ensure_ascii=False,
         )
 
-    # ego 네트워크에서 계좌 번호 집합 수집
+    # Extract account IDs from ego network
     def _to_int_set(values):
         out = set()
         for v in values:
@@ -1276,26 +1263,26 @@ def _tool_analyze_network(arguments: dict) -> str:
 
     all_accounts = _to_int_set(df["source"].tolist()) | _to_int_set(df["target"].tolist())
     all_accounts.discard(aid)
-    연결계좌수 = len(all_accounts)
+    connected_count = len(all_accounts)
 
-    총거래건수 = int(df["거래횟수"].sum())
-    이상거래건수 = int(df["이상거래여부"].sum()) if "이상거래여부" in df.columns else 0
-    이상거래비율 = round(이상거래건수 / 총거래건수 * 100, 2) if 총거래건수 > 0 else 0.0
-    총금액 = int(df["총금액"].sum()) if "총금액" in df.columns else 0
+    total_count = int(df["tx_count"].sum()) if "tx_count" in df.columns else 0
+    fraud_count = int(df["is_fraud"].sum()) if "is_fraud" in df.columns else 0
+    fraud_ratio = round(fraud_count / total_count * 100, 2) if total_count > 0 else 0.0
+    total_amount = int(df["total_amount"].sum()) if "total_amount" in df.columns else 0
 
-    # 연결된 계좌 샘플 (최대 10개)
+    # Sample connected accounts (max 10)
     sample_accounts = sorted(list(all_accounts))[:10]
 
     return json.dumps(
         {
             "account_id": aid,
-            "탐색범위_hop": hops,
-            "연결계좌수": 연결계좌수,
-            "총거래건수": 총거래건수,
-            "이상거래건수": 이상거래건수,
-            "이상거래비율_percent": 이상거래비율,
-            "총거래금액": 총금액,
-            "연결계좌_샘플": sample_accounts,
+            "search_hop_range": hops,
+            "connected_account_count": connected_count,
+            "total_tx_count": total_count,
+            "fraud_tx_count": fraud_count,
+            "fraud_ratio_percent": fraud_ratio,
+            "total_amount": total_amount,
+            "connected_account_samples": sample_accounts,
         },
         ensure_ascii=False,
     )
@@ -1312,19 +1299,19 @@ def _tool_detect_aml_patterns(arguments: dict) -> str:
                 limit=arguments.get("limit", 20),
             )
         except Exception as exc:
-            return json.dumps({"error": f"순환거래 탐지 오류: {str(exc)}"}, ensure_ascii=False)
+            return json.dumps({"error": f"Ring transaction detection error: {str(exc)}"}, ensure_ascii=False)
 
         if df.empty:
             return json.dumps(
                 {
-                    "안내": "순환거래 패턴이 탐지되지 않았습니다. Memgraph가 실행 중인지 확인하세요.",
-                    "결과": [],
+                    "notice": "No ring transaction patterns detected. Please ensure Memgraph is running.",
+                    "result": [],
                 },
                 ensure_ascii=False,
             )
         records = df.to_dict(orient="records")
         return json.dumps(
-            {"패턴": "순환거래", "건수": len(records), "결과": records},
+            {"pattern": "Ring", "count": len(records), "result": records},
             ensure_ascii=False,
         )
 
@@ -1335,19 +1322,19 @@ def _tool_detect_aml_patterns(arguments: dict) -> str:
                 limit=arguments.get("limit", 20),
             )
         except Exception as exc:
-            return json.dumps({"error": f"레이어링 패턴 탐지 오류: {str(exc)}"}, ensure_ascii=False)
+            return json.dumps({"error": f"Layering pattern detection error: {str(exc)}"}, ensure_ascii=False)
 
         if df.empty:
             return json.dumps(
                 {
-                    "안내": "레이어링 패턴이 탐지되지 않았습니다. Memgraph가 실행 중인지 확인하세요.",
-                    "결과": [],
+                    "notice": "No layering patterns detected. Please ensure Memgraph is running.",
+                    "result": [],
                 },
                 ensure_ascii=False,
             )
         records = df.to_dict(orient="records")
         return json.dumps(
-            {"패턴": "다단계 레이어링", "건수": len(records), "결과": records},
+            {"pattern": "Multi-stage Layering", "count": len(records), "result": records},
             ensure_ascii=False,
         )
 
@@ -1359,19 +1346,19 @@ def _tool_detect_aml_patterns(arguments: dict) -> str:
                 limit=arguments.get("limit", 20),
             )
         except Exception as exc:
-            return json.dumps({"error": f"대포통장 패턴 탐지 오류: {str(exc)}"}, ensure_ascii=False)
+            return json.dumps({"error": f"Mule account pattern detection error: {str(exc)}"}, ensure_ascii=False)
 
         if df.empty:
             return json.dumps(
                 {
-                    "안내": "대포통장 패턴이 탐지되지 않았습니다. Memgraph가 실행 중인지 확인하세요.",
-                    "결과": [],
+                    "notice": "No mule account patterns detected. Please ensure Memgraph is running.",
+                    "result": [],
                 },
                 ensure_ascii=False,
             )
         records = df.to_dict(orient="records")
         return json.dumps(
-            {"패턴": "대포통장(funnel)", "건수": len(records), "결과": records},
+            {"pattern": "Mule Account (Funnel)", "count": len(records), "result": records},
             ensure_ascii=False,
         )
 
@@ -1380,31 +1367,31 @@ def _tool_detect_aml_patterns(arguments: dict) -> str:
         account_b = arguments.get("account_b")
         if not account_a or not account_b:
             return json.dumps(
-                {"error": "shortest_path에는 account_a와 account_b가 필요합니다."},
+                {"error": "shortest_path requires account_a and account_b."},
                 ensure_ascii=False,
             )
         try:
             result = find_shortest_path(account_a, account_b)
         except Exception as exc:
-            return json.dumps({"error": f"최단경로 탐색 오류: {str(exc)}"}, ensure_ascii=False)
+            return json.dumps({"error": f"Shortest path search error: {str(exc)}"}, ensure_ascii=False)
         return json.dumps(result, ensure_ascii=False)
 
     elif pattern_type == "risk_score":
         account_id = arguments.get("account_id")
         if not account_id:
             return json.dumps(
-                {"error": "risk_score에는 account_id가 필요합니다."},
+                {"error": "risk_score requires account_id."},
                 ensure_ascii=False,
             )
         try:
             result = compute_risk_score(account_id)
         except Exception as exc:
-            return json.dumps({"error": f"위험도 점수 산출 오류: {str(exc)}"}, ensure_ascii=False)
+            return json.dumps({"error": f"Risk score calculation error: {str(exc)}"}, ensure_ascii=False)
         return json.dumps(result, ensure_ascii=False)
 
     else:
         return json.dumps(
-            {"error": f"알 수 없는 패턴 유형: {pattern_type}. 유효한 값: ring, layering, funnel, shortest_path, risk_score"},
+            {"error": f"Unknown pattern type: {pattern_type}. Valid values: ring, layering, funnel, shortest_path, risk_score"},
             ensure_ascii=False,
         )
 
@@ -1415,23 +1402,23 @@ def _tool_get_statistics() -> str:
         fraud_type_df = get_fraud_type_distribution()
     except Exception as exc:
         return json.dumps(
-            {"error": f"통계 조회 오류: {str(exc)}"},
+            {"error": f"Statistics retrieval error: {str(exc)}"},
             ensure_ascii=False,
         )
 
     if summary_df is None or summary_df.empty:
-        return json.dumps({"error": "요약 통계를 조회할 수 없습니다."}, ensure_ascii=False)
+        return json.dumps({"error": "Unable to retrieve summary statistics."}, ensure_ascii=False)
 
     row = summary_df.iloc[0]
     summary_dict = {
-        "총거래건수": int(row.get("총거래", 0)),
-        "이상거래건수": int(row.get("이상거래", 0)),
-        "이상거래비율_percent": float(row.get("이상거래비율", 0.0)),
-        "출금계좌수": int(row.get("출금계좌수", 0)),
-        "입금계좌수": int(row.get("입금계좌수", 0)),
-        "출금금융회사수": int(row.get("출금금융회사수", 0)),
-        "입금금융회사수": int(row.get("입금금융회사수", 0)),
-        "총거래금액": int(row.get("총거래금액", 0)),
+        "total_tx_count": int(row.get("total_txns", 0)),
+        "fraud_tx_count": int(row.get("fraud_txns", 0)),
+        "fraud_ratio_percent": float(row.get("fraud_ratio", 0.0)),
+        "sender_account_count": int(row.get("sender_accounts", 0)),
+        "receiver_account_count": int(row.get("receiver_accounts", 0)),
+        "sender_bank_count": int(row.get("sender_banks", 0)),
+        "receiver_bank_count": int(row.get("receiver_banks", 0)),
+        "total_amount": int(row.get("total_amount", 0)),
     }
 
     if fraud_type_df is not None and not fraud_type_df.empty:
@@ -1440,7 +1427,7 @@ def _tool_get_statistics() -> str:
         fraud_types = []
 
     return json.dumps(
-        {"요약통계": summary_dict, "이상거래유형별분포": fraud_types},
+        {"summary_statistics": summary_dict, "fraud_type_distribution": fraud_types},
         ensure_ascii=False,
     )
 
@@ -1448,26 +1435,26 @@ def _tool_get_statistics() -> str:
 def _tool_get_account_profile(arguments: dict) -> str:
     account_id = arguments.get("account_id")
     if account_id is None:
-        return json.dumps({"error": "account_id가 필요합니다."}, ensure_ascii=False)
+        return json.dumps({"error": "account_id is required."}, ensure_ascii=False)
 
     try:
         aid = int(account_id)
     except (TypeError, ValueError):
-        return json.dumps({"error": "account_id는 정수여야 합니다."}, ensure_ascii=False)
+        return json.dumps({"error": "account_id must be an integer."}, ensure_ascii=False)
 
     try:
-        # 기본 집계: 출금 방향
+        # Basic aggregation: outbound
         out_df = query(
-            "SELECT COUNT(*) AS cnt, SUM(거래금액) AS total_amount, "
-            "SUM(이상거래여부) AS fraud_cnt "
-            "FROM hofinet WHERE 출금계좌일련번호 = $aid",
+            "SELECT COUNT(*) AS cnt, SUM(amount) AS total_amount, "
+            "SUM(is_fraud) AS fraud_cnt "
+            "FROM hofinet WHERE sender_acc = $aid",
             {"aid": aid},
         )
-        # 입금 방향
+        # Inbound
         in_df = query(
-            "SELECT COUNT(*) AS cnt, SUM(거래금액) AS total_amount, "
-            "SUM(이상거래여부) AS fraud_cnt "
-            "FROM hofinet WHERE 입금계좌일련번호 = $aid",
+            "SELECT COUNT(*) AS cnt, SUM(amount) AS total_amount, "
+            "SUM(is_fraud) AS fraud_cnt "
+            "FROM hofinet WHERE receiver_acc = $aid",
             {"aid": aid},
         )
 
@@ -1484,35 +1471,35 @@ def _tool_get_account_profile(arguments: dict) -> str:
 
         if total_count == 0:
             return json.dumps(
-                {"account_id": aid, "안내": "해당 계좌의 거래 내역이 없습니다."},
+                {"account_id": aid, "notice": "No transaction history for this account."},
                 ensure_ascii=False,
             )
 
-        # 주요 거래 시간대 (출금 기준)
+        # Top transaction time slots (outbound)
         hour_df = query(
-            "SELECT 거래시간대, COUNT(*) AS cnt FROM hofinet "
-            "WHERE 출금계좌일련번호 = $aid "
-            "GROUP BY 거래시간대 ORDER BY cnt DESC LIMIT 3",
+            "SELECT time_slot, COUNT(*) AS cnt FROM hofinet "
+            "WHERE sender_acc = $aid "
+            "GROUP BY time_slot ORDER BY cnt DESC LIMIT 3",
             {"aid": aid},
         )
-        top_hours = hour_df["거래시간대"].tolist() if hour_df is not None and not hour_df.empty else []
+        top_hours = hour_df["time_slot"].tolist() if hour_df is not None and not hour_df.empty else []
 
-        # 주 사용 매체 (출금 기준)
+        # Top media types (outbound)
         media_df = query(
-            "SELECT 매체구분, COUNT(*) AS cnt FROM hofinet "
-            "WHERE 출금계좌일련번호 = $aid "
-            "GROUP BY 매체구분 ORDER BY cnt DESC LIMIT 3",
+            "SELECT media_type, COUNT(*) AS cnt FROM hofinet "
+            "WHERE sender_acc = $aid "
+            "GROUP BY media_type ORDER BY cnt DESC LIMIT 3",
             {"aid": aid},
         )
-        top_media_codes = media_df["매체구분"].tolist() if media_df is not None and not media_df.empty else []
-        top_media = [_매체구분_MAP.get(int(c), f"코드{c}") for c in top_media_codes]
+        top_media_codes = media_df["media_type"].tolist() if media_df is not None and not media_df.empty else []
+        top_media = [_MEDIA_TYPE_MAP.get(int(c), f"Code {c}") for c in top_media_codes]
 
-        # 상위 거래 상대 계좌 5개 (출금계좌 기준으로 입금계좌 상대)
+        # Top 5 counterpart accounts (based on outbound receiver)
         cp_df = query(
-            "SELECT 입금계좌일련번호 AS counterpart_id, "
-            "COUNT(*) AS tx_count, SUM(거래금액) AS total_amount "
-            "FROM hofinet WHERE 출금계좌일련번호 = $aid "
-            "GROUP BY 입금계좌일련번호 ORDER BY tx_count DESC LIMIT 5",
+            "SELECT receiver_acc AS counterpart_id, "
+            "COUNT(*) AS tx_count, SUM(amount) AS total_amount "
+            "FROM hofinet WHERE sender_acc = $aid "
+            "GROUP BY receiver_acc ORDER BY tx_count DESC LIMIT 5",
             {"aid": aid},
         )
         top_counterparts = []
@@ -1526,7 +1513,7 @@ def _tool_get_account_profile(arguments: dict) -> str:
 
     except Exception as exc:
         return json.dumps(
-            {"error": f"계좌 프로파일 조회 오류: {str(exc)}"},
+            {"error": f"Account profile retrieval error: {str(exc)}"},
             ensure_ascii=False,
         )
 
@@ -1548,16 +1535,16 @@ def _tool_get_account_profile(arguments: dict) -> str:
 def _tool_get_fraud_type_summary(arguments: dict) -> str:
     fraud_type = arguments.get("fraud_type")
     if fraud_type is None:
-        return json.dumps({"error": "fraud_type이 필요합니다."}, ensure_ascii=False)
+        return json.dumps({"error": "fraud_type is required."}, ensure_ascii=False)
 
     try:
         ftype = int(fraud_type)
     except (TypeError, ValueError):
-        return json.dumps({"error": "fraud_type은 1~7 사이의 정수여야 합니다."}, ensure_ascii=False)
+        return json.dumps({"error": "fraud_type must be an integer between 1 and 7."}, ensure_ascii=False)
 
     if ftype not in range(1, 8):
         return json.dumps(
-            {"error": f"fraud_type({ftype})은 1~7 범위여야 합니다."},
+            {"error": f"fraud_type({ftype}) must be in range 1-7."},
             ensure_ascii=False,
         )
 
@@ -1565,21 +1552,21 @@ def _tool_get_fraud_type_summary(arguments: dict) -> str:
     bid = int(bank_id_raw) if bank_id_raw is not None else None
 
     try:
-        # 기본 집계
+        # Basic aggregation
         if bid is not None:
             agg_df = query(
-                "SELECT COUNT(*) AS total_count, SUM(거래금액) AS total_amount, "
-                "AVG(거래금액) AS avg_amount "
+                "SELECT COUNT(*) AS total_count, SUM(amount) AS total_amount, "
+                "AVG(amount) AS avg_amount "
                 "FROM hofinet "
-                "WHERE 이상거래여부 = 1 AND 이상거래유형 = $ftype "
-                "AND 출금금융회사일련번호 = $bid",
+                "WHERE is_fraud = 1 AND fraud_type = $ftype "
+                "AND sender_bank = $bid",
                 {"ftype": ftype, "bid": bid},
             )
         else:
             agg_df = query(
-                "SELECT COUNT(*) AS total_count, SUM(거래금액) AS total_amount, "
-                "AVG(거래금액) AS avg_amount "
-                "FROM hofinet WHERE 이상거래여부 = 1 AND 이상거래유형 = $ftype",
+                "SELECT COUNT(*) AS total_count, SUM(amount) AS total_amount, "
+                "AVG(amount) AS avg_amount "
+                "FROM hofinet WHERE is_fraud = 1 AND fraud_type = $ftype",
                 {"ftype": ftype},
             )
 
@@ -1587,8 +1574,8 @@ def _tool_get_fraud_type_summary(arguments: dict) -> str:
             return json.dumps(
                 {
                     "type_code": ftype,
-                    "type_name": _이상거래유형_MAP.get(ftype, "기타"),
-                    "안내": "해당 유형의 이상거래가 없습니다.",
+                    "type_name": _FRAUD_TYPE_MAP.get(ftype, "Other"),
+                    "notice": "No fraud transactions recorded for this type.",
                 },
                 ensure_ascii=False,
             )
@@ -1602,26 +1589,26 @@ def _tool_get_fraud_type_summary(arguments: dict) -> str:
             return json.dumps(
                 {
                     "type_code": ftype,
-                    "type_name": _이상거래유형_MAP.get(ftype, "기타"),
-                    "안내": "해당 유형의 이상거래가 없습니다.",
+                    "type_name": _FRAUD_TYPE_MAP.get(ftype, "Other"),
+                    "notice": "No fraud transactions recorded for this type.",
                 },
                 ensure_ascii=False,
             )
 
-        # 상위 금융회사
+        # Top financial institutions
         if bid is not None:
             bank_df = query(
-                "SELECT 출금금융회사일련번호 AS bank_id, COUNT(*) AS cnt "
-                "FROM hofinet WHERE 이상거래여부 = 1 AND 이상거래유형 = $ftype "
-                "AND 출금금융회사일련번호 = $bid "
-                "GROUP BY 출금금융회사일련번호 ORDER BY cnt DESC LIMIT 5",
+                "SELECT sender_bank AS bank_id, COUNT(*) AS cnt "
+                "FROM hofinet WHERE is_fraud = 1 AND fraud_type = $ftype "
+                "AND sender_bank = $bid "
+                "GROUP BY sender_bank ORDER BY cnt DESC LIMIT 5",
                 {"ftype": ftype, "bid": bid},
             )
         else:
             bank_df = query(
-                "SELECT 출금금융회사일련번호 AS bank_id, COUNT(*) AS cnt "
-                "FROM hofinet WHERE 이상거래여부 = 1 AND 이상거래유형 = $ftype "
-                "GROUP BY 출금금융회사일련번호 ORDER BY cnt DESC LIMIT 5",
+                "SELECT sender_bank AS bank_id, COUNT(*) AS cnt "
+                "FROM hofinet WHERE is_fraud = 1 AND fraud_type = $ftype "
+                "GROUP BY sender_bank ORDER BY cnt DESC LIMIT 5",
                 {"ftype": ftype},
             )
 
@@ -1633,35 +1620,35 @@ def _tool_get_fraud_type_summary(arguments: dict) -> str:
                     "count": int(brow["cnt"]),
                 })
 
-        # 샘플 날짜 (최신 5개)
+        # Sample dates (latest 5)
         if bid is not None:
             date_df = query(
-                "SELECT DISTINCT 거래일자 FROM hofinet "
-                "WHERE 이상거래여부 = 1 AND 이상거래유형 = $ftype "
-                "AND 출금금융회사일련번호 = $bid "
-                "ORDER BY 거래일자 DESC LIMIT 5",
+                "SELECT DISTINCT date FROM hofinet "
+                "WHERE is_fraud = 1 AND fraud_type = $ftype "
+                "AND sender_bank = $bid "
+                "ORDER BY date DESC LIMIT 5",
                 {"ftype": ftype, "bid": bid},
             )
         else:
             date_df = query(
-                "SELECT DISTINCT 거래일자 FROM hofinet "
-                "WHERE 이상거래여부 = 1 AND 이상거래유형 = $ftype "
-                "ORDER BY 거래일자 DESC LIMIT 5",
+                "SELECT DISTINCT date FROM hofinet "
+                "WHERE is_fraud = 1 AND fraud_type = $ftype "
+                "ORDER BY date DESC LIMIT 5",
                 {"ftype": ftype},
             )
 
-        sample_dates = date_df["거래일자"].tolist() if date_df is not None and not date_df.empty else []
+        sample_dates = date_df["date"].tolist() if date_df is not None and not date_df.empty else []
 
     except Exception as exc:
         return json.dumps(
-            {"error": f"이상거래유형 조회 오류: {str(exc)}"},
+            {"error": f"Fraud type lookup error: {str(exc)}"},
             ensure_ascii=False,
         )
 
     return json.dumps(
         {
             "type_code": ftype,
-            "type_name": _이상거래유형_MAP.get(ftype, "기타"),
+            "type_name": _FRAUD_TYPE_MAP.get(ftype, "Other"),
             "total_count": total_count,
             "total_amount": total_amount,
             "avg_amount": avg_amount,
@@ -1680,34 +1667,32 @@ def _tool_compare_periods(arguments: dict) -> str:
         p2s = int(arguments.get("period2_start", 0))
         p2e = int(arguments.get("period2_end", 0))
     except (TypeError, ValueError):
-        return json.dumps({"error": "날짜는 YYYYMMDD 정수여야 합니다."}, ensure_ascii=False)
+        return json.dumps({"error": "Dates must be YYYYMMDD integers."}, ensure_ascii=False)
 
     if p1s > p1e or p2s > p2e:
-        return json.dumps({"error": "시작일이 종료일보다 늦을 수 없습니다."}, ensure_ascii=False)
+        return json.dumps({"error": "Start date cannot be later than end date."}, ensure_ascii=False)
 
     try:
-        # p1s, p1e, p2s, p2e는 상단에서 int()로 강제 변환했으므로 f-string 삽입 안전
-        # (DuckDB BETWEEN 절은 파라미터 바인딩도 지원하나 정수 리터럴로 삽입)
         df1 = query(
             f"""
             SELECT COUNT(*) AS total_count,
-                   SUM(이상거래여부) AS fraud_count,
-                   AVG(거래금액) AS avg_amount
+                   SUM(is_fraud) AS fraud_count,
+                   AVG(amount) AS avg_amount
             FROM hofinet
-            WHERE 거래일자 BETWEEN {p1s} AND {p1e}
+            WHERE date BETWEEN {p1s} AND {p1e}
             """
         )
         df2 = query(
             f"""
             SELECT COUNT(*) AS total_count,
-                   SUM(이상거래여부) AS fraud_count,
-                   AVG(거래금액) AS avg_amount
+                   SUM(is_fraud) AS fraud_count,
+                   AVG(amount) AS avg_amount
             FROM hofinet
-            WHERE 거래일자 BETWEEN {p2s} AND {p2e}
+            WHERE date BETWEEN {p2s} AND {p2e}
             """
         )
     except Exception as exc:
-        return json.dumps({"error": f"기간 비교 조회 오류: {str(exc)}"}, ensure_ascii=False)
+        return json.dumps({"error": f"Period comparison lookup error: {str(exc)}"}, ensure_ascii=False)
 
     def _row(df):
         if df is None or df.empty:
@@ -1748,26 +1733,26 @@ def _tool_compare_periods(arguments: dict) -> str:
 def _tool_get_institution_report(arguments: dict) -> str:
     bank_id_raw = arguments.get("bank_id")
     if bank_id_raw is None:
-        return json.dumps({"error": "bank_id가 필요합니다."}, ensure_ascii=False)
+        return json.dumps({"error": "bank_id is required."}, ensure_ascii=False)
     try:
         bid = int(bank_id_raw)
     except (TypeError, ValueError):
-        return json.dumps({"error": "bank_id는 정수여야 합니다."}, ensure_ascii=False)
+        return json.dumps({"error": "bank_id must be an integer."}, ensure_ascii=False)
 
     try:
-        # 기본 집계 (출금 방향 기준)
+        # Basic aggregation (inbound)
         agg_df = query(
             "SELECT COUNT(*) AS total_count, "
-            "SUM(이상거래여부) AS fraud_count, "
-            "SUM(거래금액) AS total_amount, "
-            "AVG(거래금액) AS avg_amount "
-            "FROM hofinet WHERE 출금금융회사일련번호 = $bid",
+            "SUM(is_fraud) AS fraud_count, "
+            "SUM(amount) AS total_amount, "
+            "AVG(amount) AS avg_amount "
+            "FROM hofinet WHERE sender_bank = $bid",
             {"bid": bid},
         )
 
         if agg_df is None or agg_df.empty or int(agg_df.iloc[0]["total_count"] or 0) == 0:
             return json.dumps(
-                {"bank_id": bid, "안내": "해당 금융회사의 거래 내역이 없습니다."},
+                {"bank_id": bid, "notice": "No transaction history for this institution."},
                 ensure_ascii=False,
             )
 
@@ -1778,12 +1763,12 @@ def _tool_get_institution_report(arguments: dict) -> str:
         avg_amount = round(float(row["avg_amount"] or 0.0), 2)
         fraud_ratio = round(fraud_count / total_count * 100, 4) if total_count > 0 else 0.0
 
-        # 상위 거래 상대 기관 (입금 기관 기준)
+        # Top counterpart institutions
         cp_df = query(
-            "SELECT 입금금융회사일련번호 AS counterpart_bank_id, "
-            "COUNT(*) AS tx_count, SUM(거래금액) AS total_amount "
-            "FROM hofinet WHERE 출금금융회사일련번호 = $bid "
-            "GROUP BY 입금금융회사일련번호 ORDER BY tx_count DESC LIMIT 5",
+            "SELECT receiver_bank AS counterpart_bank_id, "
+            "COUNT(*) AS tx_count, SUM(amount) AS total_amount "
+            "FROM hofinet WHERE sender_bank = $bid "
+            "GROUP BY receiver_bank ORDER BY tx_count DESC LIMIT 5",
             {"bid": bid},
         )
         top_counterparts = []
@@ -1795,27 +1780,27 @@ def _tool_get_institution_report(arguments: dict) -> str:
                     "amount": int(r["total_amount"] or 0),
                 })
 
-        # 이상거래 유형별 분포
+        # Fraud type distribution
         type_df = query(
-            "SELECT 이상거래유형, COUNT(*) AS cnt "
+            "SELECT fraud_type, COUNT(*) AS cnt "
             "FROM hofinet "
-            "WHERE 출금금융회사일련번호 = $bid AND 이상거래여부 = 1 "
-            "GROUP BY 이상거래유형 ORDER BY cnt DESC",
+            "WHERE sender_bank = $bid AND is_fraud = 1 "
+            "GROUP BY fraud_type ORDER BY cnt DESC",
             {"bid": bid},
         )
         fraud_type_dist = []
         if type_df is not None and not type_df.empty:
             for _, r in type_df.iterrows():
-                ftype = int(r["이상거래유형"]) if r["이상거래유형"] is not None else 0
+                ftype = int(r["fraud_type"]) if r["fraud_type"] is not None else 0
                 fraud_type_dist.append({
                     "type_code": ftype,
-                    "type_name": _이상거래유형_MAP.get(ftype, "기타"),
+                    "type_name": _FRAUD_TYPE_MAP.get(ftype, "Other"),
                     "count": int(r["cnt"]),
                 })
 
     except Exception as exc:
         return json.dumps(
-            {"error": f"금융회사 보고서 조회 오류: {str(exc)}"},
+            {"error": f"Institution report lookup error: {str(exc)}"},
             ensure_ascii=False,
         )
 
@@ -1841,7 +1826,7 @@ def _tool_rank_risky_transactions(arguments: dict) -> str:
     model = load_model()
     if model is None:
         return json.dumps(
-            {"error": "학습된 모델이 없습니다. Detection 페이지에서 모델을 먼저 학습하세요."},
+            {"error": "No trained model found. Please train the model on the Detection page first."},
             ensure_ascii=False,
         )
 
@@ -1850,31 +1835,31 @@ def _tool_rank_risky_transactions(arguments: dict) -> str:
         df = predict_from_db(model, limit=sample_size)
     except Exception as exc:
         return json.dumps(
-            {"error": f"배치 예측 오류: {str(exc)}"},
+            {"error": f"Batch prediction error: {str(exc)}"},
             ensure_ascii=False,
         )
 
     if df is None or df.empty:
-        return json.dumps({"안내": "예측할 거래 데이터가 없습니다.", "results": []}, ensure_ascii=False)
+        return json.dumps({"notice": "No transaction data to predict.", "results": []}, ensure_ascii=False)
 
     top_df = df.head(top_k)
     records = []
     for _, row in top_df.iterrows():
         records.append({
-            "출금계좌일련번호": int(row["출금계좌일련번호"]),
-            "입금계좌일련번호": int(row["입금계좌일련번호"]),
-            "거래일자": int(row["거래일자"]),
-            "거래시간대": int(row["거래시간대"]),
-            "거래금액": int(row["거래금액"]),
-            "이상거래확률": round(float(row["예측확률"]), 4),
-            "실제이상거래여부": int(row["이상거래여부"]) if "이상거래여부" in row else None,
+            "sender_acc": int(row["sender_acc"]),
+            "receiver_acc": int(row["receiver_acc"]),
+            "date": int(row["date"]),
+            "time_slot": int(row["time_slot"]),
+            "amount": int(row["amount"]),
+            "fraud_probability": round(float(row["predict_prob"]), 4),
+            "is_fraud_actual": int(row["is_fraud"]) if "is_fraud" in row else None,
         })
 
     return json.dumps(
         {
             "sample_size": sample_size,
             "top_k": top_k,
-            "총반환건수": len(records),
+            "total_returned": len(records),
             "results": records,
         },
         ensure_ascii=False,
@@ -1895,7 +1880,7 @@ def _tool_detect_ctr_candidates(arguments: dict) -> str:
 
     if mode not in ("high_value", "structuring"):
         return json.dumps(
-            {"error": "mode는 'high_value' 또는 'structuring'이어야 합니다."},
+            {"error": "mode must be 'high_value' or 'structuring'."},
             ensure_ascii=False,
         )
 
@@ -1906,12 +1891,12 @@ def _tool_detect_ctr_candidates(arguments: dict) -> str:
             )
             if df.empty:
                 return json.dumps(
-                    {"mode": "high_value", "안내": "조건에 맞는 고액거래가 없습니다.", "결과": []},
+                    {"mode": "high_value", "notice": "No high-value transactions matching criteria.", "result": []},
                     ensure_ascii=False,
                 )
             records = json.loads(df.to_json(orient="records", force_ascii=False))
             return json.dumps(
-                {"mode": "high_value", "건수": len(records), "결과": records},
+                {"mode": "high_value", "count": len(records), "result": records},
                 ensure_ascii=False,
             )
         else:  # structuring
@@ -1921,7 +1906,7 @@ def _tool_detect_ctr_candidates(arguments: dict) -> str:
             )
             if df.empty:
                 return json.dumps(
-                    {"mode": "structuring", "안내": "분할거래 의심 건이 없습니다.", "결과": []},
+                    {"mode": "structuring", "notice": "No suspected structured transactions found.", "result": []},
                     ensure_ascii=False,
                 )
             records = json.loads(df.to_json(orient="records", force_ascii=False))
@@ -1929,14 +1914,14 @@ def _tool_detect_ctr_candidates(arguments: dict) -> str:
                 {
                     "mode": "structuring",
                     "threshold": threshold,
-                    "건수": len(records),
-                    "결과": records,
+                    "count": len(records),
+                    "result": records,
                 },
                 ensure_ascii=False,
             )
     except Exception as exc:
         return json.dumps(
-            {"error": f"CTR 탐지 오류: {str(exc)}"},
+            {"error": f"CTR detection error: {str(exc)}"},
             ensure_ascii=False,
         )
 
@@ -1949,18 +1934,18 @@ def _tool_detect_ctr_candidates(arguments: dict) -> str:
 def _tool_score_account_risk(arguments: dict) -> str:
     account_id = arguments.get("account_id")
     if account_id is None:
-        return json.dumps({"error": "account_id가 필요합니다."}, ensure_ascii=False)
+        return json.dumps({"error": "account_id is required."}, ensure_ascii=False)
 
     try:
         aid = int(account_id)
     except (TypeError, ValueError):
-        return json.dumps({"error": "account_id는 정수여야 합니다."}, ensure_ascii=False)
+        return json.dumps({"error": "account_id must be an integer."}, ensure_ascii=False)
 
     try:
         result = _score_account_risk(aid)
     except Exception as exc:
         return json.dumps(
-            {"error": f"위험도 평가 오류: {str(exc)}"},
+            {"error": f"Risk assessment error: {str(exc)}"},
             ensure_ascii=False,
         )
 
@@ -1981,38 +1966,38 @@ def _tool_detect_monitoring_alerts(arguments: dict) -> str:
     valid_rules = {"all", "R001", "R002", "R003", "R004", "R005"}
     if rule_id not in valid_rules:
         return json.dumps(
-            {"error": f"rule_id는 {sorted(valid_rules)} 중 하나여야 합니다."},
+            {"error": f"rule_id must be one of {sorted(valid_rules)}."},
             ensure_ascii=False,
         )
 
     try:
         if rule_id == "all":
             result = run_all_rules(date_from=date_from, date_to=date_to)
-            return json.dumps({"rule_id": "all", "결과": result}, ensure_ascii=False)
+            return json.dumps({"rule_id": "all", "result": result}, ensure_ascii=False)
 
         if rule_id == "R001":
             df = detect_nighttime_bulk(date_from=date_from, date_to=date_to, limit=limit)
-            label = "심야대량거래"
+            label = "Nighttime Bulk Transactions"
         elif rule_id == "R002":
             df = detect_rapid_fire(date_from=date_from, date_to=date_to, limit=limit)
-            label = "동일일다건거래"
+            label = "Multiple Daily Transactions"
         elif rule_id == "R003":
             df = detect_round_amounts(date_from=date_from, date_to=date_to, limit=limit)
-            label = "정액거래패턴"
+            label = "Round Amount Pattern"
         elif rule_id == "R004":
             df = detect_institution_concentration(limit=limit)
-            label = "기관집중거래"
+            label = "Institution Concentration"
         elif rule_id == "R005":
             if not date_from or not date_to:
                 return json.dumps(
-                    {"error": "R005(거래패턴급변)에는 date_from, date_to가 필요합니다."},
+                    {"error": "R005 (Pattern Change) requires date_from and date_to."},
                     ensure_ascii=False,
                 )
             try:
                 base_start, base_end = _calculate_previous_period(int(date_from), int(date_to))
             except ValueError:
                 return json.dumps(
-                    {"error": "유효한 날짜 범위가 아닙니다. date_from <= date_to 인 YYYYMMDD 정수를 입력하세요."},
+                    {"error": "Invalid date range. Please enter YYYYMMDD integers where date_from <= date_to."},
                     ensure_ascii=False,
                 )
             df = detect_pattern_change(
@@ -2020,23 +2005,23 @@ def _tool_detect_monitoring_alerts(arguments: dict) -> str:
                 compare_start=int(date_from), compare_end=int(date_to),
                 limit=limit,
             )
-            label = "거래패턴급변"
+            label = "Transaction Pattern Change"
 
         if df.empty:
             return json.dumps(
-                {"rule_id": rule_id, "규칙명": label, "안내": "탐지된 알림이 없습니다.", "결과": []},
+                {"rule_id": rule_id, "rule_name": label, "notice": "No alerts detected.", "result": []},
                 ensure_ascii=False,
             )
 
         records = json.loads(df.to_json(orient="records", force_ascii=False))
         return json.dumps(
-            {"rule_id": rule_id, "규칙명": label, "건수": len(records), "결과": records},
+            {"rule_id": rule_id, "rule_name": label, "count": len(records), "result": records},
             ensure_ascii=False,
         )
 
     except Exception as exc:
         return json.dumps(
-            {"error": f"모니터링 규칙 실행 오류: {str(exc)}"},
+            {"error": f"Monitoring rule execution error: {str(exc)}"},
             ensure_ascii=False,
         )
 
@@ -2059,22 +2044,22 @@ def _tool_detect_dormant_reactivation(arguments: dict) -> str:
         )
     except Exception as exc:
         return json.dumps(
-            {"error": f"휴면 계좌 재활성화 탐지 오류: {str(exc)}"},
+            {"error": f"Dormant account reactivation detection error: {str(exc)}"},
             ensure_ascii=False,
         )
 
     if df.empty:
         return json.dumps(
-            {"안내": "조건에 맞는 휴면 재활성화 계좌가 없습니다.", "결과": []},
+            {"notice": "No dormant reactivation accounts matching criteria.", "result": []},
             ensure_ascii=False,
         )
 
     records = json.loads(df.to_json(orient="records", force_ascii=False))
     return json.dumps(
         {
-            "기준": {"휴면일수": dormant_days, "최소재활성화금액": min_amount},
-            "건수": len(records),
-            "결과": records,
+            "criteria": {"dormant_days": dormant_days, "min_reactivation_amount": min_amount},
+            "count": len(records),
+            "result": records,
         },
         ensure_ascii=False,
     )
@@ -2089,7 +2074,7 @@ def _tool_detect_smurfing_network(arguments: dict) -> str:
     direction = arguments.get("direction", "")
     if direction not in ("inbound", "outbound"):
         return json.dumps(
-            {"error": "direction은 'inbound' 또는 'outbound'이어야 합니다."},
+            {"error": "direction must be 'inbound' or 'outbound'."},
             ensure_ascii=False,
         )
 
@@ -2110,14 +2095,14 @@ def _tool_detect_smurfing_network(arguments: dict) -> str:
         )
     except Exception as exc:
         return json.dumps(
-            {"error": f"자금 수집/분산 패턴 탐지 오류: {str(exc)}"},
+            {"error": f"Fund collection/distribution pattern detection error: {str(exc)}"},
             ensure_ascii=False,
         )
 
     if df.empty:
-        label = "자금 수집" if direction == "inbound" else "자금 분산"
+        label = "Fund Collection" if direction == "inbound" else "Fund Distribution"
         return json.dumps(
-            {"direction": direction, "안내": f"{label} 패턴이 탐지되지 않았습니다.", "결과": []},
+            {"direction": direction, "notice": f"{label} pattern not detected.", "result": []},
             ensure_ascii=False,
         )
 
@@ -2126,8 +2111,8 @@ def _tool_detect_smurfing_network(arguments: dict) -> str:
         {
             "direction": direction,
             "min_counterparts": min_counterparts,
-            "건수": len(records),
-            "결과": records,
+            "count": len(records),
+            "result": records,
         },
         ensure_ascii=False,
     )
@@ -2152,19 +2137,19 @@ def _tool_get_trend_analysis(arguments: dict) -> str:
         )
     except Exception as exc:
         return json.dumps(
-            {"error": f"트렌드 분석 오류: {str(exc)}"},
+            {"error": f"Trend analysis error: {str(exc)}"},
             ensure_ascii=False,
         )
 
     if df.empty:
         return json.dumps(
-            {"unit": unit, "안내": "해당 기간의 데이터가 없습니다.", "결과": []},
+            {"unit": unit, "notice": "No data found for this period.", "result": []},
             ensure_ascii=False,
         )
 
     records = json.loads(df.to_json(orient="records", force_ascii=False))
     return json.dumps(
-        {"unit": unit, "기간수": len(records), "결과": records},
+        {"unit": unit, "period_count": len(records), "result": records},
         ensure_ascii=False,
     )
 
@@ -2182,14 +2167,14 @@ def _tool_analyze_channel_risk(arguments: dict) -> str:
         result = _analyze_channel_risk(date_from=date_from, date_to=date_to)
     except Exception as exc:
         return json.dumps(
-            {"error": f"채널 위험도 분석 오류: {str(exc)}"},
+            {"error": f"Channel risk analysis error: {str(exc)}"},
             ensure_ascii=False,
         )
 
-    # 매체구분 코드를 한글 라벨로 변환
+    # Convert media type codes to English labels
     for item in result.get("channel_stats", []):
-        code = item.get("매체구분")
-        item["채널명"] = _매체구분_MAP.get(int(code) if code is not None else 0, f"코드{code}")
+        code = item.get("media_type")
+        item["channel_name"] = _MEDIA_TYPE_MAP.get(int(code) if code is not None else 0, f"Code {code}")
 
     return json.dumps(result, ensure_ascii=False)
 
@@ -2202,18 +2187,18 @@ def _tool_analyze_channel_risk(arguments: dict) -> str:
 def _tool_get_receiving_account_profile(arguments: dict) -> str:
     account_id = arguments.get("account_id")
     if account_id is None:
-        return json.dumps({"error": "account_id가 필요합니다."}, ensure_ascii=False)
+        return json.dumps({"error": "account_id is required."}, ensure_ascii=False)
 
     try:
         aid = int(account_id)
     except (TypeError, ValueError):
-        return json.dumps({"error": "account_id는 정수여야 합니다."}, ensure_ascii=False)
+        return json.dumps({"error": "account_id must be an integer."}, ensure_ascii=False)
 
     try:
         result = _get_receiving_account_profile(aid)
     except Exception as exc:
         return json.dumps(
-            {"error": f"입금계좌 프로파일 조회 오류: {str(exc)}"},
+            {"error": f"Receiving account profile lookup error: {str(exc)}"},
             ensure_ascii=False,
         )
 
@@ -2238,19 +2223,19 @@ def _tool_analyze_cross_institution_flow(arguments: dict) -> str:
         )
     except Exception as exc:
         return json.dumps(
-            {"error": f"기관 간 자금 흐름 분석 오류: {str(exc)}"},
+            {"error": f"Inter-institution fund flow analysis error: {str(exc)}"},
             ensure_ascii=False,
         )
 
     if df.empty:
         return json.dumps(
-            {"안내": "조건에 맞는 기관 간 흐름이 없습니다.", "결과": []},
+            {"notice": "No significant inter-institution flows found matching criteria.", "result": []},
             ensure_ascii=False,
         )
 
     records = json.loads(df.to_json(orient="records", force_ascii=False))
     return json.dumps(
-        {"min_transactions": min_transactions, "건수": len(records), "결과": records},
+        {"min_transactions": min_transactions, "count": len(records), "result": records},
         ensure_ascii=False,
     )
 
@@ -2266,7 +2251,7 @@ def _tool_lookup_fiu_reference_types(arguments: dict) -> str:
 
     results = lookup_fiu_reference_types(keyword, industry)
     return json.dumps(
-        {"keyword": keyword, "건수": len(results), "결과": results},
+        {"keyword": keyword, "count": len(results), "result": results},
         ensure_ascii=False,
     )
 
@@ -2279,7 +2264,7 @@ def _tool_lookup_fiu_reference_types(arguments: dict) -> str:
 def _tool_validate_str_fields(arguments: dict) -> str:
     str_draft = arguments.get("str_draft")
     if str_draft is None:
-        return json.dumps({"error": "str_draft가 필요합니다."}, ensure_ascii=False)
+        return json.dumps({"error": "str_draft is required."}, ensure_ascii=False)
 
     result = validate_str_fields(str_draft)
     return json.dumps(result, ensure_ascii=False)
@@ -2295,18 +2280,18 @@ def _tool_get_aml_glossary(arguments: dict) -> str:
     result = get_aml_glossary(term)
     if result is None:
         return json.dumps(
-            {"error": f"용어 '{term}'를 찾을 수 없습니다.", "안내": "CDD, EDD, STR, CTR, RBA, PEP, MLRO, FATF, FIU, KYE, 구조화, 레이어링 등을 시도해보세요."},
+            {"error": f"Term '{term}' not found.", "notice": "Try searching for CDD, EDD, STR, CTR, RBA, PEP, MLRO, FATF, FIU, structuring, layering, etc."},
             ensure_ascii=False,
         )
     return json.dumps(result, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
-# OpenAI 메시지 직렬화
+# OpenAI Message Serialization
 # ---------------------------------------------------------------------------
 
 def _message_to_dict(msg):
-    """ChatCompletionMessage를 OpenAI API 호환 dict로 변환한다."""
+    """Converts ChatCompletionMessage to OpenAI API compatible dict."""
     d = {"role": msg.role, "content": msg.content or ""}
     if msg.tool_calls:
         d["tool_calls"] = [
@@ -2324,21 +2309,21 @@ def _message_to_dict(msg):
 
 
 # ---------------------------------------------------------------------------
-# 대화 실행 -도구 호출 정보를 함께 반환
+# Execute Conversation - Return tool call info together
 # ---------------------------------------------------------------------------
 
 MAX_TOOL_ROUNDS = 5
 
 
 def chat(messages: list[dict]) -> tuple[str, list[dict], list[dict]]:
-    """OpenAI API로 대화를 수행하고 응답을 반환한다.
+    """Performs conversation with OpenAI API and returns response.
 
     Args:
-        messages: 대화 히스토리 (list of dicts, user/assistant/tool 포함)
+        messages: Conversation history (list of dicts, including user/assistant/tool)
 
     Returns:
         (assistant_content, updated_messages, tool_events)
-        - tool_events: 각 도구 호출 정보 [{name, arguments, result}, ...]
+        - tool_events: each tool call info [{name, arguments, result}, ...]
     """
     client = OpenAI(api_key=config.OPENAI_API_KEY)
 
@@ -2359,7 +2344,7 @@ def chat(messages: list[dict]) -> tuple[str, list[dict], list[dict]]:
         if not msg.tool_calls:
             break
 
-        # tool call이 있으면 실행 후 재호출
+        # If there are tool calls, execute and call again
         assistant_dict = _message_to_dict(msg)
         messages.append(assistant_dict)
         full_messages.append(assistant_dict)
@@ -2369,7 +2354,7 @@ def chat(messages: list[dict]) -> tuple[str, list[dict], list[dict]]:
             tool_args = json.loads(tool_call.function.arguments)
             result = _execute_tool(tool_name, tool_args)
 
-            # 도구 이벤트 기록 (UI 시각화용)
+            # Record tool event (for UI visualization)
             tool_events.append(
                 {
                     "name": tool_name,
