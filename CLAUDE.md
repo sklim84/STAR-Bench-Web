@@ -39,21 +39,21 @@ docker-compose up -d                                    # Memgraph 실행 (그�
 python -c "from src.data.graph_etl import run_etl; print(run_etl())"  # DuckDB → Memgraph ETL
 ```
 
-**벤치마크 (`_experiments/scripts/`)**:
+**벤치마크 (`_paper/_experiments/scripts/`)**:
 ```bash
-# 다중 모델 비교 벤치마크
-python -m _experiments.scripts.benchmark --models gpt-4o-mini --output _experiments/results/round1/
-python -m _experiments.scripts.benchmark --models Qwen/Qwen3-8B --output _experiments/results/round1/ --checkpoint
+# 단일 모델 KR
+PYTHONPATH=_paper python -m _experiments.scripts.benchmark --models Qwen/Qwen3-8B --output _paper/_experiments/results_kr/ --checkpoint --resume
 
 # 영문 ablation (--cases-dir 추가)
-python -m _experiments.scripts.benchmark --models Qwen/Qwen3-8B --output _experiments/results/round1_en/ --cases-dir _paper/benchmarks_en/ --checkpoint
+PYTHONPATH=_paper python -m _experiments.scripts.benchmark --models Qwen/Qwen3-8B --output _paper/_experiments/results_en/ --cases-dir _paper/benchmarks_en/ --checkpoint --resume
 
 # 멀티턴 STR 벤치마크
-python -m _experiments.scripts.benchmark_multiturn --models Qwen/Qwen3-8B --output _experiments/results_multiturn/round1/eval
+PYTHONPATH=_paper python -m _experiments.scripts.benchmark_multiturn --models Qwen/Qwen3-8B --output _paper/_experiments/results_mt/
 
-# vLLM 로컬 모델 자동화 (GPU 서버)
-bash _experiments/scripts/vllm_benchmark.sh --gpu 0 --port 11434 --models qwen3-8b
-BENCH_MAX_TOTAL=5 bash _experiments/scripts/vllm_benchmark.sh --gpu 0 --port 11434 --models qwen3-4b  # 스모크 테스트
+# vLLM 자동화 (GPU 서버, 24-model 분담)
+bash _paper/_experiments/scripts/run_benchmark.sh --gpu 0 --port 11434 --group S1_A --mode kr
+nohup bash _paper/_experiments/scripts/run_master.sh --server 1 --modes kr,en,mt > master_s1.log 2>&1 &
+BENCH_MAX_TOTAL=5 bash _paper/_experiments/scripts/run_benchmark.sh --gpu 0 --port 11434 --group SMOKE --mode kr  # 스모크
 ```
 
 **환경 변수** (`.env` 파일 또는 환경에 설정):
@@ -192,12 +192,13 @@ _paper/                — git submodule (KA-001-AML-paper repo)
       benchmark.py           — single-turn 벤치마크 엔진 (3개 프로바이더 레지스트리)
       benchmark_multiturn.py — 멀티턴 STR 벤치마크
       tools_en.py            — 영문 도구 정의 + SYSTEM_PROMPT_EN (--tools-lang en ablation)
-      run_round1.sh          — Round 1 per-GPU runner (Group A/B/C/TP2 분담)
-      run_round1_master.sh   — 마스터 오케스트레이터 (KR/EN/MT × Phase A→C→TP2 순차)
+      run_benchmark.sh       — per-GPU runner (S1_A/S1_B/S2_TP*/S2_LARGE_* 분담)
+      run_master.sh          — 마스터 오케스트레이터 (--server 1|2, KR/EN/MT 순차)
+      tool_chat_template_phi4_mini.jinja — Phi-4-mini-instruct FC 강제 chat template
       kanana_tool_calls/     — vLLM 커스텀 파서 플러그인
-    round1/                  — KR phase 결과 (eval/, checkpoint/, comparison_*.xlsx)
-    round1_en/               — EN phase 결과
-    round1_multiturn/        — MT phase 결과
+    results_kr/              — KR phase 결과 (eval/, checkpoint/, comparison_*.xlsx)
+    results_en/              — EN phase 결과
+    results_mt/              — MT phase 결과
     bfcl_results/            — RQ6 BFCL 직접 실행 결과 (score/<model>/)
     analysis/                — 후처리 분석 산출물
     logs/                    — 실행 로그 + master.pid
@@ -217,18 +218,16 @@ Import 경로: `_experiments.scripts.benchmark` (PYTHONPATH=`_paper`로 설정 �
 
 **Native FC 모드**: vLLM tool-call-parser + OpenAI/Anthropic native `tools` 필드만 사용 (Prompting mode 미사용). 시스템 프롬프트는 도구 목록 중복 없이 워크플로우/STR 가이드/Data Schema만 포함 (3,475→1,785 chars).
 
-**스케줄링** (Round 1 v6 기준):
-- Group A (GPU 0, 11 entries): Qwen 시리즈 + EXAONE/GLM/Hermes/AX-Light
-- Group B (GPU 1, 11 entries): xLAM + Llama-3.1/3.2 + Ministral + Mistral-Nemo + qwen3-4b-think (마지막 배치)
-- Group C (20~32B, GPU 0/1 분할): Qwen3.5-27B, Qwen3-30B, Kanana, gpt-oss-20b 등
-- Group TP=2 (70B+, 양 GPU 텐서병렬, **별도 서버 분담**): Llama-3.3-70B, xLAM-70B, A.X-4.0
-- thinking 변형 (think=True): **별도 ablation 진행 권장** (`.claude/SESSION_HANDOFF.md` 참조)
+**스케줄링** (24-model 서버 분담, MODELS.md 기준):
+- Server 1 (2× H100): S1_A (GPU 0, 6 모델) + S1_B (GPU 1, 5 모델) 병렬
+- Server 2 (6× H100): TP=4 1 (gpt-oss-120b) + TP=2 3 (70B+ 모델 페어) + Single-GPU Large 9 모델
+- thinking 변형 (think+nothink): RQ3 ablation으로 5 핵심 페어만 별도 등록 (Qwen3.5-4B/27B, gpt-oss-20b/120b, kanana-2-think)
 
-**vLLM 자동화** (`_paper/_experiments/scripts/run_round1_master.sh`):
-- 마스터: KR → EN → MT phase 순차, 각 phase는 A+B 병렬 → C1+C2 병렬 → TP2 순차
-- 옵션: `--modes kr,en,mt` `--skip-tp2`
-- 단일 그룹: `bash run_round1.sh --gpu <id> --port <port> --group <A|B|C|TP2|A_OFFLOAD> --mode <kr|en|mt>`
-- 환경변수: `BENCH_MAX_TOTAL=5` (스모크 테스트)
+**vLLM 자동화** (`_paper/_experiments/scripts/run_master.sh`):
+- 마스터: `--server 1|2 --modes kr,en,mt`. 서버1은 S1_A+S1_B 병렬, 서버2는 α(TP=4+L1+L2) → β(TP=2 3 pair) → γ(L3) 단계별 진행
+- 옵션: `--skip-tp2` `--skip-tp4` `--skip-thinking`
+- 단일 그룹: `bash run_benchmark.sh --gpu <id> --port <port> --group <S1_A|S1_B|S2_TP4|S2_TP2_A|S2_LARGE_L1|...> --mode <kr|en|mt>`
+- 환경변수: `BENCH_MAX_TOTAL=5` (스모크), `BENCH_SKIP_THINK=1` (think 변형 제외)
 
 ### 논문 작성 에이전트 (`.claude/agents/paper-*.md`)
 

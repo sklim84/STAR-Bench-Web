@@ -28,9 +28,9 @@
 
 ```bash
 git pull --recurse-submodules
-bash _paper/_experiments/scripts/run_round1.sh --gpu 0,1 --port 11434 --group TP2 --mode kr
-bash _paper/_experiments/scripts/run_round1.sh --gpu 0,1 --port 11434 --group TP2 --mode en
-bash _paper/_experiments/scripts/run_round1.sh --gpu 0,1 --port 11434 --group TP2 --mode mt
+bash _paper/_experiments/scripts/run_benchmark.sh --gpu 0,1 --port 11434 --group TP2 --mode kr
+bash _paper/_experiments/scripts/run_benchmark.sh --gpu 0,1 --port 11434 --group TP2 --mode en
+bash _paper/_experiments/scripts/run_benchmark.sh --gpu 0,1 --port 11434 --group TP2 --mode mt
 ```
 
 대상 모델:
