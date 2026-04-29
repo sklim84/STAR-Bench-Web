@@ -1,0 +1,7 @@
+{
+  "enabledPlugins": {
+    "context-mode@claude-context-mode": true,
+    "superpowers@claude-plugins-official": true,
+    "qmd@qmd": true
+  }
+}

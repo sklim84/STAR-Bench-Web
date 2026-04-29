@@ -44,6 +44,9 @@ _paper/results/**/logs/
 _paper/results_en/**/logs/
 _paper/results_repro/**/logs/
 
-# Claude Code
-.claude/
-CLAUDE.md
+# Claude Code (선택 공유: agents/, settings.json, SESSION_HANDOFF.md, CLAUDE.md 추적)
+.claude/agent-memory/
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/cache/
+.claude/logs/
