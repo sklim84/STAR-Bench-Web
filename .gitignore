@@ -25,10 +25,8 @@ venv/
 Thumbs.db
 
 # Generated data (Parquet, DuckDB - regenerated from CSV)
-_datasets/*.parquet
-_datasets/*.duckdb
+# _datasets/*.parquet, *.duckdb, *.csv은 Git LFS로 추적 (.gitattributes 참조)
 _datasets/*.duckdb.wal
-_datasets/*.csv
 _datasets/original/
 
 # Trained models
