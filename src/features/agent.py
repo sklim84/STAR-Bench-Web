@@ -138,7 +138,14 @@ TOOLS = [
                     "fraud_type": {
                         "type": "string",
                         "description": "HOFINET fraud type classification",
-                        "enum": ["Money Laundering", "Mule Account", "Voice Phishing", "Illegal Gambling", "Illegal Private Finance", "New Customer", "Other"],
+                        "enum": [
+                            "Sudden Change in Transaction Pattern",
+                            "Transaction with New Counterparty",
+                            "Split Transaction",
+                            "Concurrent Multiple Transactions",
+                            "Same-Day Withdrawal after Large Deposit",
+                            "Late-Night/Early-Morning Bulk Transactions",
+                        ],
                     },
                     "transactions": {
                         "type": "array",
@@ -238,17 +245,17 @@ TOOLS = [
         "function": {
             "name": "get_fraud_type_summary",
             "description": (
-                "Retrieves details by fraud type (Money Laundering, Voice Phishing, Mule Account, etc.). "
+                "Retrieves details by HOFINET fraud type (Sudden Pattern Change, New Counterparty, Split Transaction, etc.). "
                 "Returns count/amount statistics and top associated institutions. "
-                "Code mapping: 1=Money Laundering, 2=New Counterparty, 3=Mule Account, 4=Voice Phishing, 5=Illegal Gambling, 6=Illegal Private Finance, 7=Other"
+                "Code mapping: 1=Sudden Change in Transaction Pattern, 2=Transaction with New Counterparty, 3=Split Transaction, 4=Concurrent Multiple Transactions, 5=Same-Day Withdrawal after Large Deposit, 7=Late-Night/Early-Morning Bulk Transactions (note: code 6 unused)"
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "fraud_type": {
                         "type": "integer",
-                        "description": "Fraud type code (1-7)",
-                        "enum": [1, 2, 3, 4, 5, 6, 7],
+                        "description": "Fraud type code (1-5, 7; code 6 unused)",
+                        "enum": [1, 2, 3, 4, 5, 7],
                     },
                     "bank_id": {
                         "type": "integer",
@@ -764,30 +771,7 @@ TOOLS = [
 SYSTEM_PROMPT = """You are an Anti-Money Laundering (AML) analysis expert.
 You analyze HOFINET (Electronic Financial Network) fraud detection data to detect and report suspicious money laundering transactions.
 
-Available Tools:
-1. get_statistics: Overall summary and fraud type distribution (use first)
-2. query_transactions: Execute SQL on HOFINET DB for detailed analysis
-3. get_account_profile: Statistics for a specific account
-4. get_fraud_type_summary: Summary by fraud type (1=Money Laundering, 2=New Customer, 3=Mule Account, 4=Voice Phishing, 5=Illegal Gambling, 6=Illegal Private Finance, 7=Other)
-5. compare_periods: Compare stats between two periods
-6. get_institution_report: Comprehensive report for a financial institution
-7. rank_risky_transactions: Batch prediction ranking
-8. analyze_network: Account network analysis (N-hop)
-9. detect_aml_patterns: Memgraph-based AML pattern detection (Ring, Layering, Funnel, etc.)
-10. predict_fraud: XGBoost model probability prediction
-11. generate_str: Generate Suspicious Transaction Report (STR)
-12. detect_ctr_candidates: CTR candidates or structuring detection (mode=high_value or structuring)
-13. score_account_risk: Risk evaluation (0-100) based on 5 behavioral indicators
-14. detect_monitoring_alerts: Rule-based alerts (R001-R005)
-15. detect_dormant_reactivation: Dormant account reactivation detection
-16. detect_smurfing_network: Inbound/outbound smurfing detection
-17. get_trend_analysis: Monthly/quarterly time-series trends
-18. analyze_channel_risk: Risk analysis by channel (media_type)
-19. get_receiving_account_profile: Receiving account profiling
-20. analyze_cross_institution_flow: Fund flow between institution pairs
-21. lookup_fiu_reference_types: Search FIU reference types (structuring, nighttime, non-face-to-face, etc.)
-22. validate_str_fields: STR draft validation
-23. get_aml_glossary: AML term definitions (CDD, EDD, STR, CTR, RBA, PEP, etc.)
+Tool definitions are provided via the API tools field; refer to each tool's name, description, and parameter schema there.
 
 Recommended Analysis Flow:
 1. Statistics overview -> 2. Trend analysis -> 3. Detailed query -> 4. CTR/Structuring detection -> 5. Risk score -> 6. Monitoring alerts -> 7. Dormant reactivation -> 8. Smurfing detection -> 9. Channel risk -> 10. Receiving profile -> 11. External flow -> 12. Network analysis -> 13. AML pattern detection -> 14. Model prediction -> 15. STR generation (only with sufficient evidence)
@@ -800,10 +784,10 @@ STR Generation Notes:
 
 Data Schema:
 - Table: hofinet (4,732,130 records)
-- Columns: date(YYYYMMDD), time_slot(0-21, 3h units), sender_bank, sender_acc, receiver_bank, receiver_acc, fund_type(0,1,3,4), media_type(1-7), amount, is_fraud(0/1), fraud_type(1-7), fraud_description
-- fraud_type: 1=Money Laundering, 2=New Customer, 3=Mule Account, 4=Voice Phishing, 5=Illegal Gambling, 6=Illegal Private Finance, 7=Other
-- media_type: 1=Counter, 2=ATM, 3=PB Center, 4=Internet Banking, 5=Phone, 6=Call Center, 7=Other
-- fund_type: 0=N/A, 1=Deposit, 3=Withdrawal, 4=Transfer
+- Columns: date(YYYYMMDD), time_slot(0-21, 3h units), sender_bank, sender_acc, receiver_bank, receiver_acc, fund_type(0,1,3,4), media_type(1-7), amount, is_fraud(0/1), fraud_type(1-5,7), fraud_description
+- fraud_type: 1=Sudden Change in Transaction Pattern, 2=Transaction with New Counterparty, 3=Split Transaction, 4=Concurrent Multiple Transactions, 5=Same-Day Withdrawal after Large Deposit, 7=Late-Night/Early-Morning Bulk Transactions (note: code 6 unused)
+- media_type: 1=PC Banking, 2=Internet Banking, 3=Phone, 4=Mobile Phone, 5=Per-transaction Transfer, 6=Other, 7=Bulk Transfer
+- fund_type: 0=General, 1=Salary, 3=Other, 4=Inter-bank Auto Transfer
 
 Respond in English. Provide specific figures and evidence in your analysis."""
 
@@ -844,31 +828,34 @@ _MEDIA_TYPE_MAP = {
     4: "Internet Banking", 5: "Phone/Mobile", 6: "Call Center", 7: "Other",
 }
 
-_FUND_TYPE_MAP = {0: "N/A", 1: "Deposit", 3: "Withdrawal", 4: "Transfer"}
+_FUND_TYPE_MAP = {0: "General", 1: "Salary", 3: "Other", 4: "Inter-bank Auto Transfer"}
 
 _FRAUD_TYPE_MAP = {
-    1: "Money Laundering", 2: "New Customer", 3: "Mule Account",
-    4: "Voice Phishing", 5: "Illegal Gambling", 6: "Illegal Private Finance", 7: "Other",
+    1: "Sudden Change in Transaction Pattern",
+    2: "Transaction with New Counterparty",
+    3: "Split Transaction",
+    4: "Concurrent Multiple Transactions",
+    5: "Same-Day Withdrawal after Large Deposit",
+    7: "Late-Night/Early-Morning Bulk Transactions",
 }
 
-# Mapping fraud type codes to STR Section VI suspicion items
+# Mapping fraud type codes to STR Section VI suspicion items (HOFINET official)
 _FRAUD_TYPE_TO_VI_SECTION = {
-    1: ["Structured transactions", "Sudden change in transaction pattern"],
+    1: ["Sudden change in transaction pattern", "Behavioral anomaly"],
     2: ["Suspicious request from customer with no prior transactions"],
-    3: ["Use of someone else's name/account", "Use of one-off accounts"],
-    4: ["Withdrawal on same/next day after large deposit", "Frequent deposits/withdrawals"],
-    5: ["Frequent deposits/withdrawals", "Sudden change in transaction pattern"],
-    6: ["Simultaneous requests for multiple transactions", "Use of one-off accounts"],
+    3: ["Structured transactions", "Splitting amount across multiple transfers"],
+    4: ["Simultaneous requests for multiple transactions", "Concurrent transaction bursts"],
+    5: ["Withdrawal on same day after large deposit", "Rapid fund extraction"],
+    7: ["Late-night/early-morning bulk transactions", "Off-hours mass transfers"],
 }
 
 _RECOMMENDED_ACTION_MAP = {
-    "Money Laundering": ["Strengthen transaction monitoring", "Investigate related accounts", "Consider reporting to FIU"],
-    "Mule Account":      ["Immediate account monitoring", "Verify actual owner name", "Consider referral to law enforcement"],
-    "Voice Phishing":   ["Consider immediate account freeze", "Victim verification and protection", "Referral to law enforcement"],
-    "Illegal Gambling": ["Continuous pattern monitoring", "Consider referral to authorities", "Consider transaction limits"],
-    "Illegal Private Finance": ["Verify investor damage", "Referral to authorities", "Consider account freeze"],
-    "New Customer":     ["Strengthen CDD", "Monitor additional transactions"],
-    "Other":            ["Conduct additional monitoring", "Preserve transaction history", "Review by internal committee"],
+    "Sudden Change in Transaction Pattern":         ["Strengthen transaction monitoring", "Investigate related accounts", "Consider reporting to FIU"],
+    "Transaction with New Counterparty":            ["Strengthen CDD on new counterparty", "Monitor additional transactions"],
+    "Split Transaction":                            ["Aggregate related transactions", "Review structuring intent", "Verify actual owner name"],
+    "Concurrent Multiple Transactions":             ["Consider immediate account freeze", "Victim verification and protection", "Referral to law enforcement"],
+    "Same-Day Withdrawal after Large Deposit":      ["Trace fund origin", "Verify business rationale", "Consider account freeze"],
+    "Late-Night/Early-Morning Bulk Transactions":   ["Continuous off-hours monitoring", "Pattern-based escalation", "Review by internal committee"],
 }
 
 # AML pattern name → STR Section VI check item mapping

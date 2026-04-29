@@ -138,14 +138,53 @@ class TestSystemPrompt:
         assert "자금세탁" in SYSTEM_PROMPT or "aml" in prompt_lower
 
     def test_system_prompt_mentions_tools(self):
-        """SYSTEM_PROMPT에 도구 사용 안내가 포함되어야 한다."""
+        """SYSTEM_PROMPT는 STR 가이드/워크플로우에서 핵심 도구를 참조해야 한다 (간소화 후)."""
+        # 간소화 A: 23개 도구 목록 제거. STR 워크플로우 안내에서 필수 도구만 참조.
         assert "query_transactions" in SYSTEM_PROMPT
         assert "predict_fraud" in SYSTEM_PROMPT
-        assert "generate_str" in SYSTEM_PROMPT
+        assert "generate_str" not in SYSTEM_PROMPT or "STR" in SYSTEM_PROMPT  # STR 가이드는 유지
 
-    def test_system_prompt_mentions_korean(self):
-        """SYSTEM_PROMPT에 한국어 응답 지시가 있어야 한다."""
-        assert "한국어" in SYSTEM_PROMPT
+    def test_system_prompt_no_tool_list_redundancy(self):
+        """SYSTEM_PROMPT에 23개 도구 목록 중복이 없어야 한다 (TOOLS 필드와의 중복 회피)."""
+        # 옛 'Available Tools' 번호 목록 부재 확인
+        assert "Available Tools:" not in SYSTEM_PROMPT
+        # 도구가 1~23 번호로 나열된 패턴이 없어야 함
+        import re
+        numbered_tools = re.findall(r"^\s*\d+\.\s+\w+:\s", SYSTEM_PROMPT, re.MULTILINE)
+        assert len(numbered_tools) <= 15, f"도구 목록 중복 흔적: {len(numbered_tools)}건"  # 워크플로우의 1~15는 허용
+
+    def test_system_prompt_specifies_response_language(self):
+        """SYSTEM_PROMPT에 응답 언어 지시가 있어야 한다."""
+        assert "Respond in" in SYSTEM_PROMPT
+
+    def test_system_prompt_uses_hofinet_fraud_types(self):
+        """SYSTEM_PROMPT의 fraud_type 매핑이 HOFINET 공식 라벨과 일치해야 한다."""
+        assert "Sudden Change in Transaction Pattern" in SYSTEM_PROMPT
+        assert "Transaction with New Counterparty" in SYSTEM_PROMPT
+        assert "Split Transaction" in SYSTEM_PROMPT
+        assert "Concurrent Multiple Transactions" in SYSTEM_PROMPT
+        assert "Same-Day Withdrawal after Large Deposit" in SYSTEM_PROMPT
+        assert "Late-Night/Early-Morning Bulk Transactions" in SYSTEM_PROMPT
+
+    def test_system_prompt_uses_hofinet_media_types(self):
+        """SYSTEM_PROMPT의 media_type 매핑이 HOFINET 공식 라벨과 일치해야 한다."""
+        assert "PC Banking" in SYSTEM_PROMPT
+        assert "Internet Banking" in SYSTEM_PROMPT
+        assert "Mobile Phone" in SYSTEM_PROMPT
+        assert "Bulk Transfer" in SYSTEM_PROMPT
+
+    def test_system_prompt_uses_hofinet_fund_types(self):
+        """SYSTEM_PROMPT의 fund_type 매핑이 HOFINET 공식 라벨과 일치해야 한다."""
+        assert "Salary" in SYSTEM_PROMPT
+        assert "Inter-bank Auto Transfer" in SYSTEM_PROMPT
+
+    def test_system_prompt_does_not_use_legacy_mappings(self):
+        """SYSTEM_PROMPT에 옛 잘못된 매핑이 남아 있지 않아야 한다."""
+        assert "Voice Phishing" not in SYSTEM_PROMPT
+        assert "Mule Account" not in SYSTEM_PROMPT
+        assert "Money Laundering, 2=" not in SYSTEM_PROMPT
+        assert "1=Counter" not in SYSTEM_PROMPT
+        assert "1=Deposit" not in SYSTEM_PROMPT
 
 
 # ──────────────────────────────────────────────

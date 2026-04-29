@@ -210,16 +210,16 @@ app.py                          # 라우팅 + 글로벌 CSS 주입
 |------|------|---------|---------|----------|-------------|
 | 1 | Qwen3.5-27B (think) | 27B | 0.942±0.018 | 95.4% | 95.4% |
 | 2 | Qwen3.5-27B (nothink) | 27B | 0.936±0.002 | 94.8% | 94.7% |
-| 3 | Qwen3.5-9B (nothink) | 9B | 0.932±0.001 | 95.5% | 95.0% |
-| 4 | xLAM-2-32b | 32B | 0.933±0.000 | 93.8% | 91.6% |
-| 5 | Qwen3-30B-Thinking (think) | 30B | 0.931±0.001 | 94.5% | 92.6% |
+| 3 | xLAM-2-32B | 32B | 0.933±0.000 | 93.8% | 91.6% |
+| 4 | Qwen3.5-9B (nothink) | 9B | 0.932±0.001 | 95.4% | 95.0% |
+| 5 | Qwen3-30B-Thinking (think) | 30B | 0.930±0.001 | 94.5% | 92.5% |
 | 6 | Qwen3-30B-Thinking (nothink) | 30B | 0.930±0.001 | 94.5% | 92.5% |
-| 7 | Ministral-3-14B | 14B | 0.927±0.002 | 93.2% | 92.1% |
+| 7 | Ministral-14B | 14B | 0.927±0.002 | 92.9% | 92.1% |
 | 8 | Qwen3-8B | 8B | 0.920±0.002 | 92.8% | 91.1% |
 | 9 | Qwen3.5-4B (nothink) | 4B | 0.920±0.002 | 94.2% | 92.2% |
 | 10 | Qwen3.5-4B (think) | 4B | 0.919±0.006 | 95.0% | 93.9% |
 
-> **전체 평균**: KR 0.845 / EN 0.802. 한국어가 89%의 모델에서 우세 (mean delta +0.042).
+> **KR--EN ablation**: 44개 모델 중 75%에서 한국어 프롬프트가 영어보다 높은 정확도 (mean delta +0.031).
 
 #### 멀티턴 STR (50 시나리오 × 44 모델, Top 5)
 
@@ -259,18 +259,18 @@ app.py                          # 라우팅 + 글로벌 CSS 주입
 | **컨텍스트 길이 초과** — 영문 번역으로 토큰 수 증가하여 `max-model-len 16384` 초과 | EN의 Qwen3.5 계열, Mistral-Small, GLM 등 대부분 | `--max-model-len 32768`로 상향 | ✅ 완료 |
 | **tool parser 비호환** — `deepseek_v3` 파서가 토큰 매핑 실패 | DeepSeek-R1-Qwen3-8B (KR+EN 전체 실패) | `hermes` 파서로 변경하여 재시도 | ✅ 완료 |
 | **단일 tool-call 제한** — Llama-3.2 계열이 multi-tool call 미지원 (`This model only supports single tool-calls at once!`) | Llama-3.2-1B/3B의 multi_tool 카테고리 | **모델 한계 (수정 불가)** — 논문에서 "Llama-3.2 계열은 병렬 tool calling을 지원하지 않아 multi-tool 케이스에서 체계적 실패 발생"으로 기술 | ✅ 모델 한계 |
-| **Kanana 1.5 파서 불일치** — KR은 functionary, EN은 hermes 파서 사용 | Kanana 1.5 3종 한/영 비교 공정성 | KR을 hermes 파서로 재실행하여 통일 | ✅ 완료 |
+| **Kanana 1.5 파서 불일치** — KR은 functionary, EN은 hermes 파서 사용 | Kanana 1.5 한/영 비교 공정성 | 최종 44개 모델에서 Kanana 1.5 제외 | ✅ 제외 |
 
 ### 2. 영문 Ablation 실험 (완료)
 
-- **결과**: KR 평균 0.845 / EN 평균 0.802. 한국어 > 영어인 모델 **89% (39/44)**. Mean delta **+0.042**.
+- **결과**: 44개 모델 중 **75% (39/52 configs)**에서 한국어 프롬프트가 영어보다 높은 정확도. Mean delta **+0.031**.
 
 ### 3. 재현성 검증
 
 | 실험 | Round 1 | Round 2 | Round 3 | 상태 |
 |------|---------|---------|---------|------|
 | 싱글턴 KR (44 models) | ✅ | ✅ | ✅ | 완료 |
-| 싱글턴 EN (44 models) | ✅ | ⏳ | ⬜ | EN Round 2 진행 중 |
+| 싱글턴 EN (44 models) | ✅ | ✅ | ✅ | 완료 |
 | 멀티턴 (44 models) | ✅ | ✅ | ✅ | 완료 |
 
 ### 4. 멀티턴 STR 벤치마크 (완료)
@@ -288,12 +288,12 @@ app.py                          # 라우팅 + 글로벌 CSS 주입
 
 ### 6. 분석 & 시각화
 
+- [x] Think vs NoThink 분석 → `fig_think_delta.png`, 논문 RQ3
+- [x] 파라미터 효율성 분석 (모델 크기 vs 종합점수) → `fig_size_vs_performance.png`, Appendix
+- [x] 싱글턴 vs 멀티턴 역전 분석 → `fig_turnwise_line.png`, 논문 RQ5
+- [x] Mistral 멀티턴 붕괴 원인 분석 (Turn별 hit rate 급락) → `fig_turnwise_line.png`, 논문 RQ5
 - [ ] 한/영 결과 비교 분석 (paired t-test)
-- [ ] Think vs NoThink 분석
-- [ ] 파라미터 효율성 분석 (모델 크기 vs 종합점수)
 - [ ] 국산 모델 특집 분석 (Kanana 2, EXAONE, A.X)
-- [ ] 싱글턴 vs 멀티턴 역전 분석
-- [ ] Mistral 멀티턴 붕괴 원인 분석 (Turn별 hit rate 급락)
 
 ### 실험 디렉토리 구조
 
@@ -308,8 +308,9 @@ _experiments/
 │   ├── round1/eval/                  # KR Round 1 (44 models)
 │   ├── round1_en/eval/               # EN Round 1 (44 models)
 │   ├── round2/eval/                  # KR Round 2
-│   ├── round2_en/eval/               # EN Round 2 (진행 중)
-│   ├── round3/eval/                  # KR Round 3
+│   ├── round2_en/eval/               # EN Round 2 (44 models)
+│   ├── round3/eval/                  # KR Round 3 (44 models)
+│   ├── round3_en/eval/              # EN Round 3 (43/44, 진행 중)
 │   ├── comparison_kr.xlsx            # KR 비교 리포트
 │   ├── comparison_en.xlsx            # EN 비교 리포트
 │   └── repro_mean_std.json           # 재현성 mean±std
