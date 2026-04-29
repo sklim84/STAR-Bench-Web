@@ -64,7 +64,7 @@ bash _paper/_experiments/scripts/run_benchmark.sh --gpu 0,1 --port 11434 --group
    - sender_bank 50개 / receiver_bank 54개 (`_datasets/HOFINET.MD` §6.5 참조)
 3. **Native FC 모드 사용**: vLLM tool-call-parser + API tools 필드. Prompting mode 미사용.
 4. **시스템 프롬프트**: 도구 정의 중복 금지. `Tool definitions are provided via the API tools field` 문구로 대체.
-5. **벤치마크 정합성**: 모든 정수 코드 → HOFINET 유효 값만. `_paper/_experiments/WORK_LOG.md` 매핑 표 참조.
+5. **벤치마크 정합성**: 모든 정수 코드 → HOFINET 유효 값만. 위 §2 매핑 표 + `_datasets/HOFINET.MD` 참조.
 6. **commit 메시지**: `Co-Authored-By: Claude` 라인 추가 금지 (사용자 명시 선호).
 7. **submodule push 순서**: `_paper` repo → main repo submodule pointer 갱신 → 양쪽 push.
 
@@ -73,8 +73,7 @@ bash _paper/_experiments/scripts/run_benchmark.sh --gpu 0,1 --port 11434 --group
 ## 컨텍스트 복원 시작 메시지 예시
 
 ```
-이 repo의 CLAUDE.md, .claude/SESSION_HANDOFF.md, _paper/_experiments/WORK_LOG.md를
-순서대로 읽고 컨텍스트를 복원해줘.
+이 repo의 CLAUDE.md, .claude/SESSION_HANDOFF.md를 순서대로 읽고 컨텍스트를 복원해줘.
 
 현재 다른 서버에서 v6 master가 KR phase 실행 중 (GPU 0/1, non-TP2 + non-thinking).
 나는 이 서버에서 [TP=2 / thinking ablation / 다른 작업]을 진행할 예정이야.
@@ -86,4 +85,4 @@ bash _paper/_experiments/scripts/run_benchmark.sh --gpu 0,1 --port 11434 --group
 
 - 영구 규약 변경 시 → 이 파일과 `CLAUDE.md` 동시 갱신
 - 진행 중 작업 변경 시 → 이 파일의 "현재 활성 작업" 섹션만 갱신
-- 결정 내역 → `_paper/_experiments/WORK_LOG.md`에 시간 역순 누적
+- 결정 내역 → commit 메시지 본문에 명확히 기록 (`git log`로 복원)

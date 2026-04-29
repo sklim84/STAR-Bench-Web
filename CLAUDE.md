@@ -4,10 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Session Handoff (Read First)
 
-다른 서버/시점의 claude code 인스턴스가 컨텍스트를 빠르게 복원하기 위해 다음 두 파일을 먼저 읽을 것:
+다른 서버/시점의 claude code 인스턴스가 컨텍스트를 빠르게 복원하기 위해 다음 파일을 먼저 읽을 것:
 
 1. `.claude/SESSION_HANDOFF.md` — 현재 활성 작업 상태 + 영구 규약 + 다른 서버 분담 작업
-2. `_paper/_experiments/WORK_LOG.md` — 시간 역순 의사결정 로그 + HOFINET 공식 매핑 표
+
+추가 결정 이력은 `git log` (특히 main repo와 `_paper` submodule의 commit 메시지 본문) 참조.
 
 ## Project Overview
 
@@ -119,7 +120,7 @@ DuckDB 테이블명 `hofinet`. **컬럼명이 한글**이므로 SQL에서 그대
 
 **학습 데이터**: `_datasets/original/{Training,Test,Validation}/` 디렉토리에 분할 저장.
 
-**이상거래유형 코드 (HOFINET 공식 매핑)**: 1=갑작스러운 거래패턴의 변화, 2=신규 수신처 거래(63.87%로 최다), 3=분할 거래, 4=다중거래의 동시 요청, 5=거액 입금 후 당일 인출, 7=심야/새벽 대량 거래 (코드 6은 미존재). 영문 라벨은 `_paper/_experiments/WORK_LOG.md` 매핑 표 참조.
+**이상거래유형 코드 (HOFINET 공식 매핑)**: 1=갑작스러운 거래패턴의 변화, 2=신규 수신처 거래(63.87%로 최다), 3=분할 거래, 4=다중거래의 동시 요청, 5=거액 입금 후 당일 인출, 7=심야/새벽 대량 거래 (코드 6은 미존재). 영문 라벨은 `.claude/SESSION_HANDOFF.md` "핵심 영구 규약" 섹션 참조.
 
 **컬럼**: 거래일자(int32), 거래시간대(int8, 0/3/6/9/12/15/18/21만 유효), 출금금융회사일련번호(int16, 50종), 출금계좌일련번호(int64), 입금금융회사일련번호(int16, 54종), 입금계좌일련번호(int64), 자금구분(int8, {0,1,3,4}), 매체구분(int8, 1~7), 거래금액(int64), 이상거래여부(int8, 0/1), 이상거래유형(int8), 이상거래설명(utf8)
 
@@ -202,10 +203,9 @@ _paper/                — git submodule (KA-001-AML-paper repo)
     bfcl_results/            — RQ6 BFCL 직접 실행 결과 (score/<model>/)
     analysis/                — 후처리 분석 산출물
     logs/                    — 실행 로그 + master.pid
-  WORK_LOG.md          — 시간 역순 의사결정 로그 (HOFINET 매핑 표, 정합성 정정 이력 등)
 ```
 
-**실험 진행 상태** (현재 진행: 2026-04-29 v6 master): HOFINET 정합성 정정 + 시스템 프롬프트 간소화 후 Round 1 재실험 중. 이전 라운드 결과(`_backup/results/`, `_backup/results_multiturn/`)는 invalidated baseline. 자세한 변경 이력은 `_paper/_experiments/WORK_LOG.md`.
+**실험 진행 상태** (현재 진행: 2026-04-29 v6 master): HOFINET 정합성 정정 + 시스템 프롬프트 간소화 후 Round 1 재실험 중. 이전 라운드 결과(`_backup/results/`, `_backup/results_multiturn/`)는 invalidated baseline. 자세한 변경 이력은 `git log`.
 
 Import 경로: `_experiments.scripts.benchmark` (PYTHONPATH=`_paper`로 설정 필요)
 
