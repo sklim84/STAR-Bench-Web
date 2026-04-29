@@ -5,6 +5,7 @@ analyzes suspicious transactions through conversation, and generates STR drafts.
 """
 
 import json
+import logging
 import re
 from collections import Counter
 from datetime import date
@@ -13,6 +14,8 @@ import pandas as pd
 from openai import OpenAI
 
 import config
+
+logger = logging.getLogger(__name__)
 from src.data.db import query
 from src.features.dashboard import get_summary, get_fraud_type_distribution
 from src.features.detector import load_model
