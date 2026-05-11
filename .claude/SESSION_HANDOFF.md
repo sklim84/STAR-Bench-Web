@@ -1,55 +1,37 @@
 # Session Handoff
 
-다른 서버의 claude code 인스턴스가 이 repo에서 첫 세션을 시작할 때 자동으로 참조하는 핸드오프 노트.
-세션 종료 시 갱신, 시작 시 읽기.
+다른 서버/시점의 claude code 인스턴스가 컨텍스트를 빠르게 복원하기 위한 핸드오프 노트.
+**핵심 영구 규약은 갱신 시 신중하게**, 활성 작업 섹션은 자유롭게 갱신.
 
 ---
 
-## 현재 활성 작업 (2026-04-29 17:30 기준)
+## 현재 활성 작업 (2026-05-11 기준)
 
-**메인 작업**: AML-Bench Round 1 재실험 (NeurIPS 2026 E&D 마감 5/6)
+**완료 상태**: T/NT 토글 정정 + Kanana sibling-variant 추가 + parser 정정 + 옵션 B (4쌍 ablation) 적용 완료.
 
-**상태**:
-- HOFINET 정합성 정정 완료 (코드 + 벤치마크 케이스)
-- 시스템 프롬프트 간소화 완료 (Native FC + 23-tool 중복 제거)
-- v6 master 진행 중 (KR phase, Group A [2/11], Group B [4/11])
+**최종 모델 구성 (29개)**:
+- 동일 모델 enable_thinking 토글 4쌍: Qwen3.5-4B/27B, gpt-oss-20B/120B
+- Kanana sibling-variant pair (별도): `kanana-2-30b-a3b-instruct-2601` (NT-only) ↔ `kanana-2-30b-a3b-thinking-2601` (always-thinking)
+- baseline `kanana-2-30b-a3b-instruct` 별개로 유지 (구 baseline)
 
-**인증 commit**:
-- `_paper` (submodule): `4477e49`
-- Main repo: `5ae7758`
+**최근 정정 이력 (2026-05-08 ~ 2026-05-11)**:
+- gpt-oss-20B/120B T/NT 토글 정정 재실험 (KR/EN/MT)
+- kanana-2-30b-a3b-instruct-2601 신규 sibling-variant 추가 + parser 정정 (`hermes` → `functionary_v3_llama_31`) 후 재실험
+- kanana-2-30b-a3b-thinking-2601 (Kanana-2-Think) 출처 미상 데이터 → 단일 entry 재실험으로 일관화
+- main.tex 옵션 B 적용: 5쌍 → 4쌍 thinking ablation, Kanana sibling pair는 별도 보고
+- comparison/figure 자동 재생성, 자동 표 생성 스크립트 model_id 정규화 fix
+- gpt-oss-120b KR T 누락 6건 보충 + gpt-oss-20b KR checkpoint dedup (각각 _backup으로 출처 archive)
 
----
+**환경 셋업** (불변):
+- 모든 캐시(`HF_HOME`, `VLLM_CACHE_ROOT`, `flashinfer`, `pip` 등)를 Lustre `/home/work/kftc_model/.cache/`로 redirect (`.bashrc` + `run_rerun_all.sh` 영구 설정)
+- pip 패키지 user-base는 `/home/work/kftc_model/.local` (PYTHONUSERBASE)
+- vllm 0.20.1 + flashinfer 0.6.8.post1
 
-## 다른 서버에서 진행할 작업 (분리됨)
+**런처**: `_paper/_experiments/scripts/run_rerun_all.sh <group> <gpu> <port>` (KR→EN→MT 순차).
+- 그룹: `gpt_oss_20b`, `gpt_oss_120b`, `kanana_inst_2601`, `kanana_think` (each `RERUN_*` group)
+- vLLM 통신 segfault 회피: `BENCH_CONCURRENCY=1`로 단일 스레드 권장 (Kanana-2-Think EN에서 concur=8/4 시 segfault 재발 확인)
 
-이 서버(GPU 0/1)는 **non-TP=2, non-thinking 변형**만 실험 중. 다른 서버에서 진행 권장:
-
-### A. TP=2 그룹 (70B+ 3 모델 × KR/EN/MT)
-
-```bash
-git pull --recurse-submodules
-bash _paper/_experiments/scripts/run_benchmark.sh --gpu 0,1 --port 11434 --group TP2 --mode kr
-bash _paper/_experiments/scripts/run_benchmark.sh --gpu 0,1 --port 11434 --group TP2 --mode en
-bash _paper/_experiments/scripts/run_benchmark.sh --gpu 0,1 --port 11434 --group TP2 --mode mt
-```
-
-대상 모델:
-1. `meta-llama/Llama-3.3-70B-Instruct`
-2. `Salesforce/Llama-xLAM-2-70b-fc-r`
-3. `skt/A.X-4.0` (72B)
-
-각 모델 약 5~10시간, 총 ~45~90시간 (KR/EN/MT 합산).
-
-### B. thinking ablation (9 모델 × think=True × KR/EN/MT)
-
-별도 추후 진행. 모델 목록:
-- Qwen3.5-0.8B/2B/4B/9B/27B (think=True)
-- Qwen3-4B-Thinking-2507 (think=True)
-- Qwen3-30B-A3B-Thinking-2507 (think=True)
-- kakaocorp/kanana-2-30b-a3b-thinking-2601 (think=True)
-- openai/gpt-oss-20b (think=True)
-
-`benchmark.py` MODELS 리스트에 각 모델의 think=True 항목이 정의돼 있음. `--models <name>` 만 주면 think+nothink 두 변형 모두 실행되므로, thinking-only 실행을 위해서는 환경변수 `BENCH_ONLY_THINK=1` 사용 (별도 구현 예정).
+이전 실험 (Round 1~7, 5/3 baseline 등) 의 누적 commit 이력은 `git log` 참조.
 
 ---
 
@@ -67,17 +49,6 @@ bash _paper/_experiments/scripts/run_benchmark.sh --gpu 0,1 --port 11434 --group
 5. **벤치마크 정합성**: 모든 정수 코드 → HOFINET 유효 값만. 위 §2 매핑 표 + `_datasets/HOFINET.MD` 참조.
 6. **commit 메시지**: `Co-Authored-By: Claude` 라인 추가 금지 (사용자 명시 선호).
 7. **submodule push 순서**: `_paper` repo → main repo submodule pointer 갱신 → 양쪽 push.
-
----
-
-## 컨텍스트 복원 시작 메시지 예시
-
-```
-이 repo의 CLAUDE.md, .claude/SESSION_HANDOFF.md를 순서대로 읽고 컨텍스트를 복원해줘.
-
-현재 다른 서버에서 v6 master가 KR phase 실행 중 (GPU 0/1, non-TP2 + non-thinking).
-나는 이 서버에서 [TP=2 / thinking ablation / 다른 작업]을 진행할 예정이야.
-```
 
 ---
 
