@@ -8,7 +8,14 @@
 
 from pathlib import Path
 
+import pytest
+
 import config
+
+# raw HOFINET 데이터/학습 모델은 비공개(거버넌스)이며 로컬에서 재생성된다.
+# 공개 repo의 fresh clone에는 없으므로, 존재할 때만 관련 테스트를 실행한다.
+_HAS_CSV = config.CSV_PATH.exists()
+_HAS_PARQUET = config.PARQUET_PATH.exists()
 
 
 class TestPathConstants:
@@ -24,6 +31,8 @@ class TestPathConstants:
         assert config.DATASETS_DIR.exists()
         assert config.DATASETS_DIR.is_dir()
 
+    @pytest.mark.skipif(not config.MODELS_DIR.exists(),
+                        reason="_models는 모델 학습 시 런타임 생성됨 (repo 미포함)")
     def test_models_dir_exists(self):
         """_models 디렉토리가 존재하는지 확인."""
         assert config.MODELS_DIR.exists()
@@ -60,22 +69,28 @@ class TestPathConstants:
 class TestDataFiles:
     """데이터 파일 존재 확인."""
 
+    @pytest.mark.skipif(not _HAS_CSV, reason="HOFINET.csv 비공개 (로컬 재생성)")
     def test_csv_file_exists(self):
         """HOFINET.csv 파일이 존재하는지 확인."""
         assert config.CSV_PATH.exists(), "HOFINET.csv 파일이 없습니다"
 
+    @pytest.mark.skipif(not _HAS_PARQUET, reason="HOFINET.parquet 비공개 (로컬 재생성)")
     def test_parquet_file_exists(self):
         """HOFINET.parquet 파일이 존재하는지 확인."""
         assert config.PARQUET_PATH.exists(), "HOFINET.parquet 파일이 없습니다"
 
+    @pytest.mark.skipif(not _HAS_CSV, reason="HOFINET.csv 비공개 (로컬 재생성)")
     def test_csv_file_not_empty(self):
         """CSV 파일이 비어있지 않은지 확인."""
         assert config.CSV_PATH.stat().st_size > 0
 
+    @pytest.mark.skipif(not _HAS_PARQUET, reason="HOFINET.parquet 비공개 (로컬 재생성)")
     def test_parquet_file_not_empty(self):
         """Parquet 파일이 비어있지 않은지 확인."""
         assert config.PARQUET_PATH.stat().st_size > 0
 
+    @pytest.mark.skipif(not (_HAS_CSV and _HAS_PARQUET),
+                        reason="HOFINET 원천 데이터 비공개 (로컬 재생성)")
     def test_parquet_smaller_than_csv(self):
         """Parquet 파일이 CSV보다 작은지 확인 (압축 효과)."""
         csv_size = config.CSV_PATH.stat().st_size

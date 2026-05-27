@@ -37,11 +37,6 @@ _models/*.joblib
 .coverage
 htmlcov/
 
-# Benchmark logs (regeneratable)
-_paper/results/**/logs/
-_paper/results_en/**/logs/
-_paper/results_repro/**/logs/
-
 # Invalidated baseline backup (재실험 전 라운드, 보존만 하고 추적 안 함)
 _backup/
 
