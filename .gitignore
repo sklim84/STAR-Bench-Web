@@ -46,3 +46,6 @@ _backup/
 .claude/scheduled_tasks.lock
 .claude/cache/
 .claude/logs/
+
+# Claude Code 가이드는 워크스페이스 루트(KA-001-AML-Assistant/CLAUDE.md)에서 관리
+CLAUDE.md
