@@ -2,17 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Session Handoff (Read First)
-
-다른 서버/시점의 claude code 인스턴스가 컨텍스트를 빠르게 복원하기 위해 다음 파일을 먼저 읽을 것:
-
-1. `.claude/SESSION_HANDOFF.md` — 현재 활성 작업 상태 + 영구 규약 + 다른 서버 분담 작업
-
-추가 결정 이력은 `git log` (특히 main repo와 `_paper` submodule의 commit 메시지 본문) 참조.
-
 ## Project Overview
 
-AML Assistant Platform - 에이전트를 활용하여 자금세탁의심거래를 분석하는 웹 서비스
+AML Assistant Platform (**STAR-Bench-Web**) - 에이전트를 활용하여 자금세탁의심거래를 분석하는 웹 서비스. 본 repo는 STAR-Bench 벤치마크의 23개 도구가 도출된 **레퍼런스 플랫폼**이다.
 
 | 기능 | 페이지 | 비즈니스 로직 | 상태 |
 |------|--------|--------------|------|
@@ -25,6 +17,8 @@ AML Assistant Platform - 에이전트를 활용하여 자금세탁의심거래�
 | 기능7: 거래 모니터링 규칙 탐지 | `_pages/monitoring_page.py` | `src/features/monitoring.py` | 완성 |
 | 기능8: 자금 흐름 분석 (스머핑/기관간) | — | `src/features/flow_analyzer.py` | 완성 |
 | 기능9: AML 참조 자료 | `_pages/aml_reference_page.py` | `src/features/aml_reference.py` | 완성 |
+
+> **관련 저장소**: 벤치마크는 `STAR-Bench`, 논문은 `STAR-Bench-paper` (별도 repo). 이 repo는 웹 플랫폼만 포함한다.
 
 ## Commands
 
@@ -40,27 +34,11 @@ docker-compose up -d                                    # Memgraph 실행 (그�
 python -c "from src.data.graph_etl import run_etl; print(run_etl())"  # DuckDB → Memgraph ETL
 ```
 
-**벤치마크 (`_paper/_experiments/scripts/`)**:
-```bash
-# 단일 모델 KR
-PYTHONPATH=_paper python -m _experiments.scripts.benchmark --models Qwen/Qwen3-8B --output _paper/_experiments/results_kr/ --checkpoint --resume
-
-# 영문 ablation (--cases-dir 추가)
-PYTHONPATH=_paper python -m _experiments.scripts.benchmark --models Qwen/Qwen3-8B --output _paper/_experiments/results_en/ --cases-dir _paper/benchmarks_en/ --checkpoint --resume
-
-# 멀티턴 STR 벤치마크
-PYTHONPATH=_paper python -m _experiments.scripts.benchmark_multiturn --models Qwen/Qwen3-8B --output _paper/_experiments/results_mt/
-
-# vLLM 자동화 (GPU 서버, 24-model 분담)
-bash _paper/_experiments/scripts/run_benchmark.sh --gpu 0 --port 11434 --group S1_A --mode kr
-nohup bash _paper/_experiments/scripts/run_master.sh --server 1 --modes kr,en,mt > master_s1.log 2>&1 &
-BENCH_MAX_TOTAL=5 bash _paper/_experiments/scripts/run_benchmark.sh --gpu 0 --port 11434 --group SMOKE --mode kr  # 스모크
-```
+**데이터 준비**: 거버넌스상 HOFINET 원천 데이터는 이 repo에 포함되지 않는다(`_datasets/HOFINET.MD` 스키마만 포함). 앱을 실행하려면 `_datasets/HOFINET.parquet`(또는 `.duckdb`)를 로컬에 배치하거나, 원천 CSV를 두고 `python -m src.data.loader`로 생성해야 한다. 데이터·모델 부재 시 `tests/test_config.py`의 데이터 의존 테스트는 자동 skip된다.
 
 **환경 변수** (`.env` 파일 또는 환경에 설정):
 ```
-OPENAI_API_KEY=...           # 기능4 에이전트, OpenAI 벤치마크에 필요
-ANTHROPIC_API_KEY=...        # Anthropic 모델 벤치마크에 필요
+OPENAI_API_KEY=...           # 기능4 에이전트에 필요
 MEMGRAPH_HOST=localhost      # 기본값, 변경 시 설정
 MEMGRAPH_PORT=7687           # 기본값
 ```
@@ -118,9 +96,7 @@ HOFINET 데이터셋 (Interbank Home/Firm Banking Network) - 전자금융공동�
 DuckDB 테이블명 `hofinet`. **컬럼명이 한글**이므로 SQL에서 그대로 사용: `SELECT 거래금액 FROM hofinet`.
 클래스 불균형 325.6:1 (정상 99.69% / 이상 0.31%). 상세 스키마는 `_datasets/HOFINET.MD` 참조.
 
-**학습 데이터**: `_datasets/original/{Training,Test,Validation}/` 디렉토리에 분할 저장.
-
-**이상거래유형 코드 (HOFINET 공식 매핑)**: 1=갑작스러운 거래패턴의 변화, 2=신규 수신처 거래(63.87%로 최다), 3=분할 거래, 4=다중거래의 동시 요청, 5=거액 입금 후 당일 인출, 7=심야/새벽 대량 거래 (코드 6은 미존재). 영문 라벨은 `.claude/SESSION_HANDOFF.md` "핵심 영구 규약" 섹션 참조.
+**이상거래유형 코드 (HOFINET 공식 매핑)**: 1=갑작스러운 거래패턴의 변화, 2=신규 수신처 거래(63.87%로 최다), 3=분할 거래, 4=다중거래의 동시 요청, 5=거액 입금 후 당일 인출, 7=심야/새벽 대량 거래 (코드 6은 미존재).
 
 **컬럼**: 거래일자(int32), 거래시간대(int8, 0/3/6/9/12/15/18/21만 유효), 출금금융회사일련번호(int16, 50종), 출금계좌일련번호(int64), 입금금융회사일련번호(int16, 54종), 입금계좌일련번호(int64), 자금구분(int8, {0,1,3,4}), 매체구분(int8, 1~7), 거래금액(int64), 이상거래여부(int8, 0/1), 이상거래유형(int8), 이상거래설명(utf8)
 
@@ -175,69 +151,3 @@ def detect_something(...):
 - Memgraph 의존 함수는 `unittest.mock.patch`로 `graph_db` 모킹하여 테스트
 - **DuckDB 격리**: `tests/conftest.py`의 `patch_db_connection` fixture(autouse, session scope)가 `src/data/db._conn`을 in-memory DuckDB로 교체한다. 파일 기반 DuckDB는 단일 프로세스만 write 모드로 열 수 있으므로 앱 실행 중 pytest를 돌리면 파일 잠금 충돌이 발생한다 — 앱을 종료한 뒤 테스트를 실행할 것
 - `agent.py`가 `from src.features.detector import load_model`로 import하므로, 테스트에서 load_model 모킹 시 `src.features.agent.load_model`을 패치해야 함 (`src.features.detector.load_model` 패치 무효)
-
-## Research
-
-논문 작성 목적의 별도 공간. 웹 서비스 코드(`src/`, `_pages/`)와 독립적으로 관리한다.
-
-```
-_paper/                — git submodule (KA-001-AML-paper repo)
-  _manuscript/         — 논문 원고 (main.tex, main_en.tex) + references/
-  benchmarks/          — 싱글턴 KR 벤치마크 케이스 (1,258건, cases_<tool>.json 18개)
-  benchmarks_en/       — 영문 번역 케이스 (KR-EN ablation, 1,258건, 16개)
-  benchmarks_multiturn/— 멀티턴 STR 시나리오 (50개, cases_str_workflow.json)
-  figures/             — 논문 figure (PNG/PDF) + generate_*.py
-  tables/              — 비교 리포트 (Excel)
-  _experiments/        — 벤치마크 실행 코드 + 재실험 결과 (R1~R7 정정 후 실험은 여기로)
-    scripts/
-      benchmark.py           — single-turn 벤치마크 엔진 (3개 프로바이더 레지스트리)
-      benchmark_multiturn.py — 멀티턴 STR 벤치마크
-      tools_en.py            — 영문 도구 정의 + SYSTEM_PROMPT_EN (--tools-lang en ablation)
-      run_benchmark.sh       — per-GPU runner (S1_A/S1_B/S2_TP*/S2_LARGE_* 분담)
-      run_master.sh          — 마스터 오케스트레이터 (--server 1|2, KR/EN/MT 순차)
-      tool_chat_template_phi4_mini.jinja — Phi-4-mini-instruct FC 강제 chat template
-      kanana_tool_calls/     — vLLM 커스텀 파서 플러그인
-    results_kr/              — KR phase 결과 (eval/, checkpoint/, comparison_*.xlsx)
-    results_en/              — EN phase 결과
-    results_mt/              — MT phase 결과
-    bfcl_results/            — RQ6 BFCL 직접 실행 결과 (score/<model>/)
-    analysis/                — 후처리 분석 산출물
-    logs/                    — 실행 로그 + master.pid
-```
-
-**실험 진행 상태** (현재 진행: 2026-04-29 v6 master): HOFINET 정합성 정정 + 시스템 프롬프트 간소화 후 Round 1 재실험 중. 이전 라운드 결과(`_backup/results/`, `_backup/results_multiturn/`)는 invalidated baseline. 자세한 변경 이력은 `git log`.
-
-Import 경로: `_experiments.scripts.benchmark` (PYTHONPATH=`_paper`로 설정 필요)
-
-### 다중 모델 벤치마크 (`_paper/_experiments/scripts/benchmark.py`)
-
-3개 프로바이더 레지스트리 (think/nothink 변형 분리 entry로 등록). 프로바이더별 주의사항:
-- **OpenAI**: gpt-4o-mini, gpt-5-mini. 추론 모델(gpt-5, o1, o3, o4)은 `temperature=0` 미지원 → 자동 스킵. `max_completion_tokens` 사용 (not `max_tokens`)
-- **Anthropic**: claude-haiku-4-5, claude-sonnet-4-5. 도구 스키마의 한글 프로퍼티 키를 영문으로 변환 필요 (`_KO_EN_KEY_MAP`). 응답의 영문 키는 한글로 역변환 (`_EN_KO_KEY_MAP`)
-- **vLLM**: Qwen3/3.5, Kanana, EXAONE, Mistral, gpt-oss, A.X 등. 모델별 tool-call-parser 지정 필요 (hermes, mistral, qwen3_xml, qwen3_coder, llama3_json, xlam, glm47, openai). Kanana는 커스텀 파서 플러그인 사용. Thinking 모델은 think/nothink 두 entry로 ablation 분리 등록
-
-**Native FC 모드**: vLLM tool-call-parser + OpenAI/Anthropic native `tools` 필드만 사용 (Prompting mode 미사용). 시스템 프롬프트는 도구 목록 중복 없이 워크플로우/STR 가이드/Data Schema만 포함 (3,475→1,785 chars).
-
-**스케줄링** (24-model 서버 분담, MODELS.md 기준):
-- Server 1 (2× H100): S1_A (GPU 0, 6 모델) + S1_B (GPU 1, 5 모델) 병렬
-- Server 2 (6× H100): TP=4 1 (gpt-oss-120b) + TP=2 3 (70B+ 모델 페어) + Single-GPU Large 9 모델
-- thinking 변형 (think+nothink): RQ3 ablation으로 5 핵심 페어만 별도 등록 (Qwen3.5-4B/27B, gpt-oss-20b/120b, kanana-2-think)
-
-**vLLM 자동화** (`_paper/_experiments/scripts/run_master.sh`):
-- 마스터: `--server 1|2 --modes kr,en,mt`. 서버1은 S1_A+S1_B 병렬, 서버2는 α(TP=4+L1+L2) → β(TP=2 3 pair) → γ(L3) 단계별 진행
-- 옵션: `--skip-tp2` `--skip-tp4` `--skip-thinking`
-- 단일 그룹: `bash run_benchmark.sh --gpu <id> --port <port> --group <S1_A|S1_B|S2_TP4|S2_TP2_A|S2_LARGE_L1|...> --mode <kr|en|mt>`
-- 환경변수: `BENCH_MAX_TOTAL=5` (스모크), `BENCH_SKIP_THINK=1` (think 변형 제외)
-
-### 논문 작성 에이전트 (`.claude/agents/paper-*.md`)
-
-| 에이전트 | 역할 | 주요 담당 |
-|---------|------|----------|
-| `paper-author1` | 제1저자 | 실험·구현, Methodology/Results 작성 |
-| `paper-author2` | 제2저자 | 문헌·이론, Related Work/Introduction 작성 |
-| `paper-corresponding` | 교신저자 | 총괄·감수, Abstract/Conclusion 작성 |
-| `paper-reviewer1` | 심사위원1 | 기술 검증 (방법론, 통계, 재현성) |
-| `paper-reviewer2` | 심사위원2 | AML 도메인 (규제, 실무, 윤리) |
-| `paper-reviewer3` | 심사위원3 | NLP/LLM (메트릭, 모델 비교, 기여도) |
-
-벤치마크 케이스 JSON 구조: `[{"question": "...", "expected_tool_call": {"name": "...", "arguments": {...}}}]`
