@@ -46,12 +46,12 @@ def mock_model():
     np.random.seed(42)
     n = 200
     X = pd.DataFrame({
-        "거래시간대": np.random.choice([0, 3, 6, 9, 12, 15, 18, 21], n),
-        "출금금융회사일련번호": np.random.randint(1, 100, n),
-        "입금금융회사일련번호": np.random.randint(1, 100, n),
-        "자금구분": np.random.choice([0, 1, 3, 4], n),
-        "매체구분": np.random.randint(1, 8, n),
-        "거래금액": np.random.randint(10000, 10000000, n),
+        "time_slot": np.random.choice([0, 3, 6, 9, 12, 15, 18, 21], n),
+        "sender_bank": np.random.randint(1, 100, n),
+        "receiver_bank": np.random.randint(1, 100, n),
+        "fund_type": np.random.choice([0, 1, 3, 4], n),
+        "media_type": np.random.randint(1, 8, n),
+        "amount": np.random.randint(10000, 10000000, n),
     })
     y = pd.Series([0] * 190 + [1] * 10)
     model = XGBClassifier(n_estimators=10, random_state=42, n_jobs=1, verbosity=0)
@@ -66,12 +66,12 @@ def eval_data():
     np.random.seed(42)
     n = 200
     X = pd.DataFrame({
-        "거래시간대": np.random.choice([0, 3, 6, 9, 12, 15, 18, 21], n),
-        "출금금융회사일련번호": np.random.randint(1, 100, n),
-        "입금금융회사일련번호": np.random.randint(1, 100, n),
-        "자금구분": np.random.choice([0, 1, 3, 4], n),
-        "매체구분": np.random.randint(1, 8, n),
-        "거래금액": np.random.randint(10000, 10000000, n),
+        "time_slot": np.random.choice([0, 3, 6, 9, 12, 15, 18, 21], n),
+        "sender_bank": np.random.randint(1, 100, n),
+        "receiver_bank": np.random.randint(1, 100, n),
+        "fund_type": np.random.choice([0, 1, 3, 4], n),
+        "media_type": np.random.randint(1, 8, n),
+        "amount": np.random.randint(10000, 10000000, n),
     })
     y = pd.Series([0] * 190 + [1] * 10)
     model = XGBClassifier(n_estimators=10, random_state=42, n_jobs=1, verbosity=0)
@@ -94,7 +94,7 @@ class TestConstants:
 
     def test_feature_cols_content(self):
         """FEATURE_COLS가 기대하는 컬럼을 포함하는지 확인."""
-        expected = {"거래시간대", "출금금융회사일련번호", "입금금융회사일련번호", "자금구분", "매체구분", "거래금액"}
+        expected = {"time_slot", "sender_bank", "receiver_bank", "fund_type", "media_type", "amount"}
         assert expected == set(FEATURE_COLS)
 
     def test_feature_cols_count(self):
@@ -103,7 +103,7 @@ class TestConstants:
 
     def test_target_col_defined(self):
         """TARGET_COL이 올바르게 정의되어 있는지 확인."""
-        assert TARGET_COL == "이상거래여부"
+        assert TARGET_COL == "is_fraud"
 
     def test_model_path_is_pathlib(self):
         """MODEL_PATH가 Path 객체인지 확인."""
@@ -169,8 +169,8 @@ class TestGetFeatureImportance:
 
     def test_expected_columns(self, mock_model):
         fi = get_feature_importance(mock_model)
-        assert "피처" in fi.columns
-        assert "중요도" in fi.columns
+        assert "feature" in fi.columns
+        assert "importance" in fi.columns
 
     def test_row_count_matches_features(self, mock_model):
         """피처 중요도 행 수가 FEATURE_COLS 수와 같아야 한다."""
@@ -181,24 +181,24 @@ class TestGetFeatureImportance:
         """모든 FEATURE_COLS가 결과에 포함되어야 한다."""
         fi = get_feature_importance(mock_model)
         for col in FEATURE_COLS:
-            assert col in fi["피처"].tolist()
+            assert col in fi["feature"].tolist()
 
     def test_sorted_descending(self, mock_model):
         """중요도 기준 내림차순 정렬이어야 한다."""
         fi = get_feature_importance(mock_model)
-        importances = fi["중요도"].tolist()
+        importances = fi["importance"].tolist()
         assert importances == sorted(importances, reverse=True)
 
     def test_importance_sum_approximately_one(self, mock_model):
         """피처 중요도 합이 약 1.0이어야 한다 (XGBoost 정규화)."""
         fi = get_feature_importance(mock_model)
-        total = fi["중요도"].sum()
+        total = fi["importance"].sum()
         assert abs(total - 1.0) < 0.01, f"피처 중요도 합: {total}"
 
     def test_all_importances_non_negative(self, mock_model):
         """모든 피처 중요도가 0 이상이어야 한다."""
         fi = get_feature_importance(mock_model)
-        assert (fi["중요도"] >= 0).all()
+        assert (fi["importance"] >= 0).all()
 
 
 # ──────────────────────────────────────────────
@@ -220,28 +220,28 @@ class TestPredictFromDb:
 
     def test_prediction_columns_added(self, prediction_df):
         """예측확률과 예측결과 컬럼이 추가되어야 한다."""
-        assert "예측확률" in prediction_df.columns
-        assert "예측결과" in prediction_df.columns
+        assert "prob" in prediction_df.columns
+        assert "prediction" in prediction_df.columns
 
     def test_original_columns_present(self, prediction_df):
         """원래 DB 컬럼들이 유지되어야 한다."""
-        original_cols = {"거래일자", "거래금액", "이상거래여부"}
+        original_cols = {"date", "amount", "is_fraud"}
         assert original_cols.issubset(set(prediction_df.columns))
 
     def test_probability_range(self, prediction_df):
         """예측확률이 0~1 사이이어야 한다."""
-        probs = prediction_df["예측확률"]
+        probs = prediction_df["prob"]
         assert (probs >= 0).all()
         assert (probs <= 1).all()
 
     def test_prediction_binary(self, prediction_df):
         """예측결과가 0 또는 1이어야 한다."""
-        preds = set(prediction_df["예측결과"].unique())
+        preds = set(prediction_df["prediction"].unique())
         assert preds.issubset({0, 1})
 
     def test_sorted_by_probability_desc(self, prediction_df):
         """예측확률 기준 내림차순 정렬이어야 한다."""
-        probs = prediction_df["예측확률"].tolist()
+        probs = prediction_df["prob"].tolist()
         assert probs == sorted(probs, reverse=True)
 
     def test_feature_cols_present(self, prediction_df):
@@ -356,7 +356,7 @@ class TestFindOptimalThreshold:
     def test_thresholds_df_columns(self, threshold_result):
         """thresholds_df에 필수 컬럼이 있는지 확인."""
         df = threshold_result["thresholds_df"]
-        expected_cols = {"임계값", "Precision", "Recall", "F1-Score", "TP", "FP", "FN"}
+        expected_cols = {"threshold", "precision", "recall", "f1", "tp", "fp", "fn"}
         assert expected_cols.issubset(set(df.columns))
 
     def test_thresholds_df_rows(self, threshold_result):
@@ -367,7 +367,7 @@ class TestFindOptimalThreshold:
     def test_thresholds_sorted(self, threshold_result):
         """thresholds_df의 임계값이 오름차순인지 확인."""
         df = threshold_result["thresholds_df"]
-        vals = df["임계값"].tolist()
+        vals = df["threshold"].tolist()
         assert vals == sorted(vals)
 
     def test_pr_curve_is_tuple(self, threshold_result):
@@ -380,7 +380,7 @@ class TestFindOptimalThreshold:
         """F1이 precision과 recall로부터 올바르게 계산되는지 확인."""
         df = threshold_result["thresholds_df"]
         for _, row in df.iterrows():
-            p, r, f = row["Precision"], row["Recall"], row["F1-Score"]
+            p, r, f = row["precision"], row["recall"], row["f1"]
             if p + r > 0:
                 expected_f1 = 2 * p * r / (p + r)
                 assert abs(f - expected_f1) < 0.01, f"F1 불일치: {f} vs {expected_f1}"
@@ -453,36 +453,36 @@ class TestEvaluateByFraudType:
 
     def test_expected_columns(self, fraud_type_result):
         """필수 컬럼이 있는지 확인."""
-        expected = {"이상거래유형", "유형설명", "전체건수", "탐지건수", "Recall"}
+        expected = {"fraud_type", "type_desc", "total_count", "detected_count", "recall"}
         assert expected.issubset(set(fraud_type_result.columns))
 
     def test_recall_range(self, fraud_type_result):
         """Recall이 0~1 사이인지 확인."""
         if not fraud_type_result.empty:
-            assert (fraud_type_result["Recall"] >= 0).all()
-            assert (fraud_type_result["Recall"] <= 1).all()
+            assert (fraud_type_result["recall"] >= 0).all()
+            assert (fraud_type_result["recall"] <= 1).all()
 
     def test_detected_lte_total(self, fraud_type_result):
         """탐지건수가 전체건수 이하인지 확인."""
         if not fraud_type_result.empty:
             for _, row in fraud_type_result.iterrows():
-                assert row["탐지건수"] <= row["전체건수"]
+                assert row["detected_count"] <= row["total_count"]
 
     def test_total_positive(self, fraud_type_result):
         """전체건수가 양수인지 확인."""
         if not fraud_type_result.empty:
-            assert (fraud_type_result["전체건수"] > 0).all()
+            assert (fraud_type_result["total_count"] > 0).all()
 
     def test_fraud_types_valid(self, fraud_type_result):
         """이상거래유형이 유효한 범위(1~7)인지 확인."""
         if not fraud_type_result.empty:
-            types = set(fraud_type_result["이상거래유형"])
+            types = set(fraud_type_result["fraud_type"])
             assert types.issubset(set(range(1, 8)))
 
     def test_descriptions_not_empty(self, fraud_type_result):
         """유형설명이 비어있지 않은지 확인."""
         if not fraud_type_result.empty:
-            for desc in fraud_type_result["유형설명"]:
+            for desc in fraud_type_result["type_desc"]:
                 assert desc is not None and len(str(desc)) > 0
 
 
@@ -503,7 +503,7 @@ class TestGetProbabilityDistribution:
 
     def test_expected_columns(self, prob_dist):
         """필수 컬럼이 있는지 확인."""
-        expected = {"구간", "정상", "이상"}
+        expected = {"bin", "normal", "fraud"}
         assert expected.issubset(set(prob_dist.columns))
 
     def test_ten_bins(self, prob_dist):
@@ -512,13 +512,13 @@ class TestGetProbabilityDistribution:
 
     def test_counts_non_negative(self, prob_dist):
         """모든 건수가 0 이상인지 확인."""
-        assert (prob_dist["정상"] >= 0).all()
-        assert (prob_dist["이상"] >= 0).all()
+        assert (prob_dist["normal"] >= 0).all()
+        assert (prob_dist["fraud"] >= 0).all()
 
     def test_total_matches_data_size(self, prob_dist, eval_data):
         """정상 + 이상 합계가 데이터 크기와 일치하는지 확인."""
         _, _, y, _ = eval_data
-        total = prob_dist["정상"].sum() + prob_dist["이상"].sum()
+        total = prob_dist["normal"].sum() + prob_dist["fraud"].sum()
         assert total == len(y)
 
     def test_custom_bins(self, eval_data):
@@ -529,7 +529,7 @@ class TestGetProbabilityDistribution:
 
     def test_bin_labels_format(self, prob_dist):
         """구간 레이블이 올바른 형식인지 확인."""
-        for label in prob_dist["구간"]:
+        for label in prob_dist["bin"]:
             assert "~" in label
 
 
@@ -552,12 +552,12 @@ class TestTrainModelParams:
         np.random.seed(42)
         n = 100
         X = pd.DataFrame({
-            "거래시간대": np.random.choice([0, 3, 6, 9], n),
-            "출금금융회사일련번호": np.random.randint(1, 50, n),
-            "입금금융회사일련번호": np.random.randint(1, 50, n),
-            "자금구분": np.random.choice([0, 1], n),
-            "매체구분": np.random.randint(1, 4, n),
-            "거래금액": np.random.randint(10000, 1000000, n),
+            "time_slot": np.random.choice([0, 3, 6, 9], n),
+            "sender_bank": np.random.randint(1, 50, n),
+            "receiver_bank": np.random.randint(1, 50, n),
+            "fund_type": np.random.choice([0, 1], n),
+            "media_type": np.random.randint(1, 4, n),
+            "amount": np.random.randint(10000, 1000000, n),
         })
         y_train = pd.Series([0] * 95 + [1] * 5)
         y_val = pd.Series([0] * 95 + [1] * 5)
@@ -580,12 +580,12 @@ class TestTrainModelParams:
         np.random.seed(42)
         n = 100
         X = pd.DataFrame({
-            "거래시간대": np.random.choice([0, 3], n),
-            "출금금융회사일련번호": np.random.randint(1, 20, n),
-            "입금금융회사일련번호": np.random.randint(1, 20, n),
-            "자금구분": np.random.choice([0, 1], n),
-            "매체구분": np.random.randint(1, 3, n),
-            "거래금액": np.random.randint(10000, 500000, n),
+            "time_slot": np.random.choice([0, 3], n),
+            "sender_bank": np.random.randint(1, 20, n),
+            "receiver_bank": np.random.randint(1, 20, n),
+            "fund_type": np.random.choice([0, 1], n),
+            "media_type": np.random.randint(1, 3, n),
+            "amount": np.random.randint(10000, 500000, n),
         })
         y = pd.Series([0] * 95 + [1] * 5)
 
@@ -616,6 +616,6 @@ class TestClassImbalanceHandling:
 
     def test_feature_cols_for_imbalanced_data(self):
         """FEATURE_COLS가 클래스 불균형 감지에 유용한 피처를 포함하는지 확인."""
-        # 거래금액과 거래시간대는 이상거래 탐지에 핵심 피처
-        assert "거래금액" in FEATURE_COLS
-        assert "거래시간대" in FEATURE_COLS
+        # amount과 time_slot는 이상거래 탐지에 핵심 피처
+        assert "amount" in FEATURE_COLS
+        assert "time_slot" in FEATURE_COLS

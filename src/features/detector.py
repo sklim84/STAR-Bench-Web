@@ -19,22 +19,16 @@ from sklearn.metrics import (
 
 import config
 from src.data.db import query
+from src.features.aml_reference import FRAUD_TYPE_MAP
 
 
 FEATURE_COLS = ["time_slot", "sender_bank", "receiver_bank", "fund_type", "media_type", "amount"]
 TARGET_COL = "is_fraud"
 MODEL_PATH = config.MODELS_DIR / "xgb_detector.joblib"
 
-# Fraud type explanation mapping
-FRAUD_TYPE_LABELS = {
-    1: "Money Laundering",
-    2: "New Customer",
-    3: "Mule Account",
-    4: "Voice Phishing",
-    5: "Illegal Gambling",
-    6: "Illegal Private Finance",
-    7: "Other",
-}
+# HOFINET fraud_type code → English label (single source of truth: HOFINET.MD §4.1).
+# Kept as an alias for backward compatibility with existing imports.
+FRAUD_TYPE_LABELS = FRAUD_TYPE_MAP
 
 
 def _load_split(split_name: str) -> pd.DataFrame:
