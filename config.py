@@ -19,6 +19,16 @@ DUCKDB_PATH = DATASETS_DIR / "HOFINET.duckdb"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
+# OpenRouter (primary provider for the analysis agent — OpenAI-compatible API).
+# If OPENROUTER_API_KEY is set, agent.chat() routes through OpenRouter; otherwise
+# it falls back to direct OpenAI with OPENAI_API_KEY.
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")
+# Optional OpenRouter rankings/analytics headers (recommended by OpenRouter docs).
+OPENROUTER_HTTP_REFERER = os.getenv("OPENROUTER_HTTP_REFERER", "")
+OPENROUTER_X_TITLE = os.getenv("OPENROUTER_X_TITLE", "STAR-Bench AML Assistant")
+
 # DuckDB settings
 DUCKDB_THREADS = os.cpu_count()
 

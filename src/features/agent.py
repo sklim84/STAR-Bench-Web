@@ -2316,8 +2316,39 @@ def _message_to_dict(msg):
 MAX_TOOL_ROUNDS = 5
 
 
+def _build_chat_client() -> tuple["OpenAI", str, dict]:
+    """Builds the chat client and selects model.
+
+    Returns (client, model, extra_headers).
+
+    Routing precedence:
+      1. OPENROUTER_API_KEY set  → OpenRouter (OpenAI-compatible) with
+         OPENROUTER_BASE_URL + OPENROUTER_MODEL.
+      2. Otherwise               → direct OpenAI with OPENAI_API_KEY + gpt-4o-mini.
+
+    OpenRouter accepts optional HTTP-Referer / X-Title headers for app
+    attribution; we pass them through `extra_headers` when present.
+    """
+    if config.OPENROUTER_API_KEY:
+        client = OpenAI(
+            api_key=config.OPENROUTER_API_KEY,
+            base_url=config.OPENROUTER_BASE_URL,
+        )
+        extra_headers: dict = {}
+        if config.OPENROUTER_HTTP_REFERER:
+            extra_headers["HTTP-Referer"] = config.OPENROUTER_HTTP_REFERER
+        if config.OPENROUTER_X_TITLE:
+            extra_headers["X-Title"] = config.OPENROUTER_X_TITLE
+        return client, config.OPENROUTER_MODEL, extra_headers
+
+    return OpenAI(api_key=config.OPENAI_API_KEY), "gpt-4o-mini", {}
+
+
 def chat(messages: list[dict]) -> tuple[str, list[dict], list[dict]]:
-    """Performs conversation with OpenAI API and returns response.
+    """Performs conversation with the LLM and returns response.
+
+    Routes through OpenRouter when OPENROUTER_API_KEY is set, otherwise falls
+    back to direct OpenAI (see `_build_chat_client`).
 
     Args:
         messages: Conversation history (list of dicts, including user/assistant/tool)
@@ -2326,19 +2357,22 @@ def chat(messages: list[dict]) -> tuple[str, list[dict], list[dict]]:
         (assistant_content, updated_messages, tool_events)
         - tool_events: each tool call info [{name, arguments, result}, ...]
     """
-    client = OpenAI(api_key=config.OPENAI_API_KEY)
+    client, model, extra_headers = _build_chat_client()
 
     full_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
     tool_events: list[dict] = []
 
     for _ in range(MAX_TOOL_ROUNDS):
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
+        request_kwargs: dict = dict(
+            model=model,
             messages=full_messages,
             tools=TOOLS,
             tool_choice="auto",
             max_tokens=4096,
         )
+        if extra_headers:
+            request_kwargs["extra_headers"] = extra_headers
+        response = client.chat.completions.create(**request_kwargs)
 
         msg = response.choices[0].message
 
