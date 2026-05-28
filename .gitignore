@@ -24,8 +24,11 @@ venv/
 .DS_Store
 Thumbs.db
 
-# Generated data (Parquet, DuckDB - regenerated from CSV)
-# _datasets/*.parquet, *.duckdb, *.csv은 Git LFS로 추적 (.gitattributes 참조)
+# Raw HOFINET data — governance: 공개 repo 금지 (raw 4.7M건 트랜잭션)
+# 로컬 작업용으로만 보관, README의 안내대로 별도 배치하여 사용.
+_datasets/*.csv
+_datasets/*.parquet
+_datasets/*.duckdb
 _datasets/*.duckdb.wal
 _datasets/original/
 

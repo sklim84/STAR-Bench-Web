@@ -144,12 +144,12 @@ app.py                          # 라우팅 + 글로벌 CSS 주입
 
 논문 작성 목적의 에이전트 행위능력 벤치마크입니다. AML 도메인 특화 23개 도구에 대해 LLM의 도구 선택(tool selection) 및 파라미터 추출(parameter extraction) 능력을 평가합니다.
 
-- **벤치마크 데이터**: `_paper/` (git submodule, [KA-001-AML-paper](https://github.com/sklim84/KA-001-AML-paper) repo)
-- **실행 스크립트 & 결과**: `_experiments/` (본 repo)
+- **벤치마크 데이터·엔진·결과**: 별도 repo [STAR-Bench](https://github.com/sklim84/STAR-Bench)로 분리 (워크스페이스에서는 sibling 디렉토리 `../star-bench/`).
+- **논문 원고**: 별도 repo [STAR-Bench-paper](https://github.com/sklim84/STAR-Bench-paper) (`../star-bench-paper/`).
 
 ### 벤치마크 데이터셋 구성
 
-벤치마크 데이터셋은 4개 시트(도구 정의, 평가 시나리오, 벤치마크 케이스, 케이스 요약)로 구성되며, 상세 내용은 [`benchmark_dataset.xlsx`](_paper/benchmarks/benchmark_dataset.xlsx)를 참조합니다.
+벤치마크 데이터셋은 4개 시트(도구 정의, 평가 시나리오, 벤치마크 케이스, 케이스 요약)로 구성되며, 상세 내용은 STAR-Bench repo의 [`benchmarks/benchmark_dataset.xlsx`](https://github.com/sklim84/STAR-Bench/blob/main/benchmarks/benchmark_dataset.xlsx)를 참조합니다.
 
 - **총 테스트 케이스**: 1,258건 (정상 1,099건 + 무관질문 159건)
 - **평가 도구**: 23개 (AML 에이전트의 function calling 도구)
@@ -202,7 +202,7 @@ app.py                          # 라우팅 + 글로벌 CSS 주입
 
 ### 실험 결과 (44개 모델, 14개 계열)
 
-상세 결과는 [`_paper/README.md`](_paper/README.md) 참조.
+상세 결과는 [STAR-Bench README](https://github.com/sklim84/STAR-Bench/blob/main/README.md) 참조.
 
 #### 싱글턴 Tool Calling (KR, 1,258건 × 44 모델, Top 10)
 

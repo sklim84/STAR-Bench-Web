@@ -123,33 +123,41 @@ _STR_REQUIRED_FIELDS = {
 
 
 # ---------------------------------------------------------------------------
-# Transaction Data Mappings (Codes -> English Labels)
+# HOFINET Transaction Data Mappings (Codes -> English Labels)
+#
+# Source of truth: _datasets/HOFINET.MD §4.1, §6.2, §6.3.
+# Labels are direct English translations of the HOFINET original Korean
+# definitions. Prior to 2026-05-28 these dictionaries held unrelated AML
+# categories ("Money Laundering"/"ATM/CD"/...) which did not correspond to
+# the HOFINET coding scheme — that regression has been corrected here.
+#
+# Note: HOFINET fraud_type uses codes 1, 2, 3, 4, 5, 7 (code 6 is unused).
 # ---------------------------------------------------------------------------
 
 FRAUD_TYPE_MAP = {
-    1: "Money Laundering",
-    2: "New Customer",
-    3: "Mule Account",
-    4: "Voice Phishing",
-    5: "Illegal Gambling",
-    6: "Illegal Private Finance",
-    7: "Other",
+    1: "Sudden Change in Transaction Pattern",
+    2: "Transaction with New Counterparty",
+    3: "Split Transaction",
+    4: "Concurrent Multiple Transactions",
+    5: "Same-Day Withdrawal after Large Deposit",
+    7: "Late-Night/Early-Morning Bulk Transactions",
 }
 
 MEDIA_TYPE_MAP = {
-    1: "ATM/CD",
+    1: "PC Banking",
     2: "Internet Banking",
-    3: "Mobile Banking",
-    4: "Telebanking",
-    5: "Branch Counter",
+    3: "Phone",
+    4: "Mobile Phone",
+    5: "Per-transaction Transfer",
     6: "Other",
+    7: "Bulk Transfer",
 }
 
 FUND_TYPE_MAP = {
-    0: "N/A",
-    1: "Deposit",
-    3: "Withdrawal",
-    4: "Transfer",
+    0: "General",
+    1: "Salary",
+    3: "Other",
+    4: "Inter-bank Auto Transfer",
 }
 
 

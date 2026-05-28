@@ -37,7 +37,19 @@ def patch_db_connection():
 
     이 fixture는 autouse=True로 모든 테스트에 자동 적용된다.
     파일 기반 DuckDB 잠금 문제를 방지하고 테스트 격리를 보장한다.
+
+    데이터(_datasets/HOFINET.parquet) 부재 시 모든 테스트를 자동 skip한다 —
+    공개 repo는 raw 데이터를 포함하지 않으므로 fresh clone 환경에서도 적용된다.
     """
+    import config
+
+    if not config.PARQUET_PATH.exists():
+        pytest.skip(
+            f"HOFINET.parquet not found at {config.PARQUET_PATH} — "
+            "skipping all DB-backed tests. Place the parquet locally to enable.",
+            allow_module_level=True,
+        )
+
     import src.data.db as db_module
 
     # in-memory 연결 생성

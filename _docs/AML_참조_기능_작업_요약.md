@@ -1,5 +1,7 @@
 # AML 참조 기능 작업 요약
 
+> **NOTE (2026-05-28)**: 본 문서는 repo 분리(STAR-Bench / STAR-Bench-paper / STAR-Bench-Web) 이전 작업 기록입니다. 본문의 `_paper/benchmarks/...` 경로는 현재 별도 repo `../star-bench/benchmarks/...`에 해당합니다.
+
 ## 1. 기능 정의 (_docs 기반)
 
 | 기능 | 설명 | 근거 문서 |

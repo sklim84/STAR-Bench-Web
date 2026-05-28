@@ -842,21 +842,14 @@ def _validate_predict_fraud_args(arguments: dict) -> list[str]:
 # STR Structural Helpers - Code Mapping Tables
 # ---------------------------------------------------------------------------
 
-_MEDIA_TYPE_MAP = {
-    1: "Counter", 2: "ATM", 3: "PB Center",
-    4: "Internet Banking", 5: "Phone/Mobile", 6: "Call Center", 7: "Other",
-}
-
-_FUND_TYPE_MAP = {0: "General", 1: "Salary", 3: "Other", 4: "Inter-bank Auto Transfer"}
-
-_FRAUD_TYPE_MAP = {
-    1: "갑작스러운 거래패턴의 변화",       # § VI-4 code 15
-    2: "기타(자유기술)",                    # § VI-5 code 31 (신규 수신처 거래)
-    3: "분할거래",                          # § VI-4 code 18
-    4: "다중거래의 동시요청",               # § VI-4 code 25
-    5: "거액 입금 후 당일/익일 인출",      # § VI-4 code 20
-    7: "기타(자유기술)",                    # § VI-5 code 31 (심야/새벽 대량 거래)
-}
+# Unified mappings sourced from src/features/aml_reference.py
+# (HOFINET.MD §4.1, §6.2, §6.3 ground truth). Aliased to preserve the
+# private-style names used throughout this module.
+from src.features.aml_reference import (
+    FRAUD_TYPE_MAP as _FRAUD_TYPE_MAP,
+    MEDIA_TYPE_MAP as _MEDIA_TYPE_MAP,
+    FUND_TYPE_MAP as _FUND_TYPE_MAP,
+)
 
 # Mapping fraud type codes to STR Section VI suspicion items (HOFINET official)
 _FRAUD_TYPE_TO_VI_SECTION = {
@@ -875,6 +868,8 @@ _RECOMMENDED_ACTION_MAP = {
     "Concurrent Multiple Transactions":             ["Consider immediate account freeze", "Victim verification and protection", "Referral to law enforcement"],
     "Same-Day Withdrawal after Large Deposit":      ["Trace fund origin", "Verify business rationale", "Consider account freeze"],
     "Late-Night/Early-Morning Bulk Transactions":   ["Continuous off-hours monitoring", "Pattern-based escalation", "Review by internal committee"],
+    # Fallback used by _build_str_report when fraud type can't be resolved.
+    "Other":                                        ["Strengthen transaction monitoring", "Manager review", "Consider FIU reporting based on judgment"],
 }
 
 # AML pattern name → STR Section VI check item mapping
