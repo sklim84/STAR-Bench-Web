@@ -200,11 +200,11 @@ app.py                          # 라우팅 + 글로벌 CSS 주입
 
 **평가 메트릭**: 종합점수(0~1), 도구 선택 정확도(primary_tool_hit_rate), 파라미터 추출 정확도(param_accuracy), 에러 유형별 분포(wrong_func, wrong_params, missing_params, connection_error)
 
-### 실험 결과 (44개 모델, 14개 계열)
+### 실험 결과 (29개 모델, 12개 계열)
 
 상세 결과는 [STAR-Bench README](https://github.com/sklim84/STAR-Bench/blob/main/README.md) 참조.
 
-#### 싱글턴 Tool Calling (KR, 1,258건 × 44 모델, Top 10)
+#### 싱글턴 Tool Calling (KR, 1,258건 × 29 모델, Top 10)
 
 | 순위 | 모델 | 파라미터 | 종합점수 | 도구정확도 | 파라미터정확도 |
 |------|------|---------|---------|----------|-------------|
@@ -219,9 +219,9 @@ app.py                          # 라우팅 + 글로벌 CSS 주입
 | 9 | Qwen3.5-4B (nothink) | 4B | 0.920±0.002 | 94.2% | 92.2% |
 | 10 | Qwen3.5-4B (think) | 4B | 0.919±0.006 | 95.0% | 93.9% |
 
-> **KR--EN ablation**: 44개 모델 중 75%에서 한국어 프롬프트가 영어보다 높은 정확도 (mean delta +0.031).
+> **KR--EN ablation**: 29개 모델 중 75%에서 한국어 프롬프트가 영어보다 높은 정확도 (mean delta +0.031).
 
-#### 멀티턴 STR (50 시나리오 × 44 모델, Top 5)
+#### 멀티턴 STR (50 시나리오 × 29 모델, Top 5)
 
 | 순위 | 모델 | avg_score | 시나리오 완료율 |
 |------|------|-----------|--------------|
@@ -233,7 +233,7 @@ app.py                          # 라우팅 + 글로벌 CSS 주입
 
 > Mistral 전 모델이 멀티턴에서 complete rate 0% — 싱글턴 상위 모델이 멀티턴에서 하위로 역전되는 현상 관찰.
 
-### 비교 대상 모델 (14개 계열, 44개 구성)
+### 비교 대상 모델 (12개 계열, 29개 구성)
 
 | 계열 | 모델 | 파라미터 | 실행 환경 |
 |------|------|---------|---------|
@@ -259,23 +259,23 @@ app.py                          # 라우팅 + 글로벌 CSS 주입
 | **컨텍스트 길이 초과** — 영문 번역으로 토큰 수 증가하여 `max-model-len 16384` 초과 | EN의 Qwen3.5 계열, Mistral-Small, GLM 등 대부분 | `--max-model-len 32768`로 상향 | ✅ 완료 |
 | **tool parser 비호환** — `deepseek_v3` 파서가 토큰 매핑 실패 | DeepSeek-R1-Qwen3-8B (KR+EN 전체 실패) | `hermes` 파서로 변경하여 재시도 | ✅ 완료 |
 | **단일 tool-call 제한** — Llama-3.2 계열이 multi-tool call 미지원 (`This model only supports single tool-calls at once!`) | Llama-3.2-1B/3B의 multi_tool 카테고리 | **모델 한계 (수정 불가)** — 논문에서 "Llama-3.2 계열은 병렬 tool calling을 지원하지 않아 multi-tool 케이스에서 체계적 실패 발생"으로 기술 | ✅ 모델 한계 |
-| **Kanana 1.5 파서 불일치** — KR은 functionary, EN은 hermes 파서 사용 | Kanana 1.5 한/영 비교 공정성 | 최종 44개 모델에서 Kanana 1.5 제외 | ✅ 제외 |
+| **Kanana 1.5 파서 불일치** — KR은 functionary, EN은 hermes 파서 사용 | Kanana 1.5 한/영 비교 공정성 | 최종 29개 모델에서 Kanana 1.5 제외 | ✅ 제외 |
 
 ### 2. 영문 Ablation 실험 (완료)
 
-- **결과**: 44개 모델 중 **75% (39/52 configs)**에서 한국어 프롬프트가 영어보다 높은 정확도. Mean delta **+0.031**.
+- **결과**: 29개 모델 중 **75% (39/52 configs)**에서 한국어 프롬프트가 영어보다 높은 정확도. Mean delta **+0.031**.
 
 ### 3. 재현성 검증
 
 | 실험 | Round 1 | Round 2 | Round 3 | 상태 |
 |------|---------|---------|---------|------|
-| 싱글턴 KR (44 models) | ✅ | ✅ | ✅ | 완료 |
-| 싱글턴 EN (44 models) | ✅ | ✅ | ✅ | 완료 |
-| 멀티턴 (44 models) | ✅ | ✅ | ✅ | 완료 |
+| 싱글턴 KR (29 models) | ✅ | ✅ | ✅ | 완료 |
+| 싱글턴 EN (29 models) | ✅ | ✅ | ✅ | 완료 |
+| 멀티턴 (29 models) | ✅ | ✅ | ✅ | 완료 |
 
 ### 4. 멀티턴 STR 벤치마크 (완료)
 
-50개 시나리오 × 44개 모델 × 3회 반복. Mistral 계열 멀티턴 붕괴(complete 0%), xLAM 계열 멀티턴 강세(Top 5) 등 싱글턴-멀티턴 역전 발견.
+50개 시나리오 × 29개 모델 × 3회 반복. Mistral 계열 멀티턴 붕괴(complete 0%), xLAM 계열 멀티턴 강세(Top 5) 등 싱글턴-멀티턴 역전 발견.
 
 ### 5. 제외 모델
 
@@ -305,17 +305,17 @@ _experiments/
 │   ├── evaluator.py                  # 평가 로직
 │   └── vllm_benchmark.sh             # vLLM 서버 관리 + 자동화
 ├── results/                          # 싱글턴 결과
-│   ├── round1/eval/                  # KR Round 1 (44 models)
-│   ├── round1_en/eval/               # EN Round 1 (44 models)
+│   ├── round1/eval/                  # KR Round 1 (29 models)
+│   ├── round1_en/eval/               # EN Round 1 (29 models)
 │   ├── round2/eval/                  # KR Round 2
-│   ├── round2_en/eval/               # EN Round 2 (44 models)
-│   ├── round3/eval/                  # KR Round 3 (44 models)
+│   ├── round2_en/eval/               # EN Round 2 (29 models)
+│   ├── round3/eval/                  # KR Round 3 (29 models)
 │   ├── round3_en/eval/              # EN Round 3 (43/44, 진행 중)
 │   ├── comparison_kr.xlsx            # KR 비교 리포트
 │   ├── comparison_en.xlsx            # EN 비교 리포트
 │   └── repro_mean_std.json           # 재현성 mean±std
 └── results_multiturn/                # 멀티턴 결과
-    ├── round1/eval/                  # Round 1 (44 models)
+    ├── round1/eval/                  # Round 1 (29 models)
     ├── round2/eval/                  # Round 2
     ├── round3/eval/                  # Round 3
     └── multiturn_comparison_round1-3.xlsx
