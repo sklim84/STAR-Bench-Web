@@ -6,8 +6,8 @@ de-identified interbank transfer data — from high-level dashboards and transac
 graphs to ML-based fraud detection and a conversational agent that drafts Suspicious
 Transaction Reports (STRs).
 
-This platform is also the **reference application from which the 23 function-calling tools
-of the [STAR-Bench](https://github.com/sklim84/STAR-Bench) benchmark were derived**.
+This platform is also the **reference application from which the function-calling tool suite
+of the [STAR-Bench](https://github.com/sklim84/STAR-Bench) benchmark was derived**.
 
 ---
 
@@ -55,9 +55,9 @@ writing a report.
 
 ### 💬 AI Agent (STR auto-generation)
 Query and analyze transactions through natural-language conversation, then auto-generate a
-Suspicious Transaction Report. The agent has **23 tools** spanning all of the features above
+Suspicious Transaction Report. The agent's tools span all of the features above
 (transaction queries, fraud prediction, network/pattern analysis, CTR/risk/monitoring, and
-regulatory lookups) and chains them over multiple rounds; `generate_str` composes the
+regulatory lookups) and it chains them over multiple rounds; `generate_str` composes the
 finished STR draft (form sections I–VII) from the accumulated evidence.
 
 > **Money-flow analysis** (smurfing networks and cross-institution flows) is also available
@@ -72,7 +72,7 @@ finished STR draft (form sections I–VII) from the accumulated evidence.
   falls back to DuckDB + NetworkX, so graph features degrade gracefully.
 - **Conversational agent** — routed through OpenRouter (OpenAI-compatible API, default
   `openai/gpt-4o-mini`, configurable via `OPENROUTER_MODEL`); falls back to direct OpenAI when
-  `OPENROUTER_API_KEY` is unset. Native function calling, 23 tools, up to 5 tool-call rounds.
+  `OPENROUTER_API_KEY` is unset. Native function calling over the full tool suite, up to 5 tool-call rounds.
 - **Dark-themed UI** — Streamlit with a custom dark theme and Plotly visualizations.
 
 | Layer | Technology |
@@ -80,12 +80,14 @@ finished STR draft (form sections I–VII) from the accumulated evidence.
 | Frontend | Streamlit (dark theme) + Plotly |
 | Analytics DB | DuckDB (in-memory, Parquet) |
 | Graph DB | Memgraph (optional, Docker) — NetworkX fallback |
-| AI agent | OpenRouter / OpenAI `gpt-4o-mini` + function calling (23 tools) |
+| AI agent | OpenRouter / OpenAI `gpt-4o-mini` + function calling |
 | ML model | XGBoost (fraud detection) |
 
 ---
 
 ## Quickstart
+
+**Prerequisites:** Python 3.10+ (and, optionally, Docker for the Memgraph graph store).
 
 ```bash
 pip install -r requirements.txt
@@ -138,4 +140,4 @@ or trained model is absent, data-dependent features are skipped rather than fail
 ## Related
 
 - **[STAR-Bench](https://github.com/sklim84/STAR-Bench)** — the AML agent function-calling
-  benchmark whose 23 tools are derived from this platform.
+  benchmark whose tool suite is derived from this platform.
