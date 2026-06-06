@@ -66,7 +66,6 @@
 | 수정 | _paper/benchmarks/bench_agent_behavior.py |
 | 수정 | _paper/benchmarks/run_benchmark.py |
 | 수정 | _paper/benchmarks/create_benchmark_dataset.py |
-| 수정 | CLAUDE.md (기능9, 도구 23개 반영) |
 
 ---
 
