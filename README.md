@@ -9,8 +9,6 @@ Transaction Reports (STRs).
 This platform is also the **reference application from which the 23 function-calling tools
 of the [STAR-Bench](https://github.com/sklim84/STAR-Bench) benchmark were derived**.
 
-![Home](screenshots/1.%20home.png)
-
 ---
 
 ## What you can do
@@ -30,48 +28,30 @@ centrality, community detection, and AML patterns such as ring (circular) transa
 layering, smurfing/funnel, and fund-collection/dispersion. Trace an account's neighborhood,
 shortest paths, and N-hop reach to follow how funds move.
 
-| Account-centric view | Account expansion |
-|---|---|
-| ![Network account](screenshots/3.%20Network%20-%20Acnt.png) | ![Network account expand](screenshots/3.%20Network%20-%20AcntExp.png) |
-| **Fraud-flow view** | **Institution view** |
-| ![Network fraud flow](screenshots/3.%20Network%20-%20FrdFlw.png) | ![Network institution](screenshots/3.%20Network%20-%20Inst.png) |
-
 ### 🤖 Fraud Detection
 XGBoost-based fraud-probability prediction with on-page model training/evaluation and
 feature-importance analysis. Score individual transactions or batches and inspect which
 features drive a prediction.
-
-| Train & evaluate | Run detection |
-|---|---|
-| ![Detection training](screenshots/4.%20Detection%20-%20TrainEval.png) | ![Detection run](screenshots/4.%20Detection%20-%20FrdDetExe.png) |
 
 ### 💵 CTR Monitoring
 Currency Transaction Report (CTR) candidate lookup (high-value cash transactions) and
 **structuring** detection — splitting a large amount into several sub-threshold transfers to
 evade reporting.
 
-![CTR](screenshots/5.%20CTR.png)
-
 ### 🎯 Risk Scoring
 Account risk scoring on a 0–100 scale from five behavioral indicators (late-night activity,
 amount anomaly, counterparty diversity, velocity change, prior-anomaly history) with a
 high-risk account ranking.
-
-![Risk](screenshots/6.%20Risk.png)
 
 ### 🚨 Transaction Monitoring
 Rule-based suspicious-transaction detection across six rules: nighttime bulk, same-day
 rapid-fire, round/fixed amounts, institution concentration, abrupt pattern change, and
 dormant-account reactivation.
 
-![Monitoring](screenshots/7.%20Monitoring.png)
-
 ### 📚 AML Reference
 FIU suspicious-transaction reference types, STR field validation, and an AML glossary
 (CDD, STR, CTR, RBA, and more) — the regulatory knowledge an analyst reaches for while
 writing a report.
-
-![Reference](screenshots/8.%20Reference.png)
 
 ### 💬 AI Agent (STR auto-generation)
 Query and analyze transactions through natural-language conversation, then auto-generate a
@@ -79,8 +59,6 @@ Suspicious Transaction Report. The agent has **23 tools** spanning all of the fe
 (transaction queries, fraud prediction, network/pattern analysis, CTR/risk/monitoring, and
 regulatory lookups) and chains them over multiple rounds; `generate_str` composes the
 finished STR draft (form sections I–VII) from the accumulated evidence.
-
-![Agent tool call](screenshots/9.%20Agent%20-%20ToolCall.png)
 
 > **Money-flow analysis** (smurfing networks and cross-institution flows) is also available
 > as a shared analysis capability used by the Network feature and the agent's tools.
