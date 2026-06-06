@@ -42,14 +42,3 @@ htmlcov/
 
 # Invalidated baseline backup (재실험 전 라운드, 보존만 하고 추적 안 함)
 _backup/
-
-# Claude Code (선택 공유: agents/, settings.json, SESSION_HANDOFF.md, CLAUDE.md 추적)
-.claude/agent-memory/
-.claude/settings.local.json
-.claude/scheduled_tasks.lock
-.claude/cache/
-.claude/logs/
-
-# Claude Code 가이드는 워크스페이스 루트(KA-001-AML-Assistant/CLAUDE.md)에서 관리
-CLAUDE.md
-.claude/
