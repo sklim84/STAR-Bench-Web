@@ -42,3 +42,6 @@ htmlcov/
 
 # Invalidated baseline backup (재실험 전 라운드, 보존만 하고 추적 안 함)
 _backup/
+
+# AML reference source docs (regulatory/derived material — kept out of the public repo)
+_docs/
