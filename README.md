@@ -99,6 +99,19 @@ python -m src.data.loader
 streamlit run app.py
 ```
 
+**Tool layer without the app.** To *call the AML tools* rather than run the UI —
+STAR-Bench evaluation, batch jobs, notebooks — install the lighter set instead:
+
+```bash
+pip install -r requirements-tools.txt
+```
+
+It omits Streamlit, Plotly and the menu widget. `src/__init__.py` registers a
+stand-in for Streamlit's caching decorators when Streamlit is absent, which
+removes memoisation only: the decorated helpers are pure functions of their
+arguments, so results are unchanged. The released `_datasets/HOFINET.parquet`
+and `_models/xgb_detector.joblib` mean the tools run without any prior setup.
+
 Optional — graph features via Memgraph:
 
 ```bash

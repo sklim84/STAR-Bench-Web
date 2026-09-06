@@ -1,0 +1,24 @@
+# Tool layer only — enough to import and call src.data / src.features.
+#
+# Use this when you want to *run the AML tools* without the Streamlit app:
+# STAR-Bench evaluation runs, batch jobs, notebooks. The UI packages
+# (streamlit, plotly, streamlit-option-menu) are omitted; src/__init__.py
+# registers a stand-in for Streamlit's caching decorators when it is absent,
+# which removes memoisation only and leaves results unchanged.
+#
+# To run the app itself, use requirements.txt instead.
+
+duckdb>=1.1.0
+pyarrow>=18.0.0
+pandas>=2.2.0
+numpy>=1.26.0
+networkx>=3.4.0
+joblib>=1.4.0
+scikit-learn>=1.5.0
+xgboost>=2.1.0
+python-dotenv>=1.0.0
+openai>=1.50.0
+
+# Optional: only needed for the graph-backed network tools (Memgraph/Bolt).
+# Without it those tools report themselves unavailable instead of failing.
+# neo4j>=5.20.0
