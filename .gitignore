@@ -24,17 +24,23 @@ venv/
 .DS_Store
 Thumbs.db
 
-# Raw HOFINET data — governance: 공개 repo 금지 (raw 4.7M건 트랜잭션)
-# 로컬 작업용으로만 보관, README의 안내대로 별도 배치하여 사용.
+# HOFINET data governance — 두 층을 구분한다.
+#
+# 공개: HOFINET은 합성(synthetic) 거래 환경이고 논문이 실행 가능한 평가 환경으로
+#       릴리스하는 대상이다 → _datasets/HOFINET.parquet 을 추적한다.
+# 비공개: 그 합성의 원천이 된 실거래 레코드와 원천 분할본, 그리고 로컬 빌드 산출물.
 _datasets/*.csv
 _datasets/*.parquet
+!_datasets/HOFINET.parquet
 _datasets/*.duckdb
 _datasets/*.duckdb.wal
 _datasets/original/
 
-# Trained models
+# Trained models — 탐지기는 동봉해야 predict_fraud 도구가 바로 동작한다.
+# (scripts/train_detector.py 로 재생성 가능하지만, 재현에 한 단계가 더 붙는다.)
 _models/*.pkl
 _models/*.joblib
+!_models/xgb_detector.joblib
 
 # Coverage
 .coverage

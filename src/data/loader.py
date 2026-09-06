@@ -81,10 +81,14 @@ def csv_to_parquet(csv_path=None, parquet_path=None, force=False):
     idx = table.schema.get_field_index("fraud_type")
     table = table.set_column(idx, pa.field("fraud_type", pa.int8()), col_int)
 
+    # zstd level 3 keeps the released Parquet well under GitHub's file-size
+    # limits (~45 MB vs ~75 MB for snappy) at negligible read cost; PyArrow
+    # detects the codec from the file, so the read path is unchanged.
     pq.write_table(
         table,
         str(parquet_path),
-        compression="snappy",
+        compression="zstd",
+        compression_level=3,
         use_dictionary=["fraud_description", "fund_type", "media_type", "time_slot"],
     )
     elapsed = time.time() - start

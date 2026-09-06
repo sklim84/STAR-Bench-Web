@@ -1,3 +1,6 @@
 *.csv filter=lfs diff=lfs merge=lfs -text
-_datasets/*.parquet filter=lfs diff=lfs merge=lfs -text
+# The released synthetic environment (_datasets/HOFINET.parquet, ~45 MB) is a
+# plain git object on purpose: anonymous review mirrors generally do not
+# support LFS, so an LFS pointer would hand reviewers an unusable file at
+# exactly the moment reproducibility is being judged.
 _datasets/*.duckdb filter=lfs diff=lfs merge=lfs -text
