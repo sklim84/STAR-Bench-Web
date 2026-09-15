@@ -1,201 +1,151 @@
-"""기능7: 거래 모니터링 규칙 탐지 (src/features/monitoring.py) 단위 테스트."""
+"""src/features/monitoring.py: the five rules, recalibrated to HOFINET (D18)."""
 
-import pandas as pd
 import pytest
-from unittest.mock import patch
 
-from src.features.monitoring import (
-    detect_nighttime_bulk,
-    detect_rapid_fire,
-    detect_round_amounts,
-    detect_institution_concentration,
-    detect_pattern_change,
-    run_all_rules,
-    get_monitoring_summary,
-    detect_dormant_reactivation,
-    _calculate_previous_period,
-)
+from src.data.db import query
+from src.features import monitoring
 
 
-class TestDetectNighttimeBulk:
-    """R001: detect_nighttime_bulk() 단위 테스트."""
+class TestRuleR001:
+    def test_fires_on_the_data(self):
+        df = monitoring.detect_nighttime_bulk(limit=20)
+        assert not df.empty
+        assert set(df["time_slot"]) <= set(monitoring.NIGHT_TIME_SLOTS)
+        assert (df["amount"] >= monitoring.NIGHT_MIN_AMOUNT).all()
 
-    def test_returns_dataframe(self):
-        result = detect_nighttime_bulk(limit=10)
-        assert isinstance(result, pd.DataFrame)
-
-    def test_nighttime_only(self):
-        """결과가 심야시간대(0, 3)만 포함하는지 확인."""
-        result = detect_nighttime_bulk(limit=20)
-        if not result.empty:
-            assert result["거래시간대"].isin([0, 3]).all()
-
-    def test_min_amount_filter(self):
-        result = detect_nighttime_bulk(min_amount=50_000_000, limit=10)
-        if not result.empty:
-            assert (result["거래금액"] >= 50_000_000).all()
+    def test_night_slots_cover_the_labelled_night_type(self):
+        rows = int(query(
+            f"SELECT count(*) AS c FROM hofinet WHERE fraud_type = 7 AND "
+            f"time_slot IN ({', '.join(str(s) for s in monitoring.NIGHT_TIME_SLOTS)})"
+        )["c"].iloc[0])
+        assert rows == 35
 
     def test_date_filter(self):
-        result = detect_nighttime_bulk(
-            date_from=20240101, date_to=20240630, limit=10
-        )
-        assert isinstance(result, pd.DataFrame)
+        df = monitoring.detect_nighttime_bulk(date_from=20240101, date_to=20241231, limit=20)
+        assert ((df["date"] >= 20240101) & (df["date"] <= 20241231)).all()
+
+    def test_account_filter_matches_either_side(self):
+        sample = monitoring.detect_nighttime_bulk(limit=1)
+        aid = int(sample["sender_acc"].iloc[0])
+        df = monitoring.detect_nighttime_bulk(account_id=aid, limit=20)
+        assert ((df["sender_acc"] == aid) | (df["receiver_acc"] == aid)).all()
 
 
-class TestDetectRapidFire:
-    """R002: detect_rapid_fire() 단위 테스트."""
+class TestRuleR002:
+    def test_minimum_count(self):
+        df = monitoring.detect_rapid_fire(min_count=10, limit=20)
+        assert not df.empty and (df["tx_count"] >= 10).all()
 
-    def test_returns_dataframe(self):
-        result = detect_rapid_fire(limit=10)
-        assert isinstance(result, pd.DataFrame)
-
-    def test_min_count_condition(self):
-        result = detect_rapid_fire(min_count=10, limit=20)
-        if not result.empty:
-            assert (result["거래건수"] >= 10).all()
-
-    def test_expected_columns(self):
-        result = detect_rapid_fire(limit=5)
-        if not result.empty:
-            expected = {"출금계좌일련번호", "거래일자", "거래건수", "합산금액"}
-            assert expected.issubset(set(result.columns))
+    def test_account_filter(self):
+        aid = int(monitoring.detect_rapid_fire(limit=1)["sender_acc"].iloc[0])
+        df = monitoring.detect_rapid_fire(account_id=aid, limit=20)
+        assert (df["sender_acc"] == aid).all()
 
 
-class TestDetectRoundAmounts:
-    """R003: detect_round_amounts() 단위 테스트."""
+class TestRuleR003:
+    def test_repeated_identical_amounts(self):
+        df = monitoring.detect_repeated_amounts(limit=20)
+        assert not df.empty
+        assert (df["repeat_count"] >= 3).all()
+        assert (df["amount"] >= monitoring.REPEATED_AMOUNT_MIN).all()
 
-    def test_returns_dataframe(self):
-        result = detect_round_amounts(limit=10)
-        assert isinstance(result, pd.DataFrame)
+    def test_repeat_count_matches_the_data(self):
+        row = monitoring.detect_repeated_amounts(limit=1).iloc[0]
+        actual = int(query(
+            "SELECT count(*) AS c FROM hofinet WHERE sender_acc = $a AND amount = $m",
+            {"a": int(row["sender_acc"]), "m": int(row["amount"])})["c"].iloc[0])
+        assert int(row["repeat_count"]) == actual
 
-    def test_expected_columns(self):
-        result = detect_round_amounts(limit=5)
-        if not result.empty:
-            expected = {"출금계좌일련번호", "정액거래건수", "합산금액"}
-            assert expected.issubset(set(result.columns))
-
-
-class TestDetectInstitutionConcentration:
-    """R004: detect_institution_concentration() 단위 테스트."""
-
-    def test_returns_dataframe(self):
-        result = detect_institution_concentration(limit=10)
-        assert isinstance(result, pd.DataFrame)
-
-    def test_concentration_ratio(self):
-        """집중비율이 min_ratio 이상인지 확인."""
-        result = detect_institution_concentration(min_ratio=0.8, limit=10)
-        if not result.empty:
-            assert (result["집중비율"] >= 0.8).all()
+    def test_rule_is_selective(self):
+        """The old 'amount % 1,000,000 = 0' rule was true for every row >= 1M."""
+        flagged = len(monitoring.detect_repeated_amounts(limit=100_000))
+        senders = int(query("SELECT count(DISTINCT sender_acc) AS c FROM hofinet")["c"].iloc[0])
+        assert 0 < flagged < senders
 
 
-class TestDetectPatternChange:
-    """R005: detect_pattern_change() 단위 테스트."""
+class TestRuleR004:
+    def test_returns_more_than_one_account(self):
+        df = monitoring.detect_institution_concentration(limit=50)
+        assert len(df) > 1
+        assert (df["concentration_percent"] >= 50).all()
 
-    def test_returns_dataframe(self):
-        result = detect_pattern_change(
-            base_start=20230101, base_end=20230630,
-            compare_start=20230701, compare_end=20231231,
-            limit=10,
-        )
-        assert isinstance(result, pd.DataFrame)
+    def test_dates_change_the_result(self):
+        wide = monitoring.detect_institution_concentration(limit=50)
+        narrow = monitoring.detect_institution_concentration(
+            date_from=20240101, date_to=20240131, limit=50)
+        assert not wide.equals(narrow)
 
-    def test_change_threshold(self):
-        result = detect_pattern_change(
-            base_start=20230101, base_end=20230630,
-            compare_start=20230701, compare_end=20231231,
-            change_threshold=3.0, limit=10,
-        )
-        assert isinstance(result, pd.DataFrame)
+    def test_account_filter(self):
+        aid = int(monitoring.detect_institution_concentration(limit=1)["sender_acc"].iloc[0])
+        df = monitoring.detect_institution_concentration(account_id=aid, limit=10)
+        assert list(df["sender_acc"]) == [aid]
 
-
-class TestRunAllRules:
-    """run_all_rules() 단위 테스트."""
-
-    def test_returns_dict(self):
-        result = run_all_rules()
-        assert isinstance(result, dict)
-
-    def test_all_rules_present(self):
-        result = run_all_rules()
-        assert "R001_심야대량거래" in result
-        assert "R002_동일일다건거래" in result
-        assert "R003_정액거래패턴" in result
-        assert "R004_기관집중거래" in result
-        assert "R005_거래패턴급변" in result
-
-    def test_each_rule_has_count(self):
-        result = run_all_rules()
-        for key in result:
-            assert "건수" in result[key]
-            assert result[key]["건수"] >= 0
-
-    def test_previous_period_calculation_uses_calendar_days(self):
-        base_start, base_end = _calculate_previous_period(20240201, 20240229)
-        assert base_start == 20240103
-        assert base_end == 20240131
-
-    def test_r005_previous_period_passed_to_detector(self):
-        with patch("src.features.monitoring.detect_pattern_change", return_value=pd.DataFrame()) as mock_r005:
-            run_all_rules(date_from=20240201, date_to=20240229)
-
-        args = mock_r005.call_args.args
-        assert args[0] == 20240103
-        assert args[1] == 20240131
-        assert args[2] == 20240201
-        assert args[3] == 20240229
+    def test_one_row_per_account(self):
+        df = monitoring.detect_institution_concentration(limit=50)
+        assert df["sender_acc"].is_unique
 
 
-class TestGetMonitoringSummary:
-    """get_monitoring_summary() 단위 테스트."""
+class TestRuleR005:
+    def test_default_window_is_the_last_quarter(self):
+        assert monitoring.default_pattern_change_period() == (20241001, 20241231)
 
-    def test_returns_dict(self):
-        result = get_monitoring_summary()
-        assert isinstance(result, dict)
+    def test_previous_period_has_the_same_length(self):
+        assert monitoring._calculate_previous_period(20240401, 20240630) == (20240101, 20240331)
 
-    def test_required_keys(self):
-        result = get_monitoring_summary()
-        assert "총거래건수" in result
-        assert "심야거래건수" in result
-        assert "심야거래비율" in result
-        assert "고빈도거래일수" in result
+    def test_reversed_dates_are_refused(self):
+        with pytest.raises(ValueError):
+            monitoring._calculate_previous_period(20240630, 20240401)
 
-    def test_non_negative_values(self):
-        result = get_monitoring_summary()
-        assert result["총거래건수"] >= 0
-        assert result["심야거래건수"] >= 0
-        assert result["심야거래비율"] >= 0
+    def test_detects_surges(self):
+        df = monitoring.detect_pattern_change(20240701, 20240930, 20241001, 20241231, limit=20)
+        assert not df.empty
+        assert ((df["count_change_multiple"] >= 3) | (df["amount_change_multiple"] >= 3)).all()
 
 
-class TestDetectDormantReactivation:
-    """R006: detect_dormant_reactivation() 단위 테스트."""
+class TestRuleRunner:
+    def test_run_rule_dispatches_every_rule(self):
+        for rule_id in monitoring.RULE_NAMES:
+            df = monitoring.run_rule(rule_id, limit=3)
+            assert len(df) <= 3
 
-    def test_returns_dataframe(self):
-        result = detect_dormant_reactivation(limit=10)
-        assert isinstance(result, pd.DataFrame)
+    def test_unknown_rule(self):
+        with pytest.raises(ValueError):
+            monitoring.run_rule("R009")
 
-    def test_expected_columns(self):
-        result = detect_dormant_reactivation(limit=5)
-        if not result.empty:
-            expected = {"출금계좌일련번호", "마지막활동일", "재활성화일", "휴면일수", "재활성화금액"}
-            assert expected.issubset(set(result.columns))
+    def test_run_all_rules_honours_the_limit(self):
+        result = monitoring.run_all_rules(limit=2)
+        assert set(result) == set(monitoring.RULE_NAMES)
+        assert all(len(entry["result"]) <= 2 for entry in result.values())
 
-    def test_dormant_days_filter(self):
-        result = detect_dormant_reactivation(dormant_days=365, limit=10)
-        if not result.empty:
-            assert (result["휴면일수"] >= 365).all()
+    def test_run_all_rules_reports_counts(self):
+        result = monitoring.run_all_rules(limit=5)
+        assert all(entry["count"] == len(entry["result"]) for entry in result.values())
 
-    def test_min_amount_filter(self):
-        result = detect_dormant_reactivation(
-            min_reactivation_amount=10_000_000, limit=10
-        )
-        if not result.empty:
-            assert (result["재활성화금액"] >= 10_000_000).all()
 
-    def test_uses_precise_date_diff_sql(self):
-        with patch("src.features.monitoring.query", return_value=pd.DataFrame()) as mock_query:
-            detect_dormant_reactivation(limit=1)
-        sql = mock_query.call_args.args[0]
-        assert "date_diff(" in sql
-        assert "strptime(CAST(이전거래일자 AS VARCHAR), '%Y%m%d')" in sql
-        assert "strptime(CAST(거래일자 AS VARCHAR), '%Y%m%d')" in sql
+class TestDormantReactivation:
+    def test_criteria(self):
+        df = monitoring.detect_dormant_reactivation(limit=20)
+        assert not df.empty
+        assert (df["dormant_days"] >= 180).all()
+        assert (df["reactivation_amount"] >= 5_000_000).all()
+
+    def test_daily_aggregation_is_reported(self):
+        df = monitoring.detect_dormant_reactivation(limit=5)
+        assert (df["reactivation_day_amount"] >= df["reactivation_amount"]).all()
+
+    def test_account_filter(self):
+        aid = int(monitoring.detect_dormant_reactivation(limit=1)["sender_acc"].iloc[0])
+        df = monitoring.detect_dormant_reactivation(account_id=aid, limit=10)
+        assert (df["sender_acc"] == aid).all()
+
+
+class TestMonitoringSummary:
+    def test_summary_keys(self):
+        summary = monitoring.get_monitoring_summary()
+        assert set(summary) == {"total_tx_count", "night_tx_count",
+                                "night_tx_ratio", "high_freq_tx_count"}
+        assert summary["total_tx_count"] == 4_732_130
+
+    def test_summary_honours_filters(self):
+        summary = monitoring.get_monitoring_summary({"date_from": 20240101, "date_to": 20240131})
+        assert 0 < summary["total_tx_count"] < 4_732_130

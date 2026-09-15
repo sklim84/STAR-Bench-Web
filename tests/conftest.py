@@ -1,66 +1,91 @@
-"""테스트 공통 설정.
+"""Shared fixtures for the tool-layer test suite.
 
-DuckDB 파일 잠금 문제 해결:
-- 파일 기반 DuckDB는 단일 프로세스만 write 모드로 열 수 있음
-- 앱 실행 중에는 tests가 해당 파일에 접근 불가 (IOException)
-- conftest에서 in-memory DuckDB에 Parquet를 로드하여 db._conn을 패치
-- 모든 테스트는 이 in-memory 연결을 공유 (세션 스코프)
+Tests query the released HOFINET Parquet through the platform's own connection
+path (`src.data.db.get_connection`), so the schema and hash guards are
+exercised by the suite itself rather than bypassed with a private connection.
+Set HOFINET_DUCKDB_PATH to build the test database outside the app's copy.
+
+Every database-backed test is skipped when the Parquet is absent, which is the
+case in a fresh clone of the public repository.
 """
 
 import sys
 from pathlib import Path
 
-import duckdb
 import pytest
 
-# 프로젝트 루트를 sys.path에 추가
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 
-def _build_inmemory_conn():
-    """Parquet 파일을 in-memory DuckDB에 로드하여 연결을 반환한다."""
-    import config
-
-    conn = duckdb.connect(":memory:")
-    conn.execute(f"SET threads TO {config.DUCKDB_THREADS}")
-    conn.execute(f"""
-        CREATE TABLE IF NOT EXISTS hofinet AS
-        SELECT * FROM read_parquet('{config.PARQUET_PATH.as_posix()}')
-    """)
-    return conn
-
-
 @pytest.fixture(scope="session", autouse=True)
-def patch_db_connection():
-    """세션 전체에서 db._conn을 in-memory DuckDB로 교체한다.
-
-    이 fixture는 autouse=True로 모든 테스트에 자동 적용된다.
-    파일 기반 DuckDB 잠금 문제를 방지하고 테스트 격리를 보장한다.
-
-    데이터(_datasets/HOFINET.parquet) 부재 시 모든 테스트를 자동 skip한다 —
-    공개 repo는 raw 데이터를 포함하지 않으므로 fresh clone 환경에서도 적용된다.
-    """
+def database():
+    """Opens the shared read-only connection once for the whole session."""
     import config
 
     if not config.PARQUET_PATH.exists():
         pytest.skip(
             f"HOFINET.parquet not found at {config.PARQUET_PATH} — "
-            "skipping all DB-backed tests. Place the parquet locally to enable.",
+            "place the parquet locally to enable the DB-backed tests.",
             allow_module_level=True,
         )
 
-    import src.data.db as db_module
+    from src.data import db
 
-    # in-memory 연결 생성
-    conn = _build_inmemory_conn()
-
-    # db 모듈의 싱글턴 연결을 교체
-    original_conn = db_module._conn
-    db_module._conn = conn
-
+    conn = db.get_connection()
     yield conn
 
-    # 테스트 종료 후 정리
-    conn.close()
-    db_module._conn = original_conn
+
+@pytest.fixture(scope="session")
+def model():
+    """The released detector artifact, or a skip when it is not shipped."""
+    from src.features.detector import load_model
+
+    trained = load_model()
+    if trained is None:
+        pytest.skip("detector model artifact not present")
+    return trained
+
+
+@pytest.fixture(scope="session")
+def accounts():
+    """Real account ids by role: sender-only, receiver-only, and both."""
+    from src.data.db import query
+
+    row = query("""
+        WITH senders AS (SELECT DISTINCT sender_acc AS acc FROM hofinet),
+             receivers AS (SELECT DISTINCT receiver_acc AS acc FROM hofinet)
+        SELECT
+            (SELECT min(acc) FROM senders WHERE acc NOT IN (SELECT acc FROM receivers)) AS sender_only,
+            (SELECT min(acc) FROM receivers WHERE acc NOT IN (SELECT acc FROM senders)) AS receiver_only,
+            (SELECT min(acc) FROM senders WHERE acc IN (SELECT acc FROM receivers)) AS both_roles,
+            (SELECT sender_acc FROM hofinet WHERE is_fraud = 1
+             GROUP BY sender_acc ORDER BY count(*) DESC, sender_acc LIMIT 1) AS most_fraud
+    """).iloc[0]
+    return {
+        "sender_only": int(row["sender_only"]),
+        "receiver_only": int(row["receiver_only"]),
+        "both_roles": int(row["both_roles"]),
+        "most_fraud": int(row["most_fraud"]),
+        "absent": 1234567890,
+    }
+
+
+@pytest.fixture(scope="session")
+def banks():
+    """A bank that only sends, one that only receives, and one that does both."""
+    from src.data.db import query
+
+    row = query("""
+        WITH s AS (SELECT DISTINCT sender_bank AS b FROM hofinet),
+             r AS (SELECT DISTINCT receiver_bank AS b FROM hofinet)
+        SELECT (SELECT min(b) FROM s WHERE b NOT IN (SELECT b FROM r)) AS sender_only,
+               (SELECT min(b) FROM r WHERE b NOT IN (SELECT b FROM s)) AS receiver_only,
+               (SELECT min(b) FROM s WHERE b IN (SELECT b FROM r)) AS both_roles
+    """).iloc[0]
+    return {
+        "sender_only": int(row["sender_only"]),
+        "receiver_only": int(row["receiver_only"]),
+        "both_roles": int(row["both_roles"]),
+        "absent": 500,
+    }

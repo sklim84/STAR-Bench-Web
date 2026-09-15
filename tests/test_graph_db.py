@@ -18,6 +18,13 @@ import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
 
 
+from src.data import graph_db as _graph_db
+
+_NEO4J_INSTALLED = _graph_db._NEO4J_AVAILABLE
+
+
+@pytest.mark.skipif(not _NEO4J_INSTALLED,
+                    reason="neo4j driver not installed (optional: the tool layer never needs it)")
 class TestGetDriver:
     """get_driver() 함수 테스트."""
 

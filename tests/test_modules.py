@@ -45,29 +45,28 @@ class TestModuleImports:
         import src.features
 
 
+# requirements-tools.txt installs the tool layer alone; the UI packages are
+# checked only when the full app environment (requirements.txt) is installed.
+_TOOL_PACKAGES = ["duckdb", "pyarrow", "pandas", "networkx", "dotenv", "openai",
+                  "sklearn", "xgboost"]
+_APP_PACKAGES = ["streamlit", "streamlit_option_menu", "plotly", "anthropic"]
+
+
 class TestDependencies:
     """필수 의존성 패키지 설치 확인."""
 
-    @pytest.mark.parametrize("package_name", [
-        "streamlit",
-        "streamlit_option_menu",
-        "duckdb",
-        "pyarrow",
-        "pandas",
-        "plotly",
-        "networkx",
-        "dotenv",
-        "openai",
-        "anthropic",
-        "sklearn",
-        "xgboost",
-    ])
-    def test_dependency_installed(self, package_name):
-        """필수 패키지가 설치되어 있는지 확인."""
-        try:
-            importlib.import_module(package_name)
-        except ImportError:
-            pytest.fail(f"패키지 '{package_name}'이 설치되어 있지 않습니다")
+    @pytest.mark.parametrize("package_name", _TOOL_PACKAGES)
+    def test_tool_dependency_installed(self, package_name):
+        """도구 계층 패키지가 설치되어 있는지 확인."""
+        importlib.import_module(package_name)
+
+    @pytest.mark.parametrize("package_name", _APP_PACKAGES)
+    def test_app_dependency_installed(self, package_name):
+        """앱 전용 패키지는 설치된 환경에서만 확인한다."""
+        pytest.importorskip(
+            package_name,
+            reason=f"'{package_name}' is an app-only dependency (requirements.txt)",
+        )
 
 
 class TestProjectStructure:
@@ -75,7 +74,7 @@ class TestProjectStructure:
 
     def test_required_directories(self):
         """필수 디렉토리가 존재하는지 확인."""
-        required_dirs = ["_datasets", "_models", "_docs", "src", "_pages"]
+        required_dirs = ["_datasets", "src", "_pages", "scripts", "tests"]
         for dir_name in required_dirs:
             dir_path = config.BASE_DIR / dir_name
             assert dir_path.exists(), f"디렉토리 '{dir_name}'이 없습니다"
@@ -112,6 +111,6 @@ class TestProjectStructure:
         """.gitignore 파일이 존재하는지 확인."""
         assert (config.BASE_DIR / ".gitignore").exists()
 
-    def test_env_file_exists(self):
-        """.env 파일이 존재하는지 확인."""
-        assert (config.BASE_DIR / ".env").exists(), ".env 파일이 없습니다 (API 키 설정 필요)"
+    def test_env_example_exists(self):
+        """.env.example이 존재하는지 확인 (.env는 로컬 전용)."""
+        assert (config.BASE_DIR / ".env.example").exists()

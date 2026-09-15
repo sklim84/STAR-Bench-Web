@@ -1,105 +1,71 @@
-"""기능5: CTR 모니터링 (src/features/ctr_monitor.py) 단위 테스트."""
+"""src/features/ctr_monitor.py: high-value and structuring detection."""
 
-import pandas as pd
 import pytest
 
-from src.features.ctr_monitor import (
-    get_ctr_candidates,
-    detect_structuring,
-    assess_account_structuring,
-    get_ctr_summary,
-)
+from src.features import ctr_monitor
 
 
-class TestGetCtrCandidates:
-    """get_ctr_candidates() 단위 테스트."""
+class TestCtrCandidates:
+    def test_default_threshold(self):
+        df = ctr_monitor.get_ctr_candidates(limit=50)
+        assert not df.empty and (df["amount"] >= 10_000_000).all()
 
-    def test_returns_dataframe(self):
-        result = get_ctr_candidates(limit=10)
-        assert isinstance(result, pd.DataFrame)
-
-    def test_all_amounts_above_threshold(self):
-        """모든 결과의 거래금액이 1,000만원 이상인지 확인."""
-        result = get_ctr_candidates(limit=10)
-        if not result.empty:
-            assert (result["거래금액"] >= 10_000_000).all()
-
-    def test_limit_works(self):
-        result = get_ctr_candidates(limit=5)
-        assert len(result) <= 5
+    def test_threshold_is_applied(self):
+        df = ctr_monitor.get_ctr_candidates(threshold=100_000_000, limit=50)
+        assert not df.empty and (df["amount"] >= 100_000_000).all()
 
     def test_date_filter(self):
-        result = get_ctr_candidates(date_from=20240101, date_to=20240331, limit=10)
-        assert isinstance(result, pd.DataFrame)
-        if not result.empty:
-            assert (result["거래일자"] >= 20240101).all()
-            assert (result["거래일자"] <= 20240331).all()
+        df = ctr_monitor.get_ctr_candidates(date_from=20240101, date_to=20240131, limit=50)
+        assert ((df["date"] >= 20240101) & (df["date"] <= 20240131)).all()
 
-    def test_expected_columns(self):
-        result = get_ctr_candidates(limit=1)
-        expected_cols = {"거래일자", "거래시간대", "출금계좌일련번호", "거래금액"}
-        assert expected_cols.issubset(set(result.columns))
+    def test_columns(self):
+        df = ctr_monitor.get_ctr_candidates(limit=5)
+        assert list(df.columns) == [
+            "date", "time_slot", "sender_bank", "sender_acc", "receiver_bank",
+            "receiver_acc", "fund_type", "media_type", "amount", "is_fraud", "fraud_type",
+        ]
 
-
-class TestDetectStructuring:
-    """detect_structuring() 단위 테스트."""
-
-    def test_returns_dataframe(self):
-        result = detect_structuring(limit=10)
-        assert isinstance(result, pd.DataFrame)
-
-    def test_expected_columns(self):
-        result = detect_structuring(limit=10)
-        if not result.empty:
-            expected = {"출금계좌일련번호", "거래일자", "거래건수", "합산금액"}
-            assert expected.issubset(set(result.columns))
-
-    def test_structuring_conditions(self):
-        """분할거래 조건: 합산 >= threshold, 최대단건 < threshold, 건수 >= 2."""
-        result = detect_structuring(threshold=10_000_000, limit=20)
-        if not result.empty:
-            assert (result["합산금액"] >= 10_000_000).all()
-            assert (result["최대단건금액"] < 10_000_000).all()
-            assert (result["거래건수"] >= 2).all()
-
-    def test_custom_threshold(self):
-        result = detect_structuring(threshold=50_000_000, limit=10)
-        assert isinstance(result, pd.DataFrame)
+    def test_result_is_reproducible(self):
+        """48 distinct amounts means ORDER BY amount alone is full of ties."""
+        assert ctr_monitor.get_ctr_candidates(limit=50).equals(
+            ctr_monitor.get_ctr_candidates(limit=50))
 
 
-class TestAssessAccountStructuring:
-    """assess_account_structuring() 단위 테스트."""
+class TestStructuring:
+    def test_conditions(self):
+        df = ctr_monitor.detect_structuring(limit=50)
+        assert not df.empty
+        assert (df["total_amount"] >= 10_000_000).all()
+        assert (df["max_single_amount"] < 10_000_000).all()
+        assert (df["tx_count"] >= 2).all()
 
-    def test_returns_dict(self):
-        result = assess_account_structuring(account_id=1)
-        assert isinstance(result, dict)
+    def test_threshold_is_applied(self):
+        df = ctr_monitor.detect_structuring(threshold=50_000_000, limit=50)
+        assert (df["total_amount"] >= 50_000_000).all()
 
-    def test_required_keys(self):
-        result = assess_account_structuring(account_id=1)
-        assert "account_id" in result
-        assert "총거래건수" in result
-        assert "분할거래의심일수" in result
+    def test_result_is_reproducible(self):
+        assert ctr_monitor.detect_structuring(limit=30).equals(
+            ctr_monitor.detect_structuring(limit=30))
 
 
-class TestGetCtrSummary:
-    """get_ctr_summary() 단위 테스트."""
+class TestAccountAssessment:
+    def test_keys(self, accounts):
+        result = ctr_monitor.assess_account_structuring(accounts["most_fraud"])
+        assert set(result) == {"account_id", "total_tx_count", "total_amount",
+                               "structuring_suspect_days", "structuring_details"}
 
-    def test_returns_dict(self):
-        result = get_ctr_summary()
-        assert isinstance(result, dict)
+    def test_absent_account(self, accounts):
+        result = ctr_monitor.assess_account_structuring(accounts["absent"])
+        assert result["total_tx_count"] == 0 and result["structuring_suspect_days"] == 0
 
-    def test_required_keys(self):
-        result = get_ctr_summary()
-        assert "고액거래건수" in result
-        assert "고액거래총액" in result
-        assert "분할거래의심건수" in result
 
-    def test_non_negative_values(self):
-        result = get_ctr_summary()
-        assert result["고액거래건수"] >= 0
-        assert result["고액거래총액"] >= 0
-        assert result["분할거래의심건수"] >= 0
+class TestCtrSummary:
+    def test_keys_and_values(self):
+        summary = ctr_monitor.get_ctr_summary()
+        assert set(summary) == {"high_value_count", "high_value_total",
+                                "structuring_suspect_count"}
+        assert all(value >= 0 for value in summary.values())
 
-    def test_with_filters(self):
-        result = get_ctr_summary(filters={"date_from": 20240101, "date_to": 20240630})
-        assert isinstance(result, dict)
+    def test_filters(self):
+        summary = ctr_monitor.get_ctr_summary({"date_from": 20240101, "date_to": 20240131})
+        assert summary["high_value_count"] >= 0

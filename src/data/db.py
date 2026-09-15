@@ -318,9 +318,9 @@ def query(sql: str, params=None) -> pd.DataFrame:
 def query_arrow(sql: str, params=None):
     """Executes an SQL query and returns a PyArrow Table."""
     with _cursor() as cur:
-        if params:
-            return cur.execute(sql, params).fetch_arrow_table()
-        return cur.execute(sql).fetch_arrow_table()
+        result = cur.execute(sql, params) if params else cur.execute(sql)
+        to_arrow = getattr(result, "to_arrow_table", None) or result.fetch_arrow_table
+        return to_arrow()
 
 
 class _cursor:

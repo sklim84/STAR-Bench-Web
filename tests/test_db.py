@@ -1,275 +1,164 @@
-"""src/data/db.py 기능 테스트.
+"""src/data/db.py: connection guards, per-call cursors, rebuild.
 
-검증 항목:
-- DuckDB 연결 싱글턴 패턴이 정상 동작하는지
-- SQL 쿼리가 DataFrame/Arrow Table을 올바르게 반환하는지
-- 테이블 hofinet이 생성되어 있는지
-- 집계 쿼리(COUNT, SUM, DISTINCT)가 정상 동작하는지
-- 파라미터 바인딩 쿼리가 동작하는지
+The guards matter because the May benchmark runs queried a DuckDB file built
+from the pre-translation Korean-column data without noticing (L5-001, C1-001).
 """
 
+import threading
+
+import duckdb
 import pandas as pd
 import pyarrow as pa
-from unittest.mock import MagicMock
+import pytest
 
+import config
 from src.data import db
 
 
+@pytest.fixture
+def isolated_db(tmp_path, monkeypatch):
+    """Points the module at a throwaway database file."""
+    original = db._conn
+    monkeypatch.setattr(db, "_conn", None)
+    monkeypatch.setattr(db, "_verified_conn", None)
+    monkeypatch.setattr(config, "DUCKDB_PATH", tmp_path / "test.duckdb")
+    yield tmp_path / "test.duckdb"
+    if db._conn is not None:
+        db._conn.close()
+    db._conn = original
+    db._verified_conn = None
+
+
 class TestConnection:
-    """DuckDB 연결 테스트."""
+    def test_returns_singleton(self):
+        assert db.get_connection() is db.get_connection()
 
-    def test_get_connection_returns_connection(self):
-        """get_connection이 유효한 연결 객체를 반환하는지 확인."""
-        conn = db.get_connection()
-        assert conn is not None
+    def test_table_matches_released_schema(self):
+        assert db.table_columns(db.get_connection()) == db.EXPECTED_COLUMNS
 
-    def test_singleton_pattern(self):
-        """동일한 연결 객체가 반환되는지 확인 (싱글턴)."""
-        conn1 = db.get_connection()
-        conn2 = db.get_connection()
-        assert conn1 is conn2
+    def test_build_info_records_parquet_hash(self):
+        info = db.build_info(db.get_connection())
+        if info is None:
+            pytest.skip("connection was installed from outside (no build metadata)")
+        assert info["parquet_sha256"] == db.parquet_sha256()
+        assert info["row_count"] == int(db.query("SELECT count(*) AS c FROM hofinet")["c"].iloc[0])
 
-    def test_hofinet_table_exists(self):
-        """hofinet 테이블이 존재하는지 확인."""
-        conn = db.get_connection()
-        tables = conn.execute("SHOW TABLES").fetchall()
-        table_names = [t[0] for t in tables]
-        assert "hofinet" in table_names
+    def test_connection_info_reports_paths(self):
+        info = db.connection_info()
+        assert info["duckdb_path"].endswith(".duckdb")
+        assert info["parquet_path"] == str(config.PARQUET_PATH)
 
 
 class TestQuery:
-    """query() 함수 테스트."""
+    def test_returns_dataframe(self):
+        assert isinstance(db.query("SELECT 1 AS val"), pd.DataFrame)
 
-    def test_query_returns_dataframe(self):
-        """query()가 pandas DataFrame을 반환하는지 확인."""
-        result = db.query("SELECT 1 as val")
-        assert isinstance(result, pd.DataFrame)
+    def test_row_count(self):
+        assert db.query("SELECT count(*) AS cnt FROM hofinet")["cnt"].iloc[0] == 4_732_130
 
-    def test_query_count(self):
-        """전체 레코드 수 조회가 정상 동작하는지 확인."""
-        result = db.query("SELECT count(*) as cnt FROM hofinet")
-        count = result["cnt"].iloc[0]
-        assert count == 4_732_130
+    def test_english_columns(self):
+        row = db.query("SELECT * FROM hofinet LIMIT 1")
+        assert list(row.columns) == list(db.EXPECTED_COLUMNS)
 
-    def test_query_fraud_count(self):
-        """이상거래 건수 집계가 정상 동작하는지 확인."""
+    def test_parameter_binding(self):
+        result = db.query("SELECT count(*) AS cnt FROM hofinet WHERE is_fraud = ?", [1])
+        assert result["cnt"].iloc[0] == 14_490
+
+    def test_named_parameter_binding(self):
         result = db.query(
-            "SELECT count(*) as cnt FROM hofinet WHERE 이상거래여부 = 1"
+            "SELECT count(*) AS cnt FROM hofinet WHERE fraud_type = $t", {"t": 7}
         )
-        fraud_count = result["cnt"].iloc[0]
-        assert fraud_count > 0
-        assert fraud_count < 100_000  # 약 14,490건 예상
+        assert result["cnt"].iloc[0] == 35
 
-    def test_query_distinct_accounts(self):
-        """DISTINCT 출금계좌 수 조회가 정상 동작하는지 확인."""
-        result = db.query(
-            "SELECT count(DISTINCT 출금계좌일련번호) as cnt FROM hofinet"
+    def test_query_arrow_returns_table(self):
+        assert isinstance(db.query_arrow("SELECT * FROM hofinet LIMIT 5"), pa.Table)
+
+    def test_external_file_access_is_disabled(self):
+        if db.connection_info()["origin"] != "file":
+            pytest.skip("external connection installed by the caller")
+        with pytest.raises(duckdb.Error):
+            db.query("SELECT * FROM read_csv_auto('/etc/hostname')")
+
+
+class TestCursorIsolation:
+    """Concurrent queries must not read each other's results (L3-003)."""
+
+    def test_threads_get_their_own_results(self):
+        queries = [
+            ("SELECT count(*) AS c FROM hofinet WHERE fraud_type = 7", 35),
+            ("SELECT count(*) AS c FROM hofinet WHERE is_fraud = 1", 14_490),
+            ("SELECT count(*) AS c FROM hofinet WHERE time_slot = 3", 116),
+        ]
+        errors = []
+
+        def run(sql, expected):
+            for _ in range(20):
+                try:
+                    value = int(db.query(sql)["c"].iloc[0])
+                except Exception as exc:  # noqa: BLE001 - reported below
+                    errors.append(f"{sql}: {exc}")
+                    return
+                if value != expected:
+                    errors.append(f"{sql}: {value} != {expected}")
+                    return
+
+        threads = [threading.Thread(target=run, args=q) for q in queries for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert errors == []
+
+
+class TestDatabaseGuards:
+    def test_refuses_korean_column_database(self, isolated_db):
+        conn = duckdb.connect(str(isolated_db))
+        conn.execute("CREATE TABLE hofinet AS SELECT 20210901 AS 거래일자, 1 AS 거래금액")
+        conn.close()
+        with pytest.raises(db.DatabaseMismatch):
+            db.get_connection()
+
+    def test_refuses_database_without_build_metadata(self, isolated_db):
+        conn = duckdb.connect(str(isolated_db))
+        conn.execute(
+            f"CREATE TABLE hofinet AS SELECT * FROM read_parquet('{config.PARQUET_PATH.as_posix()}') LIMIT 10"
         )
-        account_count = result["cnt"].iloc[0]
-        assert account_count > 0
+        conn.close()
+        with pytest.raises(db.DatabaseMismatch):
+            db.get_connection()
 
-    def test_query_with_params(self):
-        """파라미터 바인딩 쿼리가 동작하는지 확인."""
-        result = db.query(
-            "SELECT count(*) as cnt FROM hofinet WHERE 이상거래여부 = ?",
-            [1],
-        )
-        assert isinstance(result, pd.DataFrame)
-        assert result["cnt"].iloc[0] > 0
+    def test_refuses_database_built_from_another_parquet(self, isolated_db, monkeypatch):
+        db.rebuild_database()
+        probe = duckdb.connect(str(isolated_db))
+        try:
+            assert db.build_info(probe)["parquet_sha256"] == db.parquet_sha256()
+        finally:
+            probe.close()
+        monkeypatch.setattr(db, "parquet_sha256", lambda: "0" * 64)
+        with pytest.raises(db.DatabaseMismatch):
+            db.get_connection()
 
-    def test_query_aggregation(self):
-        """복합 집계 쿼리(app.py에서 사용하는 쿼리)가 동작하는지 확인."""
-        result = db.query("""
-            SELECT
-                count(*) as total,
-                sum(이상거래여부) as fraud,
-                count(DISTINCT 출금계좌일련번호) as accounts,
-                count(DISTINCT 출금금융회사일련번호)
-                    + count(DISTINCT 입금금융회사일련번호) as banks
-            FROM hofinet
-        """)
-        assert result["total"].iloc[0] > 0
-        assert result["fraud"].iloc[0] > 0
-        assert result["accounts"].iloc[0] > 0
-        assert result["banks"].iloc[0] > 0
+    def test_rebuild_creates_a_verified_database(self, isolated_db):
+        db.rebuild_database()
+        assert db.query("SELECT count(*) AS c FROM hofinet")["c"].iloc[0] == 4_732_130
+        assert db.connection_info()["build_info"]["parquet_sha256"] == db.parquet_sha256()
 
-    def test_query_group_by(self):
-        """GROUP BY 쿼리가 정상 동작하는지 확인."""
-        result = db.query("""
-            SELECT 이상거래여부, count(*) as cnt
-            FROM hofinet
-            GROUP BY 이상거래여부
-            ORDER BY 이상거래여부
-        """)
-        assert len(result) == 2  # 0과 1
-        assert result["이상거래여부"].tolist() == [0, 1]
+    def test_use_connection_checks_the_schema(self):
+        stale = duckdb.connect(":memory:")
+        stale.execute("CREATE TABLE hofinet AS SELECT 1 AS 거래일자")
+        try:
+            with pytest.raises(db.DatabaseMismatch):
+                db.use_connection(stale)
+        finally:
+            stale.close()
 
-    def test_query_limit(self):
-        """LIMIT 쿼리가 정상 동작하는지 확인."""
-        result = db.query("SELECT * FROM hofinet LIMIT 10")
-        assert len(result) == 10
-        assert len(result.columns) == 12
-
-
-class TestQueryArrow:
-    """query_arrow() 함수 테스트."""
-
-    def test_query_arrow_returns_arrow_table(self):
-        """query_arrow()가 PyArrow Table을 반환하는지 확인."""
-        result = db.query_arrow("SELECT * FROM hofinet LIMIT 5")
-        assert isinstance(result, pa.Table)
-
-    def test_query_arrow_count(self):
-        """Arrow 쿼리로 레코드 수 조회가 정상 동작하는지 확인."""
-        result = db.query_arrow("SELECT count(*) as cnt FROM hofinet")
-        count = result.column("cnt")[0].as_py()
-        assert count == 4_732_130
-
-    def test_query_arrow_with_params(self):
-        """Arrow 쿼리에서 파라미터 바인딩이 동작하는지 확인."""
-        result = db.query_arrow(
-            "SELECT count(*) as cnt FROM hofinet WHERE 이상거래여부 = ?",
-            [0],
-        )
-        assert isinstance(result, pa.Table)
-        count = result.column("cnt")[0].as_py()
-        assert count > 0
-
-
-class TestFraudAnalysis:
-    """이상거래 분석 쿼리 테스트."""
-
-    def test_fraud_types_exist(self):
-        """이상거래유형이 복수 종류 존재하는지 확인."""
-        result = db.query("""
-            SELECT DISTINCT 이상거래유형
-            FROM hofinet
-            WHERE 이상거래여부 = 1
-            ORDER BY 이상거래유형
-        """)
-        assert len(result) >= 2  # 최소 2종류 이상
-
-    def test_fraud_descriptions_exist(self):
-        """이상거래설명이 채워져 있는지 확인."""
-        result = db.query("""
-            SELECT DISTINCT 이상거래설명
-            FROM hofinet
-            WHERE 이상거래여부 = 1
-            ORDER BY 이상거래설명
-        """)
-        assert len(result) >= 2
-        # 설명이 빈 문자열이 아닌지 확인
-        for desc in result["이상거래설명"].tolist():
-            assert desc is not None and len(desc) > 0
-
-    def test_transaction_amount_statistics(self):
-        """거래금액 통계(최소, 최대, 평균)가 합리적인지 확인."""
-        result = db.query("""
-            SELECT
-                min(거래금액) as min_amt,
-                max(거래금액) as max_amt,
-                avg(거래금액) as avg_amt
-            FROM hofinet
-        """)
-        min_amt = result["min_amt"].iloc[0]
-        max_amt = result["max_amt"].iloc[0]
-        avg_amt = result["avg_amt"].iloc[0]
-        assert min_amt > 0
-        assert max_amt > min_amt
-        assert avg_amt > 0
-
-    def test_quarterly_data_coverage(self):
-        """데이터가 여러 분기에 걸쳐 있는지 확인."""
-        result = db.query("""
-            SELECT
-                min(거래일자) as min_date,
-                max(거래일자) as max_date,
-                count(DISTINCT 거래일자) as distinct_dates
-            FROM hofinet
-        """)
-        distinct_dates = result["distinct_dates"].iloc[0]
-        assert distinct_dates > 100  # 최소 100일 이상
-
-    def test_financial_institutions_count(self):
-        """금융회사 수가 합리적인지 확인."""
-        result = db.query("""
-            SELECT
-                count(DISTINCT 출금금융회사일련번호) as withdraw_banks,
-                count(DISTINCT 입금금융회사일련번호) as deposit_banks
-            FROM hofinet
-        """)
-        assert result["withdraw_banks"].iloc[0] >= 10
-        assert result["deposit_banks"].iloc[0] >= 10
+    def test_file_sha256_is_stable(self):
+        assert db.file_sha256(config.PARQUET_PATH) == db.parquet_sha256()
+        assert len(db.parquet_sha256()) == 64
 
 
 class TestConnectionLifecycle:
-    """db 연결 초기화/종료 분기 테스트."""
-
-    def test_get_connection_initializes_when_conn_missing(self, monkeypatch):
-        """_conn이 없으면 connect, thread 설정, 테이블 초기화를 수행해야 한다."""
-        class DummyConn:
-            def __init__(self):
-                self.executed = []
-
-            def execute(self, sql):
-                self.executed.append(sql)
-                return self
-
-        dummy = DummyConn()
-        init_called = {"count": 0}
-
-        monkeypatch.setattr(db, "_conn", None)
-        monkeypatch.setattr(db.duckdb, "connect", lambda _path: dummy)
-        monkeypatch.setattr(db, "_init_table", lambda: init_called.__setitem__("count", init_called["count"] + 1))
-
-        conn = db.get_connection()
-
-        assert conn is dummy
-        assert init_called["count"] == 1
-        assert any("SET threads TO" in sql for sql in dummy.executed)
-
-    def test_init_table_calls_csv_conversion_when_parquet_missing(self, monkeypatch):
-        """Parquet이 없으면 csv_to_parquet를 호출해야 한다."""
-        class DummyPath:
-            def exists(self):
-                return False
-
-            def as_posix(self):
-                return "/tmp/fake.parquet"
-
-        class DummyConn:
-            def __init__(self):
-                self.executed = []
-
-            def execute(self, sql):
-                self.executed.append(sql)
-                return self
-
-            def fetchone(self):
-                return [123]
-
-        dummy = DummyConn()
-        csv_called = {"called": False}
-
-        monkeypatch.setattr(db, "_conn", dummy)
-        monkeypatch.setattr(db.config, "PARQUET_PATH", DummyPath())
-        monkeypatch.setattr(db, "csv_to_parquet", lambda: csv_called.__setitem__("called", True))
-
-        count = db._init_table()
-
-        assert count == 123
-        assert csv_called["called"] is True
-        assert any("CREATE TABLE IF NOT EXISTS hofinet" in sql for sql in dummy.executed)
-
-    def test_close_handles_none_and_resets_connection(self, monkeypatch):
-        """close()는 None일 때 안전하고, 연결이 있으면 닫고 None으로 돌려야 한다."""
-        monkeypatch.setattr(db, "_conn", None)
+    def test_close_is_safe_when_already_closed(self, isolated_db):
         db.close()
         assert db._conn is None
-
-        dummy = MagicMock()
-        monkeypatch.setattr(db, "_conn", dummy)
         db.close()
-
-        dummy.close.assert_called_once()
-        assert db._conn is None

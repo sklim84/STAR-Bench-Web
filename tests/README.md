@@ -1,29 +1,48 @@
 # Tests
 
-`tests/`는 `src/` 모듈의 단위 테스트를 담습니다.
+`tests/` holds the unit tests of the tool layer (`src/`) and the pre-flight
+checks a benchmark run depends on.
 
-## 커버 범위(요약)
+## What is covered
 
-- 데이터 계층: `test_loader.py`, `test_db.py`, `test_graph_etl.py`, `test_graph_db.py`
-- 에이전트/분석 기능: `test_agent.py`, `test_agent_str.py`, `test_agent_tools_extended.py`
-- 피처 모듈: `test_dashboard.py`, `test_detector.py`, `test_network.py`, `test_monitoring.py`, `test_flow_analyzer.py`, `test_ctr_monitor.py`, `test_risk_scorer.py`, `test_aml_reference.py`
-- 공통/설정: `test_config.py`, `test_modules.py`, `conftest.py`
-- UI 유틸: `test_chart_utils.py`
+- Data layer: `test_db.py` (schema and parquet-hash guards, per-call cursors,
+  rebuild), `test_loader.py`, `test_graph_etl.py`, `test_graph_db.py`
+- Tools as the benchmark calls them: `test_agent_tools.py` (all 23 tools through
+  `_execute_tool`), `test_agent_str.py` (STR drafting and validation)
+- Feature modules: `test_dashboard.py`, `test_detector.py`, `test_network.py`,
+  `test_monitoring.py`, `test_flow_analyzer.py`, `test_ctr_monitor.py`,
+  `test_risk_scorer.py`, `test_aml_reference.py`
+- Run properties: `test_determinism.py` (the same call twice returns the same
+  bytes), `test_concurrency.py` (threaded calls match serial calls)
+- Common/config: `test_config.py`, `test_modules.py`, `tests/conftest.py`
+- UI helpers: `test_chart_utils.py`
+- Benchmark pre-flight: `test_gold_calls.py` (marked `gold`, see below)
 
-## 실행 방법
+## Running
 
 ```bash
-# tests 디렉토리 전체
-pytest -q tests
-
-# 특정 파일
-pytest -q tests/test_agent_tools_extended.py
-
-# 특정 테스트
-pytest -q tests/test_db.py::TestConnectionLifecycle::test_close_handles_none_and_resets_connection
+pytest -q                       # the whole suite except the gold-call harness
+pytest -q tests/test_db.py      # one file
+HOFINET_DUCKDB_PATH=/tmp/t.duckdb pytest -q   # build the test database elsewhere
 ```
 
-## 참고
+Every database-backed test skips when `_datasets/HOFINET.parquet` is absent, so
+a fresh clone of the public repository still runs.
 
-- `tests/__pycache__/`는 파이썬 실행 중 자동 생성되는 캐시이며 소스가 아닙니다.
-- 테스트는 in-memory DuckDB 픽스처(`tests/conftest.py`)를 사용합니다.
+## Gold-call smoke harness
+
+`test_gold_calls.py` executes every gold tool call of a STAR-Bench benchmark
+directory against this platform and fails on any tool error; empty results are
+reported per tool. It is deselected by default (`pytest.ini`) because it tests
+the benchmark data as much as the platform:
+
+```bash
+pytest -m gold                                    # default directories
+STAR_BENCH_GOLD_DIRS=/path/to/benchmarks pytest -m gold
+python scripts/gold_calls.py ../STAR-Bench/benchmarks --json report.json
+```
+
+Default directories: `../STAR-Bench/benchmarks`, `../STAR-Bench/benchmarks_en`,
+`../STAR-Bench/benchmarks_multiturn`. The files are read at run time, and both
+`sql_contains` checks and `expected.reference_calls.query_transactions.sql` are
+understood.

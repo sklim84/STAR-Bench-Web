@@ -981,10 +981,10 @@ def _opt_date(arguments: dict, name: str, default=None):
     """Reads a YYYYMMDD date argument and checks that it is a real date."""
     if name not in arguments:
         return default
-    value = _as_int(arguments[name], name)
     try:
+        value = _as_int(arguments[name], name)
         datetime.strptime(str(value), "%Y%m%d")
-    except ValueError:
+    except (ToolArgumentError, ValueError):
         raise ToolArgumentError(
             f"{name}({arguments[name]!r}) must be a date as a YYYYMMDD integer, e.g. 20240131."
         ) from None

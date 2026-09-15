@@ -45,13 +45,13 @@ def sample_transfer_df():
     return pd.DataFrame({
         "source": [1001, 1002, 2001],
         "target": [2001, 2002, 1001],
-        "거래일자": [20240101, 20240102, 20240103],
-        "거래시간대": [9, 14, 21],
-        "자금구분": [1, 3, 0],
-        "매체구분": [1, 2, 3],
-        "거래금액": [100000, 5000000, 250000],
-        "이상거래여부": [0, 1, 0],
-        "이상거래유형": [0, 3, 0],
+        "date": [20240101, 20240102, 20240103],
+        "time_slot": [9, 14, 21],
+        "fund_type": [1, 3, 0],
+        "media_type": [1, 2, 3],
+        "amount": [100000, 5000000, 250000],
+        "is_fraud": [0, 1, 0],
+        "fraud_type": [0, 3, 0],
     })
 
 
@@ -70,7 +70,7 @@ class TestRunEtl:
             result = graph_etl.run_etl()
 
         assert "error" in result
-        assert result["error"] == "Memgraph 미실행"
+        assert result["error"] == "Memgraph not running"
 
     def test_skips_etl_when_data_already_exists(self):
         """기존 데이터(accounts > 0) 존재 시 ETL을 스킵하고 기존 카운트를 반환하는지 확인."""
@@ -422,8 +422,8 @@ class TestDfToTransferBatch:
 
         result = graph_etl._df_to_transfer_batch(sample_transfer_df)
         required_keys = {
-            "source", "target", "거래일자", "거래시간대",
-            "자금구분", "매체구분", "거래금액", "이상거래여부", "이상거래유형"
+            "source", "target", "date", "time_slot",
+            "fund_type", "media_type", "amount", "is_fraud", "fraud_type"
         }
 
         for item in result:
@@ -447,18 +447,18 @@ class TestDfToTransferBatch:
         df_with_nan = pd.DataFrame({
             "source": [1001],
             "target": [2001],
-            "거래일자": [20240101],
-            "거래시간대": [9],
-            "자금구분": [1],
-            "매체구분": [1],
-            "거래금액": [100000],
-            "이상거래여부": [0],
-            "이상거래유형": [float("nan")],
+            "date": [20240101],
+            "time_slot": [9],
+            "fund_type": [1],
+            "media_type": [1],
+            "amount": [100000],
+            "is_fraud": [0],
+            "fraud_type": [float("nan")],
         })
 
         result = graph_etl._df_to_transfer_batch(df_with_nan)
 
-        assert result[0]["이상거래유형"] == 0
+        assert result[0]["fraud_type"] == 0
 
     def test_correct_values_mapping(self, sample_transfer_df):
         """DataFrame 값이 올바르게 딕셔너리에 매핑되는지 확인."""
@@ -468,13 +468,13 @@ class TestDfToTransferBatch:
 
         assert result[0]["source"] == 1001
         assert result[0]["target"] == 2001
-        assert result[0]["거래일자"] == 20240101
-        assert result[0]["거래금액"] == 100000
-        assert result[0]["이상거래여부"] == 0
+        assert result[0]["date"] == 20240101
+        assert result[0]["amount"] == 100000
+        assert result[0]["is_fraud"] == 0
 
         assert result[1]["source"] == 1002
-        assert result[1]["이상거래여부"] == 1
-        assert result[1]["이상거래유형"] == 3
+        assert result[1]["is_fraud"] == 1
+        assert result[1]["fraud_type"] == 3
 
     def test_empty_dataframe_returns_empty_list(self):
         """빈 DataFrame에 대해 빈 리스트를 반환하는지 확인."""

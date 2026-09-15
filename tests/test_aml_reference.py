@@ -1,95 +1,96 @@
-"""AML 참조 기능 테스트."""
+"""src/features/aml_reference.py: FIU catalog, STR fields, glossary, code maps."""
+
+import json
 
 import pytest
 
-from src.features.aml_reference import (
-    lookup_fiu_reference_types,
-    validate_str_fields,
-    get_aml_glossary,
-)
+from src.features import aml_reference as ref
 
 
-class TestLookupFiuReferenceTypes:
-    """lookup_fiu_reference_types 테스트."""
+class TestCodeMaps:
+    def test_fraud_type_map_matches_hofinet(self):
+        assert sorted(ref.FRAUD_TYPE_MAP) == [1, 2, 3, 4, 5, 7]
 
-    def test_returns_list(self):
-        result = lookup_fiu_reference_types("분할거래")
-        assert isinstance(result, list)
+    def test_media_type_map(self):
+        assert ref.MEDIA_TYPE_MAP[2] == "Internet Banking"
+        assert ref.MEDIA_TYPE_MAP[7] == "Bulk Transfer"
+        assert sorted(ref.MEDIA_TYPE_MAP) == [1, 2, 3, 4, 5, 6, 7]
 
-    def test_keyword_match(self):
-        result = lookup_fiu_reference_types("분할")
-        assert len(result) >= 1
-        assert any("분할" in r.get("description", "") for r in result)
+    def test_fund_type_map(self):
+        assert sorted(ref.FUND_TYPE_MAP) == [0, 1, 3, 4]
 
-    def test_industry_filter_banking(self):
-        result = lookup_fiu_reference_types("비대면", "banking")
-        assert all(r["industry"] == "은행업" for r in result)
-
-    def test_empty_keyword_returns_empty(self):
-        result = lookup_fiu_reference_types("")
-        assert result == []
+    def test_translators_fall_back(self):
+        assert ref.translate_fraud_type(6) == "Other"
+        assert ref.translate_media_type(None) == "Other"
+        assert ref.translate_fund_type("x") == "N/A"
 
 
-class TestValidateStrFields:
-    """validate_str_fields 테스트."""
+class TestFiuCatalog:
+    def test_catalog_size(self):
+        assert len(ref.lookup_fiu_reference_types("")) == 31
 
-    def test_returns_dict(self):
-        result = validate_str_fields({})
-        assert isinstance(result, dict)
-        assert "valid" in result
-        assert "missing_required" in result
+    def test_keyword_match_is_case_insensitive(self):
+        assert ref.lookup_fiu_reference_types("STRUCTURING") == \
+               ref.lookup_fiu_reference_types("structuring")
 
-    def test_incomplete_draft_has_missing(self):
-        result = validate_str_fields({})
-        assert result["valid"] is False
-        assert len(result["missing_required"]) > 0
+    def test_industry_filter(self):
+        results = ref.lookup_fiu_reference_types("", industry="securities")
+        assert results and {item["industry"] for item in results} == {"Securities"}
 
-    def test_complete_draft_valid(self):
-        draft = {
-            "표제부": {"문서번호": "2024-001", "보고일자": "20240301"},
-            "I_보고기관": {
-                "보고기관명": "테스트",
-                "보고책임자명": "홍길동",
-                "보고담당자명": "김담당",
-                "보고담당자 전화번호": "02-1234-5678",
-            },
-            "II_거래자_공통": {
-                "거래자(사업자)명": "테스트",
-                "거래자(사업자) 실명번호구분": "1",
-                "거래자(사업자) 실명번호": "123456",
-                "거래자(사업자) 국적": "1",
-            },
-            "III_거래내역": {
-                "거래발생일시": "202403011200",
-                "거래채널": "1",
-                "거래수단": "1",
-                "거래종류": "1",
-                "거래상품": "1",
-                "통화종류": "1",
-                "관련계좌 존재 여부": "1",
-                "송금/수취계좌 존재 여부": "1",
-                "거래대리인 존재여부": "2",
-            },
+    def test_korean_keyword_has_no_match(self):
+        assert ref.lookup_fiu_reference_types("심야") == []
+
+    def test_entries_carry_the_documented_fields(self):
+        item = ref.lookup_fiu_reference_types("cash")[0]
+        assert set(item) == {"industry", "category", "no", "description"}
+
+
+class TestGlossary:
+    def test_terms(self):
+        assert ref.glossary_terms()[:3] == ["CDD", "EDD", "SDD"]
+        assert len(ref.glossary_terms()) == 13
+
+    def test_lookup_is_case_insensitive(self):
+        assert ref.get_aml_glossary("cdd")["term"] == "CDD"
+
+    def test_unknown_term(self):
+        assert ref.get_aml_glossary("구조화") is None
+        assert ref.get_aml_glossary("") is None
+
+
+class TestStrValidation:
+    def _draft(self):
+        return {
+            section: {field: "value" for field in fields}
+            for section, fields in ref.STR_REQUIRED_FIELDS.items()
         }
-        result = validate_str_fields(draft)
-        assert result["valid"] is True
-        assert len(result["missing_required"]) == 0
 
+    def test_complete_draft_is_valid(self):
+        assert ref.validate_str_fields(self._draft())["valid"]
 
-class TestGetAmlGlossary:
-    """get_aml_glossary 테스트."""
+    def test_missing_field_is_named(self):
+        draft = self._draft()
+        del draft["III_TransactionDetails"]["TransactionPeriod"]
+        result = ref.validate_str_fields(draft)
+        assert not result["valid"]
+        assert result["missing_required"] == ["III_TransactionDetails.TransactionPeriod"]
 
-    def test_cdd_returns_definition(self):
-        result = get_aml_glossary("CDD")
-        assert result is not None
-        assert "CDD" in result["term"]
-        assert "고객확인" in result["definition"]
+    def test_placeholder_counts_as_missing(self):
+        draft = self._draft()
+        draft["II_Transactor"]["WithdrawalAccountNumber"] = ["Unknown"]
+        assert not ref.validate_str_fields(draft)["valid"]
 
-    def test_str_returns_definition(self):
-        result = get_aml_glossary("STR")
-        assert result is not None
-        assert "의심거래" in result["definition"]
+    def test_personal_details_are_optional(self):
+        result = ref.validate_str_fields(self._draft())
+        assert "II_Transactor.Name" in result["missing_optional"]
 
-    def test_unknown_returns_none(self):
-        result = get_aml_glossary("UNKNOWN_XYZ")
-        assert result is None
+    def test_json_string_draft(self):
+        assert ref.validate_str_fields(json.dumps(self._draft()))["valid"]
+
+    def test_free_text_draft(self):
+        result = ref.validate_str_fields("not a draft")
+        assert not result["valid"] and "error" in result
+
+    def test_flat_draft_is_accepted(self):
+        flat = {field: "value" for fields in ref.STR_REQUIRED_FIELDS.values() for field in fields}
+        assert ref.validate_str_fields(flat)["valid"]

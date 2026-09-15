@@ -6,6 +6,7 @@
 - DuckDB 스레드 설정이 유효한 값인지
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -38,9 +39,10 @@ class TestPathConstants:
         assert config.MODELS_DIR.exists()
         assert config.MODELS_DIR.is_dir()
 
+    @pytest.mark.skipif(not config.DOCS_DIR.exists(),
+                        reason="_docs는 공개 repo에 포함되지 않는 참고자료 디렉토리")
     def test_docs_dir_exists(self):
         """_docs 디렉토리가 존재하는지 확인."""
-        assert config.DOCS_DIR.exists()
         assert config.DOCS_DIR.is_dir()
 
     def test_csv_path_points_to_correct_file(self):
@@ -53,10 +55,16 @@ class TestPathConstants:
         assert config.PARQUET_PATH.name == "HOFINET.parquet"
         assert config.PARQUET_PATH.parent == config.DATASETS_DIR
 
-    def test_duckdb_path_points_to_correct_file(self):
-        """DUCKDB_PATH가 HOFINET.duckdb를 가리키는지 확인."""
-        assert config.DUCKDB_PATH.name == "HOFINET.duckdb"
-        assert config.DUCKDB_PATH.parent == config.DATASETS_DIR
+    def test_duckdb_path_points_to_a_duckdb_file(self):
+        """DUCKDB_PATH가 DuckDB 파일을 가리키는지 확인 (환경변수로 재지정 가능)."""
+        assert config.DUCKDB_PATH.suffix == ".duckdb"
+        if "HOFINET_DUCKDB_PATH" not in os.environ:
+            assert config.DUCKDB_PATH.name == "HOFINET.duckdb"
+            assert config.DUCKDB_PATH.parent == config.DATASETS_DIR
+
+    def test_reference_date_is_the_last_transaction_date(self):
+        """REFERENCE_DATE가 데이터 마지막 거래일(20241231)인지 확인."""
+        assert config.REFERENCE_DATE == 20241231
 
     def test_all_paths_are_pathlib_objects(self):
         """모든 경로 상수가 Path 객체인지 확인."""
