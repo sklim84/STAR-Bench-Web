@@ -85,12 +85,7 @@ def get_quarterly_trend(filters: dict | None = None) -> pd.DataFrame:
     return query(f"""
         SELECT
             CAST(date / 10000 AS INT) as year,
-            CASE
-                WHEN (date / 100 % 100) <= 3 THEN 1
-                WHEN (date / 100 % 100) <= 6 THEN 2
-                WHEN (date / 100 % 100) <= 9 THEN 3
-                ELSE 4
-            END as quarter,
+            (date // 100 % 100 - 1) // 3 + 1 as quarter,
             count(*) as total_txns,
             sum(is_fraud) as fraud_txns,
             round(sum(is_fraud) * 100.0 / count(*), 4) as fraud_ratio
@@ -389,7 +384,12 @@ def get_trend_analysis(unit: str = "monthly",
                        metric: str = "transactions",
                        date_from: int | None = None,
                        date_to: int | None = None) -> pd.DataFrame:
-    """Returns time-series trend analysis."""
+    """Returns time-series trend analysis.
+
+    Quarters are computed with integer arithmetic: DuckDB's `/` is float
+    division, which used to push the last month of Q1-Q3 into the next quarter
+    and produced 13 quarters instead of the dataset's 14.
+    """
     conditions = []
     if date_from is not None:
         conditions.append(f"date >= {int(date_from)}")
@@ -399,28 +399,29 @@ def get_trend_analysis(unit: str = "monthly",
 
     if unit == "quarterly":
         period_expr = (
-            "CAST(date / 10000 AS INT) * 10 + "
-            "CASE WHEN (date / 100 % 100) <= 3 THEN 1 "
-            "WHEN (date / 100 % 100) <= 6 THEN 2 "
-            "WHEN (date / 100 % 100) <= 9 THEN 3 "
-            "ELSE 4 END"
+            "CAST(date // 10000 AS VARCHAR) || 'Q' || "
+            "CAST((date // 100 % 100 - 1) // 3 + 1 AS VARCHAR)"
         )
     else:
-        period_expr = "CAST(date / 100 AS INT)"
+        period_expr = (
+            "CAST(date // 10000 AS VARCHAR) || '-' || "
+            "lpad(CAST(date // 100 % 100 AS VARCHAR), 2, '0')"
+        )
 
     return query(f"""
         SELECT
             {period_expr} AS period,
-            COUNT(*) AS transactions,
-            SUM(is_fraud) AS fraud_count,
-            ROUND(SUM(is_fraud) * 100.0 / COUNT(*), 4) AS fraud_rate,
-            SUM(amount) AS total_amount,
-            ROUND(AVG(amount), 0) AS avg_amount
+            COUNT(*)::BIGINT AS transactions,
+            COALESCE(SUM(is_fraud), 0)::BIGINT AS fraud_count,
+            ROUND(SUM(is_fraud) * 100.0 / COUNT(*), 4) AS fraud_ratio_percent,
+            COALESCE(SUM(amount), 0)::BIGINT AS total_amount,
+            ROUND(AVG(amount), 0) AS avg_amount,
+            MIN(date) AS period_start
         FROM hofinet
         {where}
         GROUP BY period
-        ORDER BY period
-    """)
+        ORDER BY period_start
+    """).drop(columns=["period_start"])
 
 
 # ------------------------------------------------------------------
@@ -440,34 +441,34 @@ def analyze_channel_risk(date_from: int | None = None,
 
     channel_df = query(f"""
         SELECT
-            media_type as channel_code,
-            COUNT(*) AS total_txns,
-            SUM(is_fraud) AS fraud_count,
-            ROUND(SUM(is_fraud) * 100.0 / COUNT(*), 4) AS fraud_rate,
-            SUM(amount) AS total_amount,
+            media_type,
+            COUNT(*)::BIGINT AS total_txns,
+            COALESCE(SUM(is_fraud), 0)::BIGINT AS fraud_count,
+            ROUND(SUM(is_fraud) * 100.0 / COUNT(*), 4) AS fraud_ratio_percent,
+            COALESCE(SUM(amount), 0)::BIGINT AS total_amount,
             ROUND(AVG(amount), 0) AS avg_amount
         FROM hofinet
         {where}
-        GROUP BY channel_code
-        ORDER BY fraud_rate DESC
+        GROUP BY media_type
+        ORDER BY fraud_ratio_percent DESC, media_type
     """)
     if not channel_df.empty:
-        channel_df["channel"] = channel_df["channel_code"].map(MEDIA_TYPE_MAP).fillna("Other")
+        channel_df["channel_name"] = channel_df["media_type"].map(MEDIA_TYPE_MAP).fillna("Other")
 
     # Channel x Hour Cross analysis
     cross_df = query(f"""
         SELECT
-            media_type as channel_code, time_slot as hour_range,
-            COUNT(*) AS transactions,
-            SUM(is_fraud) AS fraud_count,
-            ROUND(SUM(is_fraud) * 100.0 / COUNT(*), 4) AS fraud_rate
+            media_type, time_slot as hour_range,
+            COUNT(*)::BIGINT AS transactions,
+            COALESCE(SUM(is_fraud), 0)::BIGINT AS fraud_count,
+            ROUND(SUM(is_fraud) * 100.0 / COUNT(*), 4) AS fraud_ratio_percent
         FROM hofinet
         {where}
-        GROUP BY channel_code, hour_range
-        ORDER BY channel_code, hour_range
+        GROUP BY media_type, hour_range
+        ORDER BY media_type, hour_range
     """)
     if not cross_df.empty:
-        cross_df["channel"] = cross_df["channel_code"].map(MEDIA_TYPE_MAP).fillna("Other")
+        cross_df["channel_name"] = cross_df["media_type"].map(MEDIA_TYPE_MAP).fillna("Other")
 
     channel_stats = channel_df.to_dict(orient="records") if not channel_df.empty else []
     cross_stats = cross_df.to_dict(orient="records") if not cross_df.empty else []
@@ -487,10 +488,14 @@ def get_receiving_account_profile(account_id: int) -> dict:
     """Profiles account from the perspective of fund receiving."""
     aid = int(account_id)
 
-    # Basic aggregation (inbound)
+    # Basic aggregation (inbound). unique_senders is counted in SQL over every
+    # inbound transaction, not over the top-5 frame below.
     agg_df = query(
-        "SELECT COUNT(*) AS cnt, SUM(amount) AS total_amount, "
-        "SUM(is_fraud) AS fraud_cnt "
+        "SELECT COUNT(*)::BIGINT AS cnt, "
+        "COALESCE(SUM(amount), 0)::BIGINT AS total_amount, "
+        "COALESCE(SUM(is_fraud), 0)::BIGINT AS fraud_cnt, "
+        "COUNT(DISTINCT sender_acc)::BIGINT AS unique_senders, "
+        "COUNT(DISTINCT sender_bank)::BIGINT AS unique_sender_banks "
         "FROM hofinet WHERE receiver_acc = $aid",
         {"aid": aid},
     )
@@ -500,24 +505,24 @@ def get_receiving_account_profile(account_id: int) -> dict:
 
     row = agg_df.iloc[0]
     total_count = int(row["cnt"] or 0)
-    total_amount = int(row["total_amount" ] or 0)
+    total_amount = int(row["total_amount"] or 0)
     fraud_count = int(row["fraud_cnt"] or 0)
 
     # Top sending accounts
     sender_df = query(
         "SELECT sender_acc AS sender_id, "
-        "COUNT(*) AS tx_count, SUM(amount) AS total_amount "
+        "COUNT(*)::BIGINT AS tx_count, COALESCE(SUM(amount), 0)::BIGINT AS total_amount "
         "FROM hofinet WHERE receiver_acc = $aid "
-        "GROUP BY sender_acc ORDER BY tx_count DESC LIMIT 5",
+        "GROUP BY sender_acc ORDER BY tx_count DESC, sender_id LIMIT 5",
         {"aid": aid},
     )
     top_senders = sender_df.to_dict(orient="records") if not sender_df.empty else []
 
     # Sender bank distribution
     bank_df = query(
-        "SELECT sender_bank AS bank_id, COUNT(*) AS tx_count "
+        "SELECT sender_bank AS bank_id, COUNT(*)::BIGINT AS tx_count "
         "FROM hofinet WHERE receiver_acc = $aid "
-        "GROUP BY sender_bank ORDER BY tx_count DESC LIMIT 5",
+        "GROUP BY sender_bank ORDER BY tx_count DESC, bank_id LIMIT 5",
         {"aid": aid},
     )
     top_sender_banks = bank_df.to_dict(orient="records") if not bank_df.empty else []
@@ -526,10 +531,10 @@ def get_receiving_account_profile(account_id: int) -> dict:
     hour_df = query(
         "SELECT time_slot as hour_range, COUNT(*) AS cnt FROM hofinet "
         "WHERE receiver_acc = $aid "
-        "GROUP BY hour_range ORDER BY cnt DESC LIMIT 3",
+        "GROUP BY hour_range ORDER BY cnt DESC, hour_range LIMIT 3",
         {"aid": aid},
     )
-    top_hours = hour_df["hour_range"].tolist() if not hour_df.empty else []
+    top_hours = [int(v) for v in hour_df["hour_range"].tolist()] if not hour_df.empty else []
 
     return {
         "account_id": aid,
@@ -537,8 +542,9 @@ def get_receiving_account_profile(account_id: int) -> dict:
         "total_txns": total_count,
         "total_amount": total_amount,
         "fraud_count": fraud_count,
-        "fraud_rate": round(fraud_count / total_count, 4) if total_count > 0 else 0.0,
-        "unique_senders": int(sender_df["sender_id"].nunique()) if not sender_df.empty else 0,
+        "fraud_ratio_percent": round(fraud_count / total_count * 100, 4) if total_count > 0 else 0.0,
+        "unique_senders": int(row["unique_senders"] or 0),
+        "unique_sender_banks": int(row["unique_sender_banks"] or 0),
         "top_hours": top_hours,
         "top_senders": top_senders,
         "top_sender_banks": top_sender_banks,

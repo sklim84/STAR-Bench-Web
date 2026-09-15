@@ -6,10 +6,12 @@ analyzes suspicious transactions through conversation, and generates STR drafts.
 
 import json
 import logging
+import math
 import re
 from collections import Counter
-from datetime import date
+from datetime import datetime, timedelta
 
+import duckdb
 import pandas as pd
 from openai import OpenAI
 
@@ -20,8 +22,7 @@ from src.data.db import query
 from src.features.dashboard import get_summary, get_fraud_type_distribution
 from src.features.detector import load_model
 from src.features.network import (
-    get_account_ego_network,
-    get_account_ego_network_deep,
+    summarize_account_network,
     detect_ring_transactions,
     detect_layering_patterns,
     detect_funnel_accounts,
@@ -34,14 +35,11 @@ from src.features.ctr_monitor import (
 )
 from src.features.risk_scorer import score_account as _score_account_risk
 from src.features.monitoring import (
-    detect_nighttime_bulk,
-    detect_rapid_fire,
-    detect_round_amounts,
-    detect_institution_concentration,
-    detect_pattern_change,
+    RULE_NAMES,
+    run_rule,
     run_all_rules,
     detect_dormant_reactivation,
-    _calculate_previous_period,
+    default_pattern_change_period,
 )
 from src.features.dashboard import (
     get_trend_analysis as _get_trend_analysis,
@@ -56,6 +54,7 @@ from src.features.aml_reference import (
     lookup_fiu_reference_types,
     validate_str_fields,
     get_aml_glossary,
+    glossary_terms,
 )
 
 
@@ -65,10 +64,11 @@ TOOLS = [
         "function": {
             "name": "query_transactions",
             "description": (
-                "Executes SQL queries on the HOFINET database to retrieve transaction data. "
-                "The table name is 'hofinet' and columns are: date, time_slot, sender_bank, "
-                "sender_acc, receiver_bank, receiver_acc, fund_type, media_type, "
-                "amount, is_fraud, fraud_type, fraud_description."
+                "Executes a read-only SQL query on the HOFINET database. "
+                "The table name is 'hofinet' and columns are: date (INTEGER yyyymmdd), time_slot, "
+                "sender_bank, sender_acc, receiver_bank, receiver_acc, fund_type, media_type, "
+                "amount, is_fraud, fraud_type, fraud_description. "
+                "Returns total_count, returned_count and up to the first 100 rows."
             ),
             "parameters": {
                 "type": "object",
@@ -76,8 +76,9 @@ TOOLS = [
                     "sql": {
                         "type": "string",
                         "description": (
-                            "SELECT SQL query to execute. Perform aggregation, filtering, "
-                            "and grouping on the 'hofinet' table."
+                            "SELECT SQL query to execute (a leading WITH clause is allowed). "
+                            "Perform aggregation, filtering, and grouping on the 'hofinet' table. "
+                            "date is an integer, so compare it with integers: date BETWEEN 20240101 AND 20241231."
                         ),
                     }
                 },
@@ -89,7 +90,11 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "predict_fraud",
-            "description": "Predicts the probability of fraud for a transaction using the trained XGBoost model. Returns a probability between 0 and 1.",
+            "description": (
+                "Scores one transaction with the platform's XGBoost model. "
+                "Returns fraud_risk_score, an uncalibrated score between 0 and 1 (higher is riskier; "
+                "it is not a probability of fraud) and a risk level (High >= 0.7, Medium >= 0.3)."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -128,8 +133,10 @@ TOOLS = [
         "function": {
             "name": "generate_str",
             "description": (
-                "Generates a Suspicious Transaction Report (STR) in the official format (Sections I-VII) based on analysis results. "
-                "Always query related transaction data with 'query_transactions' first and include the records in the 'transactions' parameter."
+                "Generates a Suspicious Transaction Report (STR) draft in the official format "
+                "(Sections I-VII) from the analysis results passed in. Transaction records given "
+                "in 'transactions' fill in the accounts, amounts, dates and channel of the report; "
+                "without them those fields are taken from the summary text where possible."
             ),
             "parameters": {
                 "type": "object",
@@ -187,7 +194,7 @@ TOOLS = [
                     },
                     "fraud_probability": {
                         "type": "number",
-                        "description": "Fraud probability predicted by predict_fraud (0.0-1.0). Used for calculating suspicion intensity (1-5).",
+                        "description": "Risk score from predict_fraud (fraud_risk_score, 0.0-1.0). Used for calculating suspicion intensity (1-5).",
                     },
                     "aml_patterns": {
                         "type": "array",
@@ -208,7 +215,11 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "analyze_network",
-            "description": "Analyzes the transaction network of a specific account. Returns connected account count, transaction frequency, and fraud association.",
+            "description": (
+                "Analyzes the transaction network around one account. Returns the number of "
+                "connected accounts, transaction and fraud counts, fraud ratio (percent) and total "
+                "amount over every transaction in that neighbourhood."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -218,7 +229,10 @@ TOOLS = [
                     },
                     "hops": {
                         "type": "integer",
-                        "description": "Search depth (1-5). Default is 1. Hops >= 3 requires Memgraph.",
+                        "description": (
+                            "Search depth 1-5 (default 1). 1 covers the account's own transactions; "
+                            "each further hop adds the transactions of the accounts reached so far."
+                        ),
                         "default": 1,
                     },
                 },
@@ -230,7 +244,12 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_statistics",
-            "description": "Retrieves dashboard summary statistics. Returns basic stats including total transaction count, fraud count/ratio, and distribution by fraud type.",
+            "description": (
+                "Retrieves dataset-wide summary statistics: total transaction count, fraud count "
+                "and fraud ratio (percent), distinct sender and receiver account counts, distinct "
+                "sender and receiver bank counts, total amount, and the transaction count of every "
+                "fraud type. Covers the whole dataset and takes no filters."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -243,16 +262,17 @@ TOOLS = [
         "function": {
             "name": "get_account_profile",
             "description": (
-                "Retrieves the transaction profile for a specific account. "
-                "Returns total transaction count/amount, fraud count/ratio, primary transaction hours, "
-                "main channels used, and top 5 counterparties."
+                "Retrieves the transaction profile of one account, counting the transactions it "
+                "sends and the transactions it receives. Returns total/outbound/inbound counts, "
+                "total amount, fraud count and ratio (percent), the busiest time slots and channels, "
+                "and the top 5 counterparties with their direction."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "account_id": {
                         "type": "integer",
-                        "description": "Account number to query (sender_acc)",
+                        "description": "Account number to query (sender_acc or receiver_acc)",
                     }
                 },
                 "required": ["account_id"],
@@ -322,16 +342,17 @@ TOOLS = [
         "function": {
             "name": "get_institution_report",
             "description": (
-                "Reports the comprehensive status of a specific financial institution. "
-                "Returns transaction scale (count/amount), fraud ratio, top counterparts, "
-                "distribution by fraud type, and quarterly trends."
+                "Reports the status of one financial institution on both sides of the network: "
+                "outbound (as sender_bank) and inbound (as receiver_bank) transaction counts, "
+                "amounts and fraud ratios (percent), the top counterpart banks in each direction, "
+                "the distribution by fraud type, and a quarterly trend."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "bank_id": {
                         "type": "integer",
-                        "description": "Financial institution ID to query (sender_bank)",
+                        "description": "Financial institution ID to query (sender_bank codes are 102-161, receiver_bank codes 101-160)",
                     }
                 },
                 "required": ["bank_id"],
@@ -343,16 +364,17 @@ TOOLS = [
         "function": {
             "name": "rank_risky_transactions",
             "description": (
-                "Predicts samples from the database using the trained XGBoost model "
-                "and returns the top-K high-risk ones. Useful for mass detection and prioritization. "
-                "Fails if no model is found."
+                "Scores a fixed sample of database transactions with the XGBoost model and returns "
+                "the top-K by risk score. Useful for mass screening and prioritisation. The score "
+                "is the same uncalibrated fraud_risk_score predict_fraud returns; the ground-truth "
+                "label is not part of the result."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "sample_size": {
                         "type": "integer",
-                        "description": "Number of samples to predict (default 1000, max 5000)",
+                        "description": "Number of transactions to score (default 1000, max 5000)",
                         "default": 1000,
                     },
                     "top_k": {
@@ -370,9 +392,14 @@ TOOLS = [
         "function": {
             "name": "detect_aml_patterns",
             "description": (
-                "Detects AML (Anti-Money Laundering) patterns using Memgraph Graph DB. "
-                "Identifies ring transactions, layering, funnel (mule) patterns, "
-                "finds shortest paths between accounts, or calculates account risk scores."
+                "Detects AML patterns in the transfer graph. "
+                "ring: cycles of min_len-max_len fraud-labelled transfers that return to their "
+                "starting account. layering: chains of at least min_layers consecutive "
+                "fraud-labelled transfers. funnel: accounts that receive from at least min_inflow "
+                "distinct accounts and forward to 1-max_outflow accounts (mule/collection accounts). "
+                "shortest_path: the shortest chain of transfers between two accounts, in either "
+                "direction. risk_score: a graph risk score (0-1) for one account from its own and "
+                "its counterparties' fraud share, cycle participation and inflow/outflow imbalance."
             ),
             "parameters": {
                 "type": "object",
@@ -435,8 +462,9 @@ TOOLS = [
             "name": "detect_ctr_candidates",
             "description": (
                 "Inquires on CTR (Currency Transaction Report) related items or detects structuring patterns. "
-                "mode=high_value: Query transactions over 10M KRW. "
-                "mode=structuring: Detect suspected structuring where multiple transactions on the same day sum above threshold."
+                "mode=high_value: single transactions at or above the threshold (default 10,000,000 KRW). "
+                "mode=structuring: accounts whose transactions on one day stay below the threshold "
+                "individually but sum to it or above."
             ),
             "parameters": {
                 "type": "object",
@@ -456,7 +484,7 @@ TOOLS = [
                     },
                     "threshold": {
                         "type": "integer",
-                        "description": "Reporting threshold (default 10,000,000 KRW)",
+                        "description": "Reporting threshold in KRW, applied in both modes (default 10,000,000)",
                         "default": 10000000,
                     },
                     "limit": {
@@ -474,16 +502,19 @@ TOOLS = [
         "function": {
             "name": "score_account_risk",
             "description": (
-                "Evaluates an account's risk score (0-100) based on 5 indicators (nighttime ratio, "
-                "amount anomaly, diversity, velocity change, fraud history). "
-                "Returns risk level (High/Medium/Low) and component scores."
+                "Evaluates an account's behavioural risk score (0-100) from 5 indicators: share of "
+                "night-time transactions (slots 21, 0, 3), how far its average amount sits from the "
+                "dataset average, counterparty diversity, change in volume between its last two "
+                "quarters, and fraud history (the share of its transactions that HOFINET labels as "
+                "fraud). Returns the risk level (High >= 70, Medium >= 40, Low), the component "
+                "scores and their weights. Transactions in both directions count."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "account_id": {
                         "type": "integer",
-                        "description": "Account number to evaluate (sender_acc)",
+                        "description": "Account number to evaluate (sender_acc or receiver_acc)",
                     },
                 },
                 "required": ["account_id"],
@@ -495,10 +526,16 @@ TOOLS = [
         "function": {
             "name": "detect_monitoring_alerts",
             "description": (
-                "Detects rule-based transaction monitoring alerts. "
-                "R001=Nighttime Bulk, R002=Rapid Fire, R003=Round Amount Pattern, "
-                "R004=Institution Concentration, R005=Pattern Change. "
-                "Use rule_id='all' to run all rules."
+                "Runs the rule-based transaction monitoring rules and returns their alerts. "
+                "R001 Nighttime Bulk: transactions of 5,000,000 KRW or more in the night slots "
+                "(21, 0, 3). R002 Rapid Fire: accounts with 10 or more transactions on one day. "
+                "R003 Repeated Identical Amounts: accounts that send the same amount "
+                "(2,000,000 KRW or more) at least 3 times. R004 Institution Concentration: "
+                "accounts sending at least half of their transactions to one receiving institution. "
+                "R005 Pattern Change: accounts whose volume in the given period is at least 3 times "
+                "their volume in the preceding period of equal length; without dates it compares the "
+                "last quarter of the data with the one before. rule_id='all' runs all five. "
+                "date_from, date_to and account_id apply to every rule."
             ),
             "parameters": {
                 "type": "object",
@@ -518,7 +555,7 @@ TOOLS = [
                     },
                     "account_id": {
                         "type": "integer",
-                        "description": "Optional account filter",
+                        "description": "Optional account filter (the account the rule describes: sender_acc, or either side for R001)",
                     },
                     "limit": {
                         "type": "integer",
@@ -535,9 +572,10 @@ TOOLS = [
         "function": {
             "name": "detect_dormant_reactivation",
             "description": (
-                "Detects accounts reactivated after a long period of dormancy. "
-                "Finds accounts with no transactions for a set period (default 180 days) followed by large transactions. "
-                "Useful for identifying mule accounts or money laundering patterns."
+                "Detects accounts reactivated after a long period of dormancy: no transactions for "
+                "dormant_days (default 180) followed by a transaction of at least "
+                "min_reactivation_amount. Returns the last activity date, the reactivation date, "
+                "the length of the gap and the amounts on the reactivation day."
             ),
             "parameters": {
                 "type": "object",
@@ -567,10 +605,13 @@ TOOLS = [
         "function": {
             "name": "detect_smurfing_network",
             "description": (
-                "Detects fund collection (many-to-one) or distribution (one-to-many) patterns. "
-                "direction=inbound: Funds converging from many accounts to one (collection). "
-                "direction=outbound: Funds dispersing from one account to many. "
-                "Used for identifying mule accounts, placement stage, or smurfing."
+                "Counts distinct counterparties per account and returns the accounts above the "
+                "threshold. direction=inbound: accounts that receive from at least "
+                "min_counterparts distinct sending accounts (collection). direction=outbound: "
+                "accounts that send to at least min_counterparts distinct receiving accounts "
+                "(dispersion). Only the counterparty count in that one direction is considered; "
+                "for accounts that collect from many and then forward to a few, use "
+                "detect_aml_patterns with pattern_type='funnel'."
             ),
             "parameters": {
                 "type": "object",
@@ -612,9 +653,10 @@ TOOLS = [
         "function": {
             "name": "get_trend_analysis",
             "description": (
-                "Analyzes monthly or quarterly time-series trends. "
-                "Tracks changes in transaction volume, fraud ratio, and amounts over time. "
-                "Returns trends for a specified range or the entire period if omitted."
+                "Analyzes monthly or quarterly time-series trends: transaction count, fraud count, "
+                "fraud ratio (percent), total and average amount per period. Periods are labelled "
+                "'2024-07' (monthly) and '2024Q3' (quarterly). Covers the whole dataset "
+                "(14 quarters, 2021-09 to 2024-12) unless a date range is given."
             ),
             "parameters": {
                 "type": "object",
@@ -643,9 +685,10 @@ TOOLS = [
         "function": {
             "name": "analyze_channel_risk",
             "description": (
-                "Analyzes risk by transaction channel (medium_type). "
-                "Returns fraud ratios for ATM, Internet Banking, PB, Counter, etc., "
-                "along with channel x hour cross-analysis results."
+                "Analyzes risk by transaction channel (media_type): 1 PC Banking, 2 Internet "
+                "Banking, 3 Phone, 4 Mobile Phone, 5 Per-transaction Transfer, 6 Other, "
+                "7 Bulk Transfer. Returns per-channel transaction and fraud counts, fraud ratio "
+                "(percent) and amounts, plus a channel x time-slot cross-analysis."
             ),
             "parameters": {
                 "type": "object",
@@ -668,9 +711,10 @@ TOOLS = [
         "function": {
             "name": "get_receiving_account_profile",
             "description": (
-                "Profiles an account from a fund-receiving (inbound) perspective. "
-                "Analyzes inflow patterns based on receiver_acc to identify who sends funds "
-                "and how diverse the sources are."
+                "Profiles an account from a fund-receiving (inbound) perspective, based on "
+                "receiver_acc. Returns the inbound transaction count and amount, fraud count and "
+                "ratio (percent), the number of distinct sending accounts and banks, and the top 5 "
+                "senders and sending banks."
             ),
             "parameters": {
                 "type": "object",
@@ -724,16 +768,19 @@ TOOLS = [
         "function": {
             "name": "lookup_fiu_reference_types",
             "description": (
-                "Searches FIU reference types for suspicious transactions by industry. "
-                "Used to check if transaction patterns match FIU reference types. "
-                "Search keywords: structuring, nighttime, non-face-to-face, virtual assets, third-party name, dormancy."
+                "Searches the FIU suspicious-transaction reference catalog (an excerpt: 31 entries "
+                "for banking and securities). The catalog is in English and the keyword is matched "
+                "as a case-insensitive substring of an entry's industry, category and description, "
+                "so keywords must be English: e.g. structuring, cash, non-face-to-face, "
+                "virtual asset, dormancy, gambling, balance certificate. An empty keyword returns "
+                "the whole catalog."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "keyword": {
                         "type": "string",
-                        "description": "Search keyword (e.g., structuring, nighttime, non-face-to-face, virtual assets)",
+                        "description": "English search keyword (e.g., structuring, cash, non-face-to-face, virtual asset)",
                     },
                     "industry": {
                         "type": "string",
@@ -750,15 +797,27 @@ TOOLS = [
         "function": {
             "name": "validate_str_fields",
             "description": (
-                "Performs validation of mandatory fields for an STR (Suspicious Transaction Report) draft. "
-                "Checks for missing mandatory items such as header, reporting institution, transactor, and transaction details."
+                "Checks an STR draft for the fields the report form requires and reports what is "
+                "missing. Required: Header.ReportingDate; "
+                "I_ReportingInstitution.WithdrawalInstitutionCode; "
+                "II_Transactor.WithdrawalAccountNumber and .ReceivingAccountNumber; "
+                "III_TransactionDetails.TransactionPeriod, .TransactionCount, .TransactionChannel "
+                "and .TotalAmount_KRW; VI_TransactionType.PrimarySuspicionType; "
+                "VII_Narrative.SuspicionJudgmentReason. The output of generate_str validates as is. "
+                "Personal details the form asks for but HOFINET does not contain (names, identity "
+                "documents, phone numbers) are optional and reported under missing_optional."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "str_draft": {
                         "type": "object",
-                        "description": "STR draft dict. Can be nested by section (e.g., I_ReportingInstitution, II_Transactor, III_TransactionDetails)",
+                        "description": (
+                            "STR draft object, nested by section "
+                            "(Header, I_ReportingInstitution, II_Transactor, III_TransactionDetails, "
+                            "VI_TransactionType, VII_Narrative), as generate_str returns it. "
+                            "Field names are matched ignoring case and underscores."
+                        ),
                     },
                 },
                 "required": ["str_draft"],
@@ -770,15 +829,16 @@ TOOLS = [
         "function": {
             "name": "get_aml_glossary",
             "description": (
-                "Returns definitions of AML terms. "
-                "CDD, EDD, STR, CTR, RBA, PEP, MLRO, FATF, FIU, KYE, structuring, layering, etc."
+                "Returns the definition of an AML term. The glossary holds 13 English entries and "
+                "matches the term exactly, ignoring case: CDD, EDD, SDD, STR, CTR, RBA, PEP, MLRO, "
+                "FATF, FIU, KYE, Structuring, Layering. There are no Korean entries."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "term": {
                         "type": "string",
-                        "description": "Term to lookup (e.g., CDD, STR, CTR, RBA, PEP)",
+                        "description": "English term to look up (CDD, EDD, SDD, STR, CTR, RBA, PEP, MLRO, FATF, FIU, KYE, Structuring, Layering)",
                     },
                 },
                 "required": ["term"],
@@ -787,55 +847,241 @@ TOOLS = [
     },
 ]
 
-SYSTEM_PROMPT = """You are an Anti-Money Laundering (AML) analysis expert.
-You analyze HOFINET (Electronic Financial Network) fraud detection data to detect and report suspicious money laundering transactions.
+SYSTEM_PROMPT = """You are an Anti-Money Laundering (AML) analyst.
+You work with HOFINET (Electronic Financial Network) transaction data to examine and report suspicious transactions.
 
 Tool definitions are provided via the API tools field; refer to each tool's name, description, and parameter schema there.
 
-Recommended Analysis Flow:
-1. Statistics overview -> 2. Trend analysis -> 3. Detailed query -> 4. CTR/Structuring detection -> 5. Risk score -> 6. Monitoring alerts -> 7. Dormant reactivation -> 8. Smurfing detection -> 9. Channel risk -> 10. Receiving profile -> 11. External flow -> 12. Network analysis -> 13. AML pattern detection -> 14. Model prediction -> 15. STR generation (only with sufficient evidence)
+Data:
+- Table hofinet, 4,732,130 transactions, one row per transfer.
+- Columns: date, time_slot, sender_bank, sender_acc, receiver_bank, receiver_acc, fund_type, media_type, amount, is_fraud, fraud_type, fraud_description.
+- date is an INTEGER in yyyymmdd form and runs from 20210901 to 20241231 (14 quarters). Compare it with integers, for example date BETWEEN 20240101 AND 20241231; string dates such as '2024-01-01' and LIKE patterns do not work on it.
+- time_slot is the first hour of a 3-hour slot: 0, 3, 6, 9, 12, 15, 18, 21.
+- sender_acc and receiver_acc are 16-digit account numbers, from 9000000000000002 to 9000000004455021. 30,526 accounts appear as sender, 422,698 as receiver, 414 as both.
+- sender_bank codes run 102-161 (50 institutions), receiver_bank codes 101-160 (54 institutions).
+- amount is in KRW and takes 48 distinct values between 1 and 500,000,000.
+- is_fraud is 1 for the 14,490 transactions labelled as suspicious and 0 for the rest.
+- fraud_type is NULL for normal transactions; fraud_description is an empty string for them and otherwise holds the Korean label exactly as listed here:
+  1 = Sudden change in transaction pattern ('갑작스러운 거래패턴의 변화', 1,955 rows)
+  2 = Transaction with a new counterparty ('신규 수신처 거래', 9,255)
+  3 = Split transaction ('분할 거래', 2,073)
+  4 = Concurrent multiple transactions ('다중거래의 동시 요청', 929)
+  5 = Same-day withdrawal after a large deposit ('거액 입금 후 당일 인출', 243)
+  7 = Late-night/early-morning bulk transactions ('심야/새벽 대량 거래', 35)
+  Code 6 is not used.
+- media_type: 1=PC Banking, 2=Internet Banking, 3=Phone, 4=Mobile Phone, 5=Per-transaction Transfer, 6=Other, 7=Bulk Transfer.
+- fund_type: 0=General, 1=Salary, 3=Other, 4=Inter-bank Auto Transfer.
 
-STR Generation Notes:
-- Always query data first with query_transactions.
-- Include transaction records in the transactions parameter for auto-extraction.
-- Pass fraud_probability from predict_fraud if performed.
-- Include aml_patterns from detect_aml_patterns results.
-
-Data Schema:
-- Table: hofinet (4,732,130 records)
-- Columns: date(YYYYMMDD), time_slot(0-21, 3h units), sender_bank, sender_acc, receiver_bank, receiver_acc, fund_type(0,1,3,4), media_type(1-7), amount, is_fraud(0/1), fraud_type(1-5,7), fraud_description
-- fraud_type: 1=Sudden Change in Transaction Pattern, 2=Transaction with New Counterparty, 3=Split Transaction, 4=Concurrent Multiple Transactions, 5=Same-Day Withdrawal after Large Deposit, 7=Late-Night/Early-Morning Bulk Transactions (note: code 6 unused)
-- media_type: 1=PC Banking, 2=Internet Banking, 3=Phone, 4=Mobile Phone, 5=Per-transaction Transfer, 6=Other, 7=Bulk Transfer
-- fund_type: 0=General, 1=Salary, 3=Other, 4=Inter-bank Auto Transfer
-
-Respond in English. Provide specific figures and evidence in your analysis."""
+Answer in the language of the user's question. Give the figures the tools return and say what they support."""
 
 
 # ---------------------------------------------------------------------------
-# Parameter Validation Helpers
+# Argument handling
+#
+# Models serialise tool arguments in different ways: the whole object as a JSON
+# string, nested arrays as strings, numbers as strings, and the literal "null"
+# where a value is absent. The helpers below read those forms, so a tool fails
+# only when the value itself is wrong, and report what is wrong instead of
+# surfacing an int('null') or NaN traceback.
 # ---------------------------------------------------------------------------
 
 _VALID_TIME_SLOTS = {0, 3, 6, 9, 12, 15, 18, 21}
 _VALID_FUND_TYPES = {0, 1, 3, 4}
 _VALID_MEDIA_TYPES = set(range(1, 8))
 
+_NULL_STRINGS = {"", "null", "none", "nan", "n/a", "undefined"}
 
-def _validate_predict_fraud_args(arguments: dict) -> list[str]:
-    """Validates predict_fraud parameters."""
-    errors = []
-    time_slot = arguments.get("time_slot")
-    if time_slot not in _VALID_TIME_SLOTS:
-        errors.append(f"time_slot({time_slot}) must be one of {sorted(_VALID_TIME_SLOTS)}.")
-    fund_type = arguments.get("fund_type")
-    if fund_type not in _VALID_FUND_TYPES:
-        errors.append(f"fund_type({fund_type}) must be one of {sorted(_VALID_FUND_TYPES)}.")
-    media_type = arguments.get("media_type")
-    if media_type not in _VALID_MEDIA_TYPES:
-        errors.append(f"media_type({media_type}) must be between 1 and 7.")
-    amount = arguments.get("amount")
-    if not isinstance(amount, (int, float)) or amount <= 0:
-        errors.append(f"amount({amount}) must be a positive integer.")
-    return errors
+
+class ToolArgumentError(ValueError):
+    """An argument is missing, or cannot be read as the type the schema declares."""
+
+
+def _is_null(value) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, float) and math.isnan(value):
+        return True
+    return isinstance(value, str) and value.strip().lower() in _NULL_STRINGS
+
+
+def _load_json(value):
+    """Parses a JSON-encoded string, or returns the value unchanged."""
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text or text[0] not in "[{\"":
+        return value
+    try:
+        return json.loads(text)
+    except ValueError:
+        return value
+
+
+def _normalize_arguments(arguments) -> dict:
+    """Returns the arguments as a dict with null-like entries removed."""
+    arguments = _load_json(arguments)
+    if arguments is None:
+        return {}
+    if not isinstance(arguments, dict):
+        raise ToolArgumentError("Arguments must be a JSON object.")
+    return {k: v for k, v in arguments.items() if not _is_null(v)}
+
+
+def _as_int(value, name: str) -> int:
+    """Reads an integer argument, accepting numeric strings such as '12'."""
+    if isinstance(value, bool):
+        raise ToolArgumentError(f"{name} must be an integer.")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if math.isnan(value) or value != int(value):
+            raise ToolArgumentError(f"{name}({value}) must be an integer.")
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip().replace(",", "").replace("_", "")
+        try:
+            return int(text)
+        except ValueError:
+            try:
+                number = float(text)
+            except ValueError:
+                number = None
+            if number is not None and not math.isnan(number) and number == int(number):
+                return int(number)
+    raise ToolArgumentError(f"{name}({value!r}) must be an integer.")
+
+
+def _as_float(value, name: str) -> float:
+    """Reads a number argument, accepting numeric strings such as '0.91'."""
+    if isinstance(value, bool):
+        raise ToolArgumentError(f"{name} must be a number.")
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip().replace(",", ""))
+        except ValueError:
+            pass
+    raise ToolArgumentError(f"{name}({value!r}) must be a number.")
+
+
+def _req_int(arguments: dict, name: str) -> int:
+    if name not in arguments:
+        raise ToolArgumentError(f"{name} is required.")
+    return _as_int(arguments[name], name)
+
+
+def _opt_int(arguments: dict, name: str, default=None):
+    if name not in arguments:
+        return default
+    return _as_int(arguments[name], name)
+
+
+def _opt_date(arguments: dict, name: str, default=None):
+    """Reads a YYYYMMDD date argument and checks that it is a real date."""
+    if name not in arguments:
+        return default
+    value = _as_int(arguments[name], name)
+    try:
+        datetime.strptime(str(value), "%Y%m%d")
+    except ValueError:
+        raise ToolArgumentError(
+            f"{name}({arguments[name]!r}) must be a date as a YYYYMMDD integer, e.g. 20240131."
+        ) from None
+    return value
+
+
+def _limit(arguments: dict, default: int = 20, maximum: int = 100) -> int:
+    limit = _opt_int(arguments, "limit", default)
+    if limit is None or limit <= 0:
+        return default
+    return min(limit, maximum)
+
+
+def _int_value(value, default: int = 0) -> int:
+    """NaN-safe int for query results: SUM over zero rows comes back NULL/NaN."""
+    if value is None:
+        return default
+    if isinstance(value, float) and math.isnan(value):
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except (TypeError, ValueError):
+        pass
+    return int(value)
+
+
+def _float_value(value, default: float = 0.0, digits: int = 4) -> float:
+    """NaN-safe float for query results."""
+    if value is None:
+        return default
+    if isinstance(value, float) and math.isnan(value):
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except (TypeError, ValueError):
+        pass
+    return round(float(value), digits)
+
+
+def _percent(part, whole, digits: int = 4) -> float:
+    """Returns part/whole as a percentage. Every ratio a tool returns is a percentage."""
+    part = _float_value(part, 0.0, 10)
+    whole = _float_value(whole, 0.0, 10)
+    if not whole:
+        return 0.0
+    return round(part / whole * 100, digits)
+
+
+def _records(df) -> list[dict]:
+    """Converts a DataFrame to JSON-safe records (NaN becomes null)."""
+    if df is None or df.empty:
+        return []
+    return json.loads(df.to_json(orient="records", force_ascii=False))
+
+
+def _date_conditions(date_from, date_to, column: str = "date") -> list[str]:
+    conditions = []
+    if date_from is not None:
+        conditions.append(f"{column} >= {int(date_from)}")
+    if date_to is not None:
+        conditions.append(f"{column} <= {int(date_to)}")
+    return conditions
+
+
+def _validate_predict_fraud_args(arguments: dict) -> tuple[dict, list[str]]:
+    """Reads and validates the six predict_fraud features.
+
+    Returns (feature values in FEATURE_COLS order, error messages). Numeric
+    strings are accepted; keys that are not features are ignored, so the model's
+    key order or an extra key cannot change the result.
+    """
+    from src.features.detector import FEATURE_COLS
+
+    values: dict = {}
+    errors: list[str] = []
+    for name in FEATURE_COLS:
+        if name not in arguments:
+            errors.append(f"{name} is required.")
+            continue
+        try:
+            values[name] = _as_int(arguments[name], name)
+        except ToolArgumentError as exc:
+            errors.append(str(exc))
+    if errors:
+        return values, errors
+
+    if values["time_slot"] not in _VALID_TIME_SLOTS:
+        errors.append(f"time_slot({values['time_slot']}) must be one of {sorted(_VALID_TIME_SLOTS)}.")
+    if values["fund_type"] not in _VALID_FUND_TYPES:
+        errors.append(f"fund_type({values['fund_type']}) must be one of {sorted(_VALID_FUND_TYPES)}.")
+    if values["media_type"] not in _VALID_MEDIA_TYPES:
+        errors.append(f"media_type({values['media_type']}) must be between 1 and 7.")
+    if values["amount"] <= 0:
+        errors.append(f"amount({values['amount']}) must be a positive integer.")
+    return values, errors
 
 
 # ---------------------------------------------------------------------------
@@ -851,6 +1097,60 @@ from src.features.aml_reference import (
     FUND_TYPE_MAP as _FUND_TYPE_MAP,
 )
 
+# STR Section VI suspicion classification (FIU form; HOFINET.MD §4.2).
+# The generate_str fraud_type enum is §VI-4 (codes 15-30) plus §VI-5 code 31.
+_VI_CATEGORY_CODES = {
+    "갑작스러운 거래패턴의 변화": 15,
+    "원격지거래": 16,
+    "교환거래": 17,
+    "분할거래": 18,
+    "현금에 집착하는 거래": 19,
+    "거액 입금 후 당일/익일 인출": 20,
+    "무기명증서 관련거래": 21,
+    "계좌개설 없이 거액 환전/송금": 22,
+    "의심스러운 담보대출/보험약관대출": 23,
+    "주금 납입/잔액증명서 발급": 24,
+    "다중거래의 동시요청": 25,
+    "빈번한 입출금": 26,
+    "의심스러운 대여금고/보호예수": 27,
+    "법인/타인자산 담보 거래": 28,
+    "무관업종 보험청약": 29,
+    "테러자금으로 의심": 30,
+    "기타(자유기술)": 31,
+}
+
+# HOFINET fraud_type -> §VI category (HOFINET.MD §4.2). Codes 2 and 7 have no
+# §VI-4 counterpart and map to the form's catch-all item.
+_HOFINET_TO_VI_CATEGORY = {
+    1: "갑작스러운 거래패턴의 변화",
+    2: "기타(자유기술)",
+    3: "분할거래",
+    4: "다중거래의 동시요청",
+    5: "거액 입금 후 당일/익일 인출",
+    7: "기타(자유기술)",
+}
+
+# Names models use for a HOFINET fraud type: the raw fraud_description values,
+# the English labels the tools return, and the §VI category names.
+_FRAUD_TYPE_ALIASES = {
+    "갑작스러운 거래패턴의 변화": 1,
+    "sudden change in transaction pattern": 1,
+    "신규 수신처 거래": 2,
+    "신규거래처": 2,
+    "transaction with new counterparty": 2,
+    "분할 거래": 3,
+    "분할거래": 3,
+    "split transaction": 3,
+    "다중거래의 동시 요청": 4,
+    "다중거래의 동시요청": 4,
+    "concurrent multiple transactions": 4,
+    "거액 입금 후 당일 인출": 5,
+    "거액 입금 후 당일/익일 인출": 5,
+    "same-day withdrawal after large deposit": 5,
+    "심야/새벽 대량 거래": 7,
+    "late-night/early-morning bulk transactions": 7,
+}
+
 # Mapping fraud type codes to STR Section VI suspicion items (HOFINET official)
 _FRAUD_TYPE_TO_VI_SECTION = {
     1: ["Sudden change in transaction pattern", "Behavioral anomaly"],
@@ -862,34 +1162,35 @@ _FRAUD_TYPE_TO_VI_SECTION = {
 }
 
 _RECOMMENDED_ACTION_MAP = {
-    "Sudden Change in Transaction Pattern":         ["Strengthen transaction monitoring", "Investigate related accounts", "Consider reporting to FIU"],
-    "Transaction with New Counterparty":            ["Strengthen CDD on new counterparty", "Monitor additional transactions"],
-    "Split Transaction":                            ["Aggregate related transactions", "Review structuring intent", "Verify actual owner name"],
-    "Concurrent Multiple Transactions":             ["Consider immediate account freeze", "Victim verification and protection", "Referral to law enforcement"],
-    "Same-Day Withdrawal after Large Deposit":      ["Trace fund origin", "Verify business rationale", "Consider account freeze"],
-    "Late-Night/Early-Morning Bulk Transactions":   ["Continuous off-hours monitoring", "Pattern-based escalation", "Review by internal committee"],
-    # Fallback used by _build_str_report when fraud type can't be resolved.
-    "Other":                                        ["Strengthen transaction monitoring", "Manager review", "Consider FIU reporting based on judgment"],
+    1: ["Strengthen transaction monitoring", "Investigate related accounts", "Consider reporting to FIU"],
+    2: ["Strengthen CDD on new counterparty", "Monitor additional transactions"],
+    3: ["Aggregate related transactions", "Review structuring intent", "Verify actual owner name"],
+    4: ["Consider immediate account freeze", "Victim verification and protection", "Referral to law enforcement"],
+    5: ["Trace fund origin", "Verify business rationale", "Consider account freeze"],
+    7: ["Continuous off-hours monitoring", "Pattern-based escalation", "Review by internal committee"],
+    # Fallback used by _build_str_report when the fraud type cannot be resolved.
+    None: ["Strengthen transaction monitoring", "Manager review", "Consider FIU reporting based on judgment"],
 }
 
-# AML pattern name → STR Section VI check item mapping
-_PATTERN_TO_VI_SECTION_MAP = {
-    "Ring": "Structured transactions",
-    "Layering": "Sudden change in transaction pattern",
-    "Funnel": "Use of someone else's name/account",
-}
+# AML pattern name (Korean or English, as models write it) -> Section VI check item
+_AML_PATTERN_ITEMS = (
+    (("ring", "cycle", "순환", "환거래"), "Structured transactions"),
+    (("layering", "레이어링", "다단계"), "Sudden change in transaction pattern"),
+    (("funnel", "mule", "대포통장", "집금"), "Use of someone else's name/account"),
+    (("structuring", "smurfing", "분할", "스머핑"), "Splitting amount across multiple transfers"),
+)
 
 _TOOL_DESCRIPTION_MAP = {
     "query_transactions":    "Directly query HOFINET DB transaction data",
-    "predict_fraud":         "XGBoost fraud probability model prediction",
+    "predict_fraud":         "XGBoost model risk score for one transaction",
     "analyze_network":       "Account transaction network analysis",
     "get_statistics":        "Query overall statistics dashboard",
     "get_account_profile":   "Query account transaction statistics profile",
     "get_fraud_type_summary": "Query status by fraud type",
-    "detect_aml_patterns":   "Memgraph graph DB AML pattern detection",
+    "detect_aml_patterns":   "Graph-based AML pattern detection",
     "compare_periods":        "Comparative analysis of transaction stats by period",
     "get_institution_report": "Comprehensive report for financial institution",
-    "rank_risky_transactions": "XGBoost model batch prediction risk ranking",
+    "rank_risky_transactions": "XGBoost model batch risk ranking",
     "generate_str":          "Generate STR report",
     "detect_ctr_candidates": "Detect CTR high-value/structured transactions",
     "score_account_risk":    "Evaluate account risk (5 behavioral indicators)",
@@ -900,7 +1201,85 @@ _TOOL_DESCRIPTION_MAP = {
     "analyze_channel_risk":  "Risk analysis by channel",
     "get_receiving_account_profile": "Receiving account profiling",
     "analyze_cross_institution_flow": "Inter-institution fund flow analysis",
+    "lookup_fiu_reference_types": "FIU suspicious-transaction reference catalog lookup",
+    "validate_str_fields":   "STR draft field validation",
+    "get_aml_glossary":      "AML term definition lookup",
 }
+
+_TX_INT_FIELDS = (
+    "date", "time_slot", "sender_bank", "sender_acc", "receiver_bank",
+    "receiver_acc", "fund_type", "media_type", "amount", "fraud_type",
+)
+
+# Account numbers written into a free-text summary, in either language.
+_SENDER_ACCOUNT_RE = re.compile(
+    r"(?:sender_acc|sender account|withdrawal account|출금\s*계좌(?:번호)?)\D{0,12}(\d{4,})",
+    re.IGNORECASE,
+)
+_RECEIVER_ACCOUNT_RE = re.compile(
+    r"(?:receiver_acc|receiver account|receiving account|beneficiary account|"
+    r"입금\s*계좌(?:번호)?|수취\s*계좌(?:번호)?)\D{0,12}(\d{4,})",
+    re.IGNORECASE,
+)
+_ANY_ACCOUNT_RE = re.compile(r"(?:account|계좌)\D{0,12}(\d{4,})", re.IGNORECASE)
+
+
+def _string_list(value) -> list[str]:
+    """Reads a list-of-strings argument, accepting a JSON string or 'a, b'."""
+    value = _load_json(value)
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [part.strip() for part in value.split(",") if part.strip()]
+    if isinstance(value, (list, tuple)):
+        return [str(item).strip() for item in value if not _is_null(item)]
+    return []
+
+
+def _coerce_transactions(value) -> list[dict]:
+    """Reads the transactions argument, which models often send as a JSON string."""
+    value = _load_json(value)
+    if isinstance(value, dict):
+        value = [value]
+    if not isinstance(value, (list, tuple)):
+        return []
+    rows = []
+    for item in value:
+        item = _load_json(item)
+        if not isinstance(item, dict):
+            continue
+        row = {}
+        for key, raw in item.items():
+            if _is_null(raw):
+                continue
+            if key in _TX_INT_FIELDS:
+                try:
+                    row[key] = _as_int(raw, key)
+                except ToolArgumentError:
+                    continue
+            else:
+                row[key] = raw
+        rows.append(row)
+    return rows
+
+
+def _resolve_fraud_type(name: str | None) -> tuple[int | None, str | None]:
+    """Maps a fraud_type argument to (HOFINET code, §VI category name).
+
+    Accepts the §VI category names of the schema enum, the Korean
+    fraud_description values stored in HOFINET, and the English labels the
+    tools return.
+    """
+    if not name:
+        return None, None
+    text = str(name).strip()
+    if text in _VI_CATEGORY_CODES:
+        code = _FRAUD_TYPE_ALIASES.get(text.lower())
+        return code, text
+    code = _FRAUD_TYPE_ALIASES.get(text.lower())
+    if code is None:
+        return None, None
+    return code, _HOFINET_TO_VI_CATEGORY.get(code)
 
 
 def _build_str_report(
@@ -911,56 +1290,75 @@ def _build_str_report(
     fraud_probability: float | None,
     aml_patterns: list[str],
 ) -> dict:
-    """Generates a structured report dictionary matching official STR sections (I~VII)."""
-    today = date.today().strftime("%Y-%m-%d")
+    """Generates a structured report dictionary matching official STR sections (I~VII).
+
+    The reporting date is the HOFINET reference date, not today's date, so the
+    same call always produces the same report.
+    """
+    reference_date = datetime.strptime(str(config.REFERENCE_DATE), "%Y%m%d").strftime("%Y-%m-%d")
 
     # ── Extract fields from transaction data ──────────────────────────────────────────
     tx = transactions or []
 
-    tx_dates = sorted({str(t.get("date", "")) for t in tx if t.get("date")})
-    sender_accounts = list({str(t["sender_acc"]) for t in tx if t.get("sender_acc")})
-    receiver_accounts = list({str(t["receiver_acc"]) for t in tx if t.get("receiver_acc")})
-    sender_banks = list({str(t["sender_bank"]) for t in tx if t.get("sender_bank")})
-    receiver_banks = list({str(t["receiver_bank"]) for t in tx if t.get("receiver_bank")})
+    tx_dates = sorted({str(t["date"]) for t in tx if t.get("date")})
+    sender_accounts = sorted({str(t["sender_acc"]) for t in tx if t.get("sender_acc")})
+    receiver_accounts = sorted({str(t["receiver_acc"]) for t in tx if t.get("receiver_acc")})
+    sender_banks = sorted({str(t["sender_bank"]) for t in tx if t.get("sender_bank")})
+    receiver_banks = sorted({str(t["receiver_bank"]) for t in tx if t.get("receiver_bank")})
 
-    media_counts = Counter(t.get("media_type") for t in tx if t.get("media_type"))
+    media_counts = Counter(t["media_type"] for t in tx if t.get("media_type") is not None)
     channel = _MEDIA_TYPE_MAP.get(
         media_counts.most_common(1)[0][0] if media_counts else None, "Unknown"
     )
 
-    fund_counts = Counter(t.get("fund_type") for t in tx if t.get("fund_type") is not None)
+    fund_counts = Counter(t["fund_type"] for t in tx if t.get("fund_type") is not None)
     tx_type = _FUND_TYPE_MAP.get(
         fund_counts.most_common(1)[0][0] if fund_counts else None, "Unknown"
     )
 
-    total_amount = sum(t.get("amount", 0) for t in tx)
-    max_single_amount = max((t.get("amount", 0) for t in tx), default=0)
+    total_amount = sum(t.get("amount", 0) or 0 for t in tx)
+    max_single_amount = max((t.get("amount", 0) or 0 for t in tx), default=0)
 
-    fraud_type_counts = Counter(t.get("fraud_type") for t in tx if t.get("fraud_type"))
+    fraud_type_counts = Counter(t["fraud_type"] for t in tx if t.get("fraud_type"))
     primary_fraud_code = fraud_type_counts.most_common(1)[0][0] if fraud_type_counts else None
-    primary_fraud_name = _FRAUD_TYPE_MAP.get(primary_fraud_code, fraud_type or "Other")
+    argument_code, argument_category = _resolve_fraud_type(fraud_type)
+    if primary_fraud_code is None:
+        primary_fraud_code = argument_code
+    vi_category = (
+        argument_category
+        or _HOFINET_TO_VI_CATEGORY.get(primary_fraud_code)
+        or "기타(자유기술)"
+    )
+    primary_fraud_name = _FRAUD_TYPE_MAP.get(primary_fraud_code) if primary_fraud_code else None
 
-    # Summary regex fallback (when transactions are not provided)
+    # Summary fallback (when transactions are not provided)
     if not tx:
-        account_candidates = re.findall(r"(?:account|sender_acc|receiver_acc)[^\d]*(\d{5,})", summary)
-        sender_accounts = receiver_accounts = list(set(account_candidates))
+        sender_accounts = sorted(set(_SENDER_ACCOUNT_RE.findall(summary)))
+        receiver_accounts = sorted(set(_RECEIVER_ACCOUNT_RE.findall(summary)))
+        if not sender_accounts and not receiver_accounts:
+            found = sorted(set(_ANY_ACCOUNT_RE.findall(summary)))
+            sender_accounts = receiver_accounts = found
 
     # ── VI. Transaction Type Check Items ──────────────────────────────────────────
     vi_items = list(_FRAUD_TYPE_TO_VI_SECTION.get(primary_fraud_code, []))
-    for p in (aml_patterns or []):
-        for k, v in _PATTERN_TO_VI_SECTION_MAP.items():
-            if k in p and v not in vi_items:
-                vi_items.append(v)
+    for pattern in (aml_patterns or []):
+        lowered = str(pattern).lower()
+        for aliases, item in _AML_PATTERN_ITEMS:
+            if any(alias in lowered for alias in aliases) and item not in vi_items:
+                vi_items.append(item)
     if not vi_items:
         vi_items = ["Other features and types - Refer to Section VII narrative"]
 
     # ── VII. Suspicion Intensity (1~5) ──────────────────────────────────────────────
     if fraud_probability is not None:
         suspicion_intensity = min(5, max(1, round(fraud_probability * 4) + 1))
-        suspicion_intensity_desc = f"Based on AI model prediction probability of {fraud_probability:.1%}"
+        suspicion_intensity_desc = (
+            f"Based on the model risk score of {fraud_probability:.1%} "
+            "(uncalibrated; not a probability of fraud)"
+        )
     else:
         suspicion_intensity = 3
-        suspicion_intensity_desc = "AI prediction not performed - manual judgment required"
+        suspicion_intensity_desc = "Model risk score not provided - manual judgment required"
 
     txn_period = (
         f"{tx_dates[0]} ~ {tx_dates[-1]}" if len(tx_dates) > 1
@@ -969,7 +1367,7 @@ def _build_str_report(
     related_account_count = len(set(sender_accounts) | set(receiver_accounts))
 
     overall_opinion = (
-        f"[{today}] {primary_fraud_name} suspicious transaction detected. "
+        f"[{reference_date}] {primary_fraud_name or vi_category} suspicious transaction detected. "
         f"Period: {txn_period}, related accounts: {related_account_count}, "
         f"total amount: {total_amount:,} KRW ({len(tx)} txns)."
     )
@@ -978,12 +1376,14 @@ def _build_str_report(
     overall_opinion += " Manager review and decision on FIU reporting required."
 
     analysis_grounds = [_TOOL_DESCRIPTION_MAP.get(t, t) for t in (tools_used or [])]
-    recommended_actions = _RECOMMENDED_ACTION_MAP.get(primary_fraud_name, _RECOMMENDED_ACTION_MAP["Other"])
+    recommended_actions = _RECOMMENDED_ACTION_MAP.get(
+        primary_fraud_code, _RECOMMENDED_ACTION_MAP[None]
+    )
 
     return {
         "ReportType": "Suspicious Transaction Report (STR)",
         "Header": {
-            "ReportingDate": today,
+            "ReportingDate": reference_date,
             "ReportTypeClassification": "New Report",
         },
         "I_ReportingInstitution": {
@@ -1011,7 +1411,10 @@ def _build_str_report(
             "ReceivingInstitutionCode": receiver_banks,
         },
         "VI_TransactionType": {
-            "PrimarySuspicionType": primary_fraud_name,
+            "PrimarySuspicionType": vi_category,
+            "SectionVICode": _VI_CATEGORY_CODES.get(vi_category),
+            "HOFINETFraudType": primary_fraud_code,
+            "HOFINETFraudTypeName": primary_fraud_name,
             "ApplicableItems": vi_items,
             "DetectedAMLPatterns": aml_patterns or [],
         },
@@ -1038,7 +1441,6 @@ def _build_str_report(
 
 
 # ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
 # Tool Execution
 # ---------------------------------------------------------------------------
 
@@ -1048,6 +1450,11 @@ def _execute_tool(name: str, arguments: dict) -> str:
     All exceptions are handled internally to return a JSON error message,
     so the caller can use it without separate try/except.
     """
+    try:
+        arguments = _normalize_arguments(arguments)
+    except ToolArgumentError as exc:
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+
     try:
         if name == "query_transactions":
             return _tool_query_transactions(arguments)
@@ -1098,6 +1505,9 @@ def _execute_tool(name: str, arguments: dict) -> str:
         else:
             return json.dumps({"error": f"Unknown tool: {name}"}, ensure_ascii=False)
 
+    except ToolArgumentError as exc:
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+
     except Exception as exc:
         logger.error(f"Error executing tool {name}: {str(exc)}")
         return json.dumps(
@@ -1106,25 +1516,45 @@ def _execute_tool(name: str, arguments: dict) -> str:
         )
 
 
+# Read-only SQL guard. The statement is parsed by DuckDB instead of matched
+# against the raw text, so CTEs, parenthesised selects, comments and column
+# aliases such as last_update_date are accepted, while anything that is not a
+# single SELECT is refused. File-reading table functions are blocked here as
+# well; the shared connection also runs with external access disabled.
+_FILE_FUNCTION_RE = re.compile(
+    r"\b(read_[a-z_]+|scan_[a-z_]+|[a-z_]*_scan|glob|sniff_csv|parquet_[a-z_]+)\s*\(",
+    re.IGNORECASE,
+)
+_QUERY_ROW_LIMIT = 100
+
+
 def _tool_query_transactions(arguments: dict) -> str:
-    sql = arguments.get("sql", "").strip()
+    sql = arguments.get("sql")
+    sql = sql.strip() if isinstance(sql, str) else ""
 
     if not sql:
         return json.dumps({"error": "SQL query is empty."}, ensure_ascii=False)
 
-    # Allow SELECT only (prevention of SQL injection)
-    if not sql.upper().startswith("SELECT"):
-        return json.dumps({"error": "Only SELECT queries are allowed."}, ensure_ascii=False)
+    try:
+        statements = duckdb.extract_statements(sql)
+    except Exception as exc:
+        return json.dumps({"error": f"SQL syntax error: {str(exc)[:200]}"}, ensure_ascii=False)
 
-    # Block dangerous keywords
-    forbidden = ["DROP", "DELETE", "INSERT", "UPDATE", "ALTER", "CREATE", "TRUNCATE"]
-    sql_upper = sql.upper()
-    for kw in forbidden:
-        if kw in sql_upper:
-            return json.dumps(
-                {"error": f"Queries containing '{kw}' keyword cannot be executed."},
-                ensure_ascii=False,
-            )
+    if len(statements) != 1:
+        return json.dumps(
+            {"error": "Exactly one SELECT statement can be executed per call."},
+            ensure_ascii=False,
+        )
+    if statements[0].type != duckdb.StatementType.SELECT:
+        return json.dumps(
+            {"error": "Only SELECT queries are allowed."},
+            ensure_ascii=False,
+        )
+    if _FILE_FUNCTION_RE.search(sql):
+        return json.dumps(
+            {"error": "Reading files is not allowed; query the 'hofinet' table."},
+            ensure_ascii=False,
+        )
 
     try:
         df = query(sql)
@@ -1146,25 +1576,20 @@ def _tool_query_transactions(arguments: dict) -> str:
             ensure_ascii=False,
         )
 
-    if df is None or df.empty:
-        return json.dumps({"result": [], "notice": "No data found."}, ensure_ascii=False)
-
-    # Limit to top 100 if result is too large
-    total = len(df)
-    if total > 100:
-        df = df.head(100)
-        result = json.loads(df.to_json(orient="records", force_ascii=False))
-        return json.dumps(
-            {"result": result, "total_count": total, "notice": f"Returning top 100 of {total} total records."},
-            ensure_ascii=False,
-        )
-
-    return df.to_json(orient="records", force_ascii=False)
+    total = 0 if df is None else len(df)
+    result = _records(df.head(_QUERY_ROW_LIMIT)) if total else []
+    payload = {"total_count": total, "returned_count": len(result), "result": result}
+    if total == 0:
+        payload["notice"] = "No data found."
+    elif total > _QUERY_ROW_LIMIT:
+        payload["notice"] = f"Returning the first {_QUERY_ROW_LIMIT} of {total} rows."
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def _tool_predict_fraud(arguments: dict) -> str:
-    # Validate parameters
-    errors = _validate_predict_fraud_args(arguments)
+    from src.features.detector import FEATURE_COLS
+
+    values, errors = _validate_predict_fraud_args(arguments)
     if errors:
         return json.dumps(
             {"error": "Input parameter error", "details": errors},
@@ -1179,111 +1604,94 @@ def _tool_predict_fraud(arguments: dict) -> str:
         )
 
     try:
-        # Use English internal names for feature DF if model was trained with them
-        features = pd.DataFrame([arguments])
-        # Mapping incoming English keys to expected feature names if they differ
-        # (Assuming model features were also internationalized)
-        prob = model.predict_proba(features)[:, 1][0]
-        level = "High" if prob >= 0.7 else ("Medium" if prob >= 0.3 else "Low")
-        return json.dumps(
-            {
-                "fraud_probability": round(float(prob), 4),
-                "risk_level": level,
-                "input_values": arguments,
-            },
-            ensure_ascii=False,
-        )
+        # Feature order is fixed by FEATURE_COLS: the order the model sent its
+        # arguments in, and any extra key, must not change the score.
+        features = pd.DataFrame([[values[col] for col in FEATURE_COLS]], columns=FEATURE_COLS)
+        score = float(model.predict_proba(features)[:, 1][0])
     except Exception as exc:
         return json.dumps(
             {"error": f"Model prediction error: {str(exc)}"},
             ensure_ascii=False,
         )
 
+    level = "High" if score >= 0.7 else ("Medium" if score >= 0.3 else "Low")
+    return json.dumps(
+        {
+            "fraud_risk_score": round(score, 4),
+            "risk_level": level,
+            "score_type": "uncalibrated XGBoost score in [0, 1]; not a probability of fraud",
+            "input_values": {col: values[col] for col in FEATURE_COLS},
+        },
+        ensure_ascii=False,
+    )
+
 
 def _tool_generate_str(arguments: dict) -> str:
-    summary = arguments.get("summary", "").strip()
+    summary = arguments.get("summary")
+    if isinstance(summary, (int, float)):
+        summary = str(summary)
+    summary = summary.strip() if isinstance(summary, str) else ""
     if not summary:
         return json.dumps({"error": "Summary content for STR generation is empty."}, ensure_ascii=False)
 
+    risk_score = None
+    if "fraud_probability" in arguments:
+        risk_score = _as_float(arguments["fraud_probability"], "fraud_probability")
+        if 1 < risk_score <= 100:
+            risk_score = risk_score / 100
+        if not 0 <= risk_score <= 1:
+            return json.dumps(
+                {"error": f"fraud_probability({arguments['fraud_probability']!r}) must be between 0 and 1."},
+                ensure_ascii=False,
+            )
+
     report = _build_str_report(
         summary=summary,
-        fraud_type=arguments.get("fraud_type", "Other"),
-        tools_used=arguments.get("tools_used", []),
-        transactions=arguments.get("transactions", []),
-        fraud_probability=arguments.get("fraud_probability"),
-        aml_patterns=arguments.get("aml_patterns", []),
+        fraud_type=arguments.get("fraud_type"),
+        tools_used=_string_list(arguments.get("tools_used")),
+        transactions=_coerce_transactions(arguments.get("transactions")),
+        fraud_probability=risk_score,
+        aml_patterns=_string_list(arguments.get("aml_patterns")),
     )
     return json.dumps(report, ensure_ascii=False)
 
 
 def _tool_analyze_network(arguments: dict) -> str:
-    account_id = arguments.get("account_id")
-    if account_id is None:
-        return json.dumps({"error": "account_id is required."}, ensure_ascii=False)
+    aid = _req_int(arguments, "account_id")
+    hops = max(1, min(_opt_int(arguments, "hops", 1) or 1, 5))
 
     try:
-        aid = int(account_id)
-    except (TypeError, ValueError):
-        return json.dumps({"error": "account_id must be an integer."}, ensure_ascii=False)
-
-    hops = max(1, min(int(arguments.get("hops", 1)), 5))
-
-    try:
-        if hops > 2:
-            df = get_account_ego_network_deep(aid, hops=hops)
-        else:
-            df = get_account_ego_network(aid, hops=hops)
+        summary = summarize_account_network(aid, hops=hops)
     except Exception as exc:
         return json.dumps(
             {"error": f"Network retrieval error: {str(exc)}"},
             ensure_ascii=False,
         )
 
-    if df is None or df.empty:
+    if summary["total_tx_count"] == 0:
         return json.dumps(
             {
                 "account_id": aid,
+                "search_hop_range": hops,
                 "notice": "No transaction history for this account.",
                 "connected_account_count": 0,
                 "total_tx_count": 0,
                 "fraud_tx_count": 0,
-                "fraud_ratio": 0.0,
+                "fraud_ratio_percent": 0.0,
             },
             ensure_ascii=False,
         )
-
-    # Extract account IDs from ego network
-    def _to_int_set(values):
-        out = set()
-        for v in values:
-            try:
-                out.add(int(v))
-            except (TypeError, ValueError):
-                continue
-        return out
-
-    all_accounts = _to_int_set(df["source"].tolist()) | _to_int_set(df["target"].tolist())
-    all_accounts.discard(aid)
-    connected_count = len(all_accounts)
-
-    total_count = int(df["tx_count"].sum()) if "tx_count" in df.columns else 0
-    fraud_count = int(df["is_fraud"].sum()) if "is_fraud" in df.columns else 0
-    fraud_ratio = round(fraud_count / total_count * 100, 2) if total_count > 0 else 0.0
-    total_amount = int(df["total_amount"].sum()) if "total_amount" in df.columns else 0
-
-    # Sample connected accounts (max 10)
-    sample_accounts = sorted(list(all_accounts))[:10]
 
     return json.dumps(
         {
             "account_id": aid,
             "search_hop_range": hops,
-            "connected_account_count": connected_count,
-            "total_tx_count": total_count,
-            "fraud_tx_count": fraud_count,
-            "fraud_ratio_percent": fraud_ratio,
-            "total_amount": total_amount,
-            "connected_account_samples": sample_accounts,
+            "connected_account_count": summary["connected_account_count"],
+            "total_tx_count": summary["total_tx_count"],
+            "fraud_tx_count": summary["fraud_tx_count"],
+            "fraud_ratio_percent": _percent(summary["fraud_tx_count"], summary["total_tx_count"], 2),
+            "total_amount": summary["total_amount"],
+            "connected_account_samples": summary["connected_account_samples"],
         },
         ensure_ascii=False,
     )
@@ -1291,86 +1699,79 @@ def _tool_analyze_network(arguments: dict) -> str:
 
 def _tool_detect_aml_patterns(arguments: dict) -> str:
     pattern_type = arguments.get("pattern_type", "")
+    limit = _limit(arguments)
+    account_id = _opt_int(arguments, "account_id")
 
     if pattern_type == "ring":
+        min_len = _opt_int(arguments, "min_len", 3)
+        max_len = _opt_int(arguments, "max_len", 6)
         try:
             df = detect_ring_transactions(
-                min_len=arguments.get("min_len", 3),
-                max_len=arguments.get("max_len", 6),
-                limit=arguments.get("limit", 20),
+                min_len=min_len, max_len=max_len, limit=limit, account_id=account_id,
             )
         except Exception as exc:
             return json.dumps({"error": f"Ring transaction detection error: {str(exc)}"}, ensure_ascii=False)
 
-        if df.empty:
-            return json.dumps(
-                {
-                    "notice": "No ring transaction patterns detected. Please ensure Memgraph is running.",
-                    "result": [],
-                },
-                ensure_ascii=False,
+        records = _records(df)
+        payload = {"pattern": "Ring", "count": len(records), "result": records}
+        if not records:
+            payload["notice"] = (
+                f"No ring pattern of {min_len}-{max_len} fraud transfers found. "
+                "HOFINET's transfer graph is acyclic, so rings do not occur in this dataset."
             )
-        records = df.to_dict(orient="records")
-        return json.dumps(
-            {"pattern": "Ring", "count": len(records), "result": records},
-            ensure_ascii=False,
-        )
+        return json.dumps(payload, ensure_ascii=False)
 
     elif pattern_type == "layering":
+        min_layers = _opt_int(arguments, "min_layers", 3)
         try:
             df = detect_layering_patterns(
-                min_layers=arguments.get("min_layers", 3),
-                limit=arguments.get("limit", 20),
+                min_layers=min_layers, limit=limit, account_id=account_id,
             )
         except Exception as exc:
             return json.dumps({"error": f"Layering pattern detection error: {str(exc)}"}, ensure_ascii=False)
 
-        if df.empty:
-            return json.dumps(
-                {
-                    "notice": "No layering patterns detected. Please ensure Memgraph is running.",
-                    "result": [],
-                },
-                ensure_ascii=False,
+        records = _records(df)
+        payload = {"pattern": "Multi-stage Layering", "count": len(records), "result": records}
+        if not records:
+            payload["notice"] = (
+                f"No chain of {min_layers} or more consecutive fraud transfers found. "
+                "The longest such chain in HOFINET is 2 transfers."
             )
-        records = df.to_dict(orient="records")
-        return json.dumps(
-            {"pattern": "Multi-stage Layering", "count": len(records), "result": records},
-            ensure_ascii=False,
-        )
+        return json.dumps(payload, ensure_ascii=False)
 
     elif pattern_type == "funnel":
+        min_inflow = _opt_int(arguments, "min_inflow", 10)
+        max_outflow = _opt_int(arguments, "max_outflow", 3)
         try:
             df = detect_funnel_accounts(
-                min_inflow=arguments.get("min_inflow", 10),
-                max_outflow=arguments.get("max_outflow", 3),
-                limit=arguments.get("limit", 20),
+                min_inflow=min_inflow, max_outflow=max_outflow,
+                limit=limit, account_id=account_id,
             )
         except Exception as exc:
-            return json.dumps({"error": f"Mule account pattern detection error: {str(exc)}"}, ensure_ascii=False)
+            return json.dumps({"error": f"Funnel pattern detection error: {str(exc)}"}, ensure_ascii=False)
 
-        if df.empty:
-            return json.dumps(
-                {
-                    "notice": "No mule account patterns detected. Please ensure Memgraph is running.",
-                    "result": [],
-                },
-                ensure_ascii=False,
+        records = _records(df)
+        payload = {
+            "pattern": "Funnel (collect and forward)",
+            "criteria": {"min_inflow": min_inflow, "max_outflow": max_outflow},
+            "count": len(records),
+            "result": records,
+        }
+        if not records:
+            payload["notice"] = (
+                f"No account receives from {min_inflow} or more accounts and forwards to "
+                f"1-{max_outflow} accounts. Only 414 HOFINET accounts both receive and send."
             )
-        records = df.to_dict(orient="records")
-        return json.dumps(
-            {"pattern": "Mule Account (Funnel)", "count": len(records), "result": records},
-            ensure_ascii=False,
-        )
+        return json.dumps(payload, ensure_ascii=False)
 
     elif pattern_type == "shortest_path":
-        account_a = arguments.get("account_a")
-        account_b = arguments.get("account_b")
-        if not account_a or not account_b:
+        if "account_a" not in arguments or "account_b" not in arguments:
             return json.dumps(
                 {"error": "shortest_path requires account_a and account_b."},
                 ensure_ascii=False,
             )
+        account_a = _req_int(arguments, "account_a")
+        account_b = _req_int(arguments, "account_b")
         try:
             result = find_shortest_path(account_a, account_b)
         except Exception as exc:
@@ -1378,8 +1779,7 @@ def _tool_detect_aml_patterns(arguments: dict) -> str:
         return json.dumps(result, ensure_ascii=False)
 
     elif pattern_type == "risk_score":
-        account_id = arguments.get("account_id")
-        if not account_id:
+        if account_id is None:
             return json.dumps(
                 {"error": "risk_score requires account_id."},
                 ensure_ascii=False,
@@ -1434,97 +1834,84 @@ def _tool_get_statistics() -> str:
 
 
 def _tool_get_account_profile(arguments: dict) -> str:
-    account_id = arguments.get("account_id")
-    if account_id is None:
-        return json.dumps({"error": "account_id is required."}, ensure_ascii=False)
+    aid = _req_int(arguments, "account_id")
 
     try:
-        aid = int(account_id)
-    except (TypeError, ValueError):
-        return json.dumps({"error": "account_id must be an integer."}, ensure_ascii=False)
-
-    try:
-        # Basic aggregation: outbound
-        out_df = query(
-            "SELECT COUNT(*) AS cnt, SUM(amount) AS total_amount, "
-            "SUM(is_fraud) AS fraud_cnt "
-            "FROM hofinet WHERE sender_acc = $aid",
+        agg_df = query(
+            "SELECT COUNT(*)::BIGINT AS total_count, "
+            "COUNT(*) FILTER (WHERE sender_acc = $aid)::BIGINT AS outbound_count, "
+            "COUNT(*) FILTER (WHERE receiver_acc = $aid)::BIGINT AS inbound_count, "
+            "COALESCE(SUM(amount), 0)::BIGINT AS total_amount, "
+            "COALESCE(SUM(is_fraud), 0)::BIGINT AS fraud_count "
+            "FROM hofinet WHERE sender_acc = $aid OR receiver_acc = $aid",
             {"aid": aid},
         )
-        # Inbound
-        in_df = query(
-            "SELECT COUNT(*) AS cnt, SUM(amount) AS total_amount, "
-            "SUM(is_fraud) AS fraud_cnt "
-            "FROM hofinet WHERE receiver_acc = $aid",
-            {"aid": aid},
-        )
-
-        out_row = out_df.iloc[0] if out_df is not None and not out_df.empty else None
-        in_row = in_df.iloc[0] if in_df is not None and not in_df.empty else None
-
-        total_count = int((out_row["cnt"] if out_row is not None else 0) +
-                          (in_row["cnt"] if in_row is not None else 0))
-        total_amount = int((out_row["total_amount"] if out_row is not None else 0) or 0) + \
-                       int((in_row["total_amount"] if in_row is not None else 0) or 0)
-        fraud_count = int((out_row["fraud_cnt"] if out_row is not None else 0) or 0) + \
-                      int((in_row["fraud_cnt"] if in_row is not None else 0) or 0)
-        fraud_ratio = round(fraud_count / total_count, 4) if total_count > 0 else 0.0
+        row = agg_df.iloc[0]
+        total_count = _int_value(row["total_count"])
 
         if total_count == 0:
             return json.dumps(
-                {"account_id": aid, "notice": "No transaction history for this account."},
+                {"account_id": aid, "total_count": 0,
+                 "notice": "No transaction history for this account."},
                 ensure_ascii=False,
             )
 
-        # Top transaction time slots (outbound)
+        # Transactions in either direction, so a receive-only account is profiled too.
         hour_df = query(
             "SELECT time_slot, COUNT(*) AS cnt FROM hofinet "
-            "WHERE sender_acc = $aid "
-            "GROUP BY time_slot ORDER BY cnt DESC LIMIT 3",
+            "WHERE sender_acc = $aid OR receiver_acc = $aid "
+            "GROUP BY time_slot ORDER BY cnt DESC, time_slot LIMIT 3",
             {"aid": aid},
         )
-        top_hours = hour_df["time_slot"].tolist() if hour_df is not None and not hour_df.empty else []
+        top_hours = [int(v) for v in hour_df["time_slot"].tolist()]
 
-        # Top media types (outbound)
         media_df = query(
             "SELECT media_type, COUNT(*) AS cnt FROM hofinet "
-            "WHERE sender_acc = $aid "
-            "GROUP BY media_type ORDER BY cnt DESC LIMIT 3",
+            "WHERE sender_acc = $aid OR receiver_acc = $aid "
+            "GROUP BY media_type ORDER BY cnt DESC, media_type LIMIT 3",
             {"aid": aid},
         )
-        top_media_codes = media_df["media_type"].tolist() if media_df is not None and not media_df.empty else []
-        top_media = [_MEDIA_TYPE_MAP.get(int(c), f"Code {c}") for c in top_media_codes]
+        top_media = [_MEDIA_TYPE_MAP.get(int(c), f"Code {c}") for c in media_df["media_type"].tolist()]
 
-        # Top 5 counterpart accounts (based on outbound receiver)
         cp_df = query(
-            "SELECT receiver_acc AS counterpart_id, "
-            "COUNT(*) AS tx_count, SUM(amount) AS total_amount "
-            "FROM hofinet WHERE sender_acc = $aid "
-            "GROUP BY receiver_acc ORDER BY tx_count DESC LIMIT 5",
+            "SELECT receiver_acc AS counterpart_id, 'outbound' AS direction, "
+            "       COUNT(*)::BIGINT AS tx_count, COALESCE(SUM(amount), 0)::BIGINT AS total_amount "
+            "FROM hofinet WHERE sender_acc = $aid GROUP BY receiver_acc "
+            "UNION ALL "
+            "SELECT sender_acc, 'inbound', "
+            "       COUNT(*)::BIGINT, COALESCE(SUM(amount), 0)::BIGINT "
+            "FROM hofinet WHERE receiver_acc = $aid GROUP BY sender_acc "
+            "ORDER BY tx_count DESC, counterpart_id, direction LIMIT 5",
             {"aid": aid},
         )
-        top_counterparts = []
-        if cp_df is not None and not cp_df.empty:
-            for _, row in cp_df.iterrows():
-                top_counterparts.append({
-                    "account_id": int(row["counterpart_id"]),
-                    "count": int(row["tx_count"]),
-                    "amount": int(row["total_amount"] or 0),
-                })
+        top_counterparts = [
+            {
+                "account_id": int(r["counterpart_id"]),
+                "direction": r["direction"],
+                "count": _int_value(r["tx_count"]),
+                "amount": _int_value(r["total_amount"]),
+            }
+            for _, r in cp_df.iterrows()
+        ]
 
+    except ToolArgumentError:
+        raise
     except Exception as exc:
         return json.dumps(
             {"error": f"Account profile retrieval error: {str(exc)}"},
             ensure_ascii=False,
         )
 
+    fraud_count = _int_value(row["fraud_count"])
     return json.dumps(
         {
             "account_id": aid,
             "total_count": total_count,
-            "total_amount": total_amount,
+            "outbound_count": _int_value(row["outbound_count"]),
+            "inbound_count": _int_value(row["inbound_count"]),
+            "total_amount": _int_value(row["total_amount"]),
             "fraud_count": fraud_count,
-            "fraud_ratio": fraud_ratio,
+            "fraud_ratio_percent": _percent(fraud_count, total_count),
             "top_hours": top_hours,
             "top_media": top_media,
             "top_counterparts": top_counterparts,
@@ -1533,24 +1920,23 @@ def _tool_get_account_profile(arguments: dict) -> str:
     )
 
 
+def _no_fraud_rows_notice(bank_id) -> str:
+    if bank_id is None:
+        return "No fraud transactions recorded for this type."
+    return f"No fraud transactions recorded for this type with sender bank {bank_id}."
+
+
 def _tool_get_fraud_type_summary(arguments: dict) -> str:
-    fraud_type = arguments.get("fraud_type")
-    if fraud_type is None:
-        return json.dumps({"error": "fraud_type is required."}, ensure_ascii=False)
+    ftype = _req_int(arguments, "fraud_type")
 
-    try:
-        ftype = int(fraud_type)
-    except (TypeError, ValueError):
-        return json.dumps({"error": "fraud_type must be an integer between 1 and 7."}, ensure_ascii=False)
-
-    if ftype not in range(1, 8):
+    if ftype not in _FRAUD_TYPE_MAP:
         return json.dumps(
-            {"error": f"fraud_type({ftype}) must be in range 1-7."},
+            {"error": f"fraud_type({ftype}) must be one of {sorted(_FRAUD_TYPE_MAP)} "
+                      "(code 6 is not used in HOFINET)."},
             ensure_ascii=False,
         )
 
-    bank_id_raw = arguments.get("bank_id")
-    bid = int(bank_id_raw) if bank_id_raw is not None else None
+    bid = _opt_int(arguments, "bank_id")
 
     try:
         # Basic aggregation
@@ -1576,22 +1962,26 @@ def _tool_get_fraud_type_summary(arguments: dict) -> str:
                 {
                     "type_code": ftype,
                     "type_name": _FRAUD_TYPE_MAP.get(ftype, "Other"),
-                    "notice": "No fraud transactions recorded for this type.",
+                    "bank_filter": bid,
+                    "total_count": 0,
+                    "notice": _no_fraud_rows_notice(bid),
                 },
                 ensure_ascii=False,
             )
 
         row = agg_df.iloc[0]
-        total_count = int(row["total_count"] or 0)
-        total_amount = int(row["total_amount"] or 0)
-        avg_amount = round(float(row["avg_amount"] or 0), 2)
+        total_count = _int_value(row["total_count"])
+        total_amount = _int_value(row["total_amount"])
+        avg_amount = _float_value(row["avg_amount"], digits=2)
 
         if total_count == 0:
             return json.dumps(
                 {
                     "type_code": ftype,
                     "type_name": _FRAUD_TYPE_MAP.get(ftype, "Other"),
-                    "notice": "No fraud transactions recorded for this type.",
+                    "bank_filter": bid,
+                    "total_count": 0,
+                    "notice": _no_fraud_rows_notice(bid),
                 },
                 ensure_ascii=False,
             )
@@ -1599,17 +1989,17 @@ def _tool_get_fraud_type_summary(arguments: dict) -> str:
         # Top financial institutions
         if bid is not None:
             bank_df = query(
-                "SELECT sender_bank AS bank_id, COUNT(*) AS cnt "
+                "SELECT sender_bank AS bank_id, COUNT(*)::BIGINT AS cnt "
                 "FROM hofinet WHERE is_fraud = 1 AND fraud_type = $ftype "
                 "AND sender_bank = $bid "
-                "GROUP BY sender_bank ORDER BY cnt DESC LIMIT 5",
+                "GROUP BY sender_bank ORDER BY cnt DESC, bank_id LIMIT 5",
                 {"ftype": ftype, "bid": bid},
             )
         else:
             bank_df = query(
-                "SELECT sender_bank AS bank_id, COUNT(*) AS cnt "
+                "SELECT sender_bank AS bank_id, COUNT(*)::BIGINT AS cnt "
                 "FROM hofinet WHERE is_fraud = 1 AND fraud_type = $ftype "
-                "GROUP BY sender_bank ORDER BY cnt DESC LIMIT 5",
+                "GROUP BY sender_bank ORDER BY cnt DESC, bank_id LIMIT 5",
                 {"ftype": ftype},
             )
 
@@ -1618,7 +2008,7 @@ def _tool_get_fraud_type_summary(arguments: dict) -> str:
             for _, brow in bank_df.iterrows():
                 top_banks.append({
                     "bank_id": int(brow["bank_id"]),
-                    "count": int(brow["cnt"]),
+                    "count": _int_value(brow["cnt"]),
                 })
 
         # Sample dates (latest 5)
@@ -1638,7 +2028,7 @@ def _tool_get_fraud_type_summary(arguments: dict) -> str:
                 {"ftype": ftype},
             )
 
-        sample_dates = date_df["date"].tolist() if date_df is not None and not date_df.empty else []
+        sample_dates = [int(v) for v in date_df["date"].tolist()] if date_df is not None else []
 
     except Exception as exc:
         return json.dumps(
@@ -1662,13 +2052,19 @@ def _tool_get_fraud_type_summary(arguments: dict) -> str:
 
 
 def _tool_compare_periods(arguments: dict) -> str:
-    try:
-        p1s = int(arguments.get("period1_start", 0))
-        p1e = int(arguments.get("period1_end", 0))
-        p2s = int(arguments.get("period2_start", 0))
-        p2e = int(arguments.get("period2_end", 0))
-    except (TypeError, ValueError):
-        return json.dumps({"error": "Dates must be YYYYMMDD integers."}, ensure_ascii=False)
+    missing = [
+        name for name in ("period1_start", "period1_end", "period2_start", "period2_end")
+        if name not in arguments
+    ]
+    if missing:
+        return json.dumps(
+            {"error": f"Missing required dates: {', '.join(missing)} (YYYYMMDD integers)."},
+            ensure_ascii=False,
+        )
+    p1s = _opt_date(arguments, "period1_start")
+    p1e = _opt_date(arguments, "period1_end")
+    p2s = _opt_date(arguments, "period2_start")
+    p2e = _opt_date(arguments, "period2_end")
 
     if p1s > p1e or p2s > p2e:
         return json.dumps({"error": "Start date cannot be later than end date."}, ensure_ascii=False)
@@ -1676,8 +2072,9 @@ def _tool_compare_periods(arguments: dict) -> str:
     try:
         df1 = query(
             f"""
-            SELECT COUNT(*) AS total_count,
-                   SUM(is_fraud) AS fraud_count,
+            SELECT COUNT(*)::BIGINT AS total_count,
+                   COALESCE(SUM(is_fraud), 0)::BIGINT AS fraud_count,
+                   COALESCE(SUM(amount), 0)::BIGINT AS total_amount,
                    AVG(amount) AS avg_amount
             FROM hofinet
             WHERE date BETWEEN {p1s} AND {p1e}
@@ -1685,8 +2082,9 @@ def _tool_compare_periods(arguments: dict) -> str:
         )
         df2 = query(
             f"""
-            SELECT COUNT(*) AS total_count,
-                   SUM(is_fraud) AS fraud_count,
+            SELECT COUNT(*)::BIGINT AS total_count,
+                   COALESCE(SUM(is_fraud), 0)::BIGINT AS fraud_count,
+                   COALESCE(SUM(amount), 0)::BIGINT AS total_amount,
                    AVG(amount) AS avg_amount
             FROM hofinet
             WHERE date BETWEEN {p2s} AND {p2e}
@@ -1697,12 +2095,13 @@ def _tool_compare_periods(arguments: dict) -> str:
 
     def _row(df):
         if df is None or df.empty:
-            return {"total_count": 0, "fraud_count": 0, "avg_amount": 0.0}
+            return {"total_count": 0, "fraud_count": 0, "total_amount": 0, "avg_amount": 0.0}
         r = df.iloc[0]
         return {
-            "total_count": int(r["total_count"] or 0),
-            "fraud_count": int(r["fraud_count"] or 0),
-            "avg_amount": round(float(r["avg_amount"] or 0.0), 2),
+            "total_count": _int_value(r["total_count"]),
+            "fraud_count": _int_value(r["fraud_count"]),
+            "total_amount": _int_value(r["total_amount"]),
+            "avg_amount": _float_value(r["avg_amount"], digits=2),
         }
 
     r1 = _row(df1)
@@ -1713,8 +2112,8 @@ def _tool_compare_periods(arguments: dict) -> str:
             return None
         return round((v2 - v1) / v1 * 100, 2)
 
-    fraud_ratio1 = round(r1["fraud_count"] / r1["total_count"] * 100, 4) if r1["total_count"] > 0 else 0.0
-    fraud_ratio2 = round(r2["fraud_count"] / r2["total_count"] * 100, 4) if r2["total_count"] > 0 else 0.0
+    fraud_ratio1 = _percent(r1["fraud_count"], r1["total_count"])
+    fraud_ratio2 = _percent(r2["fraud_count"], r2["total_count"])
 
     return json.dumps(
         {
@@ -1732,97 +2131,146 @@ def _tool_compare_periods(arguments: dict) -> str:
 
 
 def _tool_get_institution_report(arguments: dict) -> str:
-    bank_id_raw = arguments.get("bank_id")
-    if bank_id_raw is None:
-        return json.dumps({"error": "bank_id is required."}, ensure_ascii=False)
-    try:
-        bid = int(bank_id_raw)
-    except (TypeError, ValueError):
-        return json.dumps({"error": "bank_id must be an integer."}, ensure_ascii=False)
+    bid = _req_int(arguments, "bank_id")
 
     try:
-        # Basic aggregation (inbound)
         agg_df = query(
-            "SELECT COUNT(*) AS total_count, "
-            "SUM(is_fraud) AS fraud_count, "
-            "SUM(amount) AS total_amount, "
-            "AVG(amount) AS avg_amount "
-            "FROM hofinet WHERE sender_bank = $bid",
+            "SELECT "
+            "  COUNT(*) FILTER (WHERE sender_bank = $bid)::BIGINT AS out_count, "
+            "  COALESCE(SUM(is_fraud) FILTER (WHERE sender_bank = $bid), 0)::BIGINT AS out_fraud, "
+            "  COALESCE(SUM(amount) FILTER (WHERE sender_bank = $bid), 0)::BIGINT AS out_amount, "
+            "  AVG(amount) FILTER (WHERE sender_bank = $bid) AS out_avg, "
+            "  COUNT(*) FILTER (WHERE receiver_bank = $bid)::BIGINT AS in_count, "
+            "  COALESCE(SUM(is_fraud) FILTER (WHERE receiver_bank = $bid), 0)::BIGINT AS in_fraud, "
+            "  COALESCE(SUM(amount) FILTER (WHERE receiver_bank = $bid), 0)::BIGINT AS in_amount, "
+            "  AVG(amount) FILTER (WHERE receiver_bank = $bid) AS in_avg "
+            "FROM hofinet WHERE sender_bank = $bid OR receiver_bank = $bid",
             {"bid": bid},
         )
+        row = agg_df.iloc[0]
+        out_count = _int_value(row["out_count"])
+        in_count = _int_value(row["in_count"])
 
-        if agg_df is None or agg_df.empty or int(agg_df.iloc[0]["total_count"] or 0) == 0:
+        if out_count == 0 and in_count == 0:
             return json.dumps(
-                {"bank_id": bid, "notice": "No transaction history for this institution."},
+                {"bank_id": bid, "total_count": 0,
+                 "notice": "No transaction history for this institution."},
                 ensure_ascii=False,
             )
 
-        row = agg_df.iloc[0]
-        total_count = int(row["total_count"] or 0)
-        fraud_count = int(row["fraud_count"] or 0)
-        total_amount = int(row["total_amount"] or 0)
-        avg_amount = round(float(row["avg_amount"] or 0.0), 2)
-        fraud_ratio = round(fraud_count / total_count * 100, 4) if total_count > 0 else 0.0
+        out_fraud = _int_value(row["out_fraud"])
+        in_fraud = _int_value(row["in_fraud"])
 
-        # Top counterpart institutions
+        # Counterpart institutions, both directions.
         cp_df = query(
-            "SELECT receiver_bank AS counterpart_bank_id, "
-            "COUNT(*) AS tx_count, SUM(amount) AS total_amount "
+            "SELECT receiver_bank AS bank_id, COUNT(*)::BIGINT AS tx_count, "
+            "       COALESCE(SUM(amount), 0)::BIGINT AS total_amount "
             "FROM hofinet WHERE sender_bank = $bid "
-            "GROUP BY receiver_bank ORDER BY tx_count DESC LIMIT 5",
+            "GROUP BY receiver_bank ORDER BY tx_count DESC, bank_id LIMIT 5",
             {"bid": bid},
         )
-        top_counterparts = []
-        if cp_df is not None and not cp_df.empty:
-            for _, r in cp_df.iterrows():
-                top_counterparts.append({
-                    "bank_id": int(r["counterpart_bank_id"]),
-                    "count": int(r["tx_count"]),
-                    "amount": int(r["total_amount"] or 0),
-                })
+        source_df = query(
+            "SELECT sender_bank AS bank_id, COUNT(*)::BIGINT AS tx_count, "
+            "       COALESCE(SUM(amount), 0)::BIGINT AS total_amount "
+            "FROM hofinet WHERE receiver_bank = $bid "
+            "GROUP BY sender_bank ORDER BY tx_count DESC, bank_id LIMIT 5",
+            {"bid": bid},
+        )
 
-        # Fraud type distribution
+        # Fraud type distribution over transactions on either side of the bank.
         type_df = query(
-            "SELECT fraud_type, COUNT(*) AS cnt "
+            "SELECT fraud_type, COUNT(*)::BIGINT AS cnt "
             "FROM hofinet "
-            "WHERE sender_bank = $bid AND is_fraud = 1 "
-            "GROUP BY fraud_type ORDER BY cnt DESC",
+            "WHERE (sender_bank = $bid OR receiver_bank = $bid) AND is_fraud = 1 "
+            "GROUP BY fraud_type ORDER BY cnt DESC, fraud_type",
             {"bid": bid},
         )
-        fraud_type_dist = []
-        if type_df is not None and not type_df.empty:
-            for _, r in type_df.iterrows():
-                ftype = int(r["fraud_type"]) if r["fraud_type"] is not None else 0
-                fraud_type_dist.append({
-                    "type_code": ftype,
-                    "type_name": _FRAUD_TYPE_MAP.get(ftype, "Other"),
-                    "count": int(r["cnt"]),
-                })
 
+        # Quarterly trend (integer quarter arithmetic; see R1-N1).
+        trend_df = query(
+            "SELECT CAST(date / 10000 AS INT) AS year, "
+            "       (date // 100 % 100 - 1) // 3 + 1 AS quarter, "
+            "       COUNT(*) FILTER (WHERE sender_bank = $bid)::BIGINT AS outbound_count, "
+            "       COALESCE(SUM(is_fraud) FILTER (WHERE sender_bank = $bid), 0)::BIGINT AS outbound_fraud_count, "
+            "       COUNT(*) FILTER (WHERE receiver_bank = $bid)::BIGINT AS inbound_count, "
+            "       COALESCE(SUM(is_fraud) FILTER (WHERE receiver_bank = $bid), 0)::BIGINT AS inbound_fraud_count "
+            "FROM hofinet WHERE sender_bank = $bid OR receiver_bank = $bid "
+            "GROUP BY year, quarter ORDER BY year, quarter",
+            {"bid": bid},
+        )
+
+    except ToolArgumentError:
+        raise
     except Exception as exc:
         return json.dumps(
             {"error": f"Institution report lookup error: {str(exc)}"},
             ensure_ascii=False,
         )
 
+    def _counterparts(df):
+        return [
+            {
+                "bank_id": int(r["bank_id"]),
+                "count": _int_value(r["tx_count"]),
+                "amount": _int_value(r["total_amount"]),
+            }
+            for _, r in df.iterrows()
+        ]
+
+    fraud_type_dist = [
+        {
+            "type_code": _int_value(r["fraud_type"]),
+            "type_name": _FRAUD_TYPE_MAP.get(_int_value(r["fraud_type"]), "Other"),
+            "count": _int_value(r["cnt"]),
+        }
+        for _, r in type_df.iterrows()
+    ]
+
+    quarterly_trend = [
+        {
+            "quarter": f"{_int_value(r['year'])}Q{_int_value(r['quarter'])}",
+            "outbound_count": _int_value(r["outbound_count"]),
+            "outbound_fraud_count": _int_value(r["outbound_fraud_count"]),
+            "inbound_count": _int_value(r["inbound_count"]),
+            "inbound_fraud_count": _int_value(r["inbound_fraud_count"]),
+        }
+        for _, r in trend_df.iterrows()
+    ]
+
     return json.dumps(
         {
             "bank_id": bid,
-            "total_count": total_count,
-            "fraud_count": fraud_count,
-            "fraud_ratio_percent": fraud_ratio,
-            "total_amount": total_amount,
-            "avg_amount": avg_amount,
-            "top_counterpart_banks": top_counterparts,
+            "total_count": out_count + in_count,
+            "outbound": {
+                "total_count": out_count,
+                "fraud_count": out_fraud,
+                "fraud_ratio_percent": _percent(out_fraud, out_count),
+                "total_amount": _int_value(row["out_amount"]),
+                "avg_amount": _float_value(row["out_avg"], digits=2),
+            },
+            "inbound": {
+                "total_count": in_count,
+                "fraud_count": in_fraud,
+                "fraud_ratio_percent": _percent(in_fraud, in_count),
+                "total_amount": _int_value(row["in_amount"]),
+                "avg_amount": _float_value(row["in_avg"], digits=2),
+            },
+            "top_counterpart_banks": _counterparts(cp_df),
+            "top_source_banks": _counterparts(source_df),
             "fraud_type_distribution": fraud_type_dist,
+            "quarterly_trend": quarterly_trend,
         },
         ensure_ascii=False,
     )
 
 
+_RANK_SAMPLE_MAX = 5000
+
+
 def _tool_rank_risky_transactions(arguments: dict) -> str:
-    sample_size = min(int(arguments.get("sample_size", 1000)), 5000)
-    top_k = min(int(arguments.get("top_k", 20)), 100)
+    requested_sample = _opt_int(arguments, "sample_size", 1000) or 1000
+    sample_size = min(max(requested_sample, 1), _RANK_SAMPLE_MAX)
+    top_k = min(max(_opt_int(arguments, "top_k", 20) or 20, 1), 100)
 
     model = load_model()
     if model is None:
@@ -1832,7 +2280,7 @@ def _tool_rank_risky_transactions(arguments: dict) -> str:
         )
 
     try:
-        from src.features.detector import predict_from_db, FEATURE_COLS
+        from src.features.detector import predict_from_db
         df = predict_from_db(model, limit=sample_size)
     except Exception as exc:
         return json.dumps(
@@ -1841,30 +2289,38 @@ def _tool_rank_risky_transactions(arguments: dict) -> str:
         )
 
     if df is None or df.empty:
-        return json.dumps({"notice": "No transaction data to predict.", "results": []}, ensure_ascii=False)
+        return json.dumps({"notice": "No transaction data to score.", "results": []}, ensure_ascii=False)
 
-    top_df = df.head(top_k)
+    # The ground-truth label is not returned: the agent must judge the ranking
+    # from the score, not from the answer key.
     records = []
-    for _, row in top_df.iterrows():
+    for _, row in df.head(top_k).iterrows():
         records.append({
-            "sender_acc": int(row["sender_acc"]),
-            "receiver_acc": int(row["receiver_acc"]),
             "date": int(row["date"]),
             "time_slot": int(row["time_slot"]),
+            "sender_bank": int(row["sender_bank"]),
+            "sender_acc": int(row["sender_acc"]),
+            "receiver_bank": int(row["receiver_bank"]),
+            "receiver_acc": int(row["receiver_acc"]),
+            "fund_type": int(row["fund_type"]),
+            "media_type": int(row["media_type"]),
             "amount": int(row["amount"]),
-            "fraud_probability": round(float(row["predict_prob"]), 4),
-            "is_fraud_actual": int(row["is_fraud"]) if "is_fraud" in row else None,
+            "fraud_risk_score": round(float(row["prob"]), 4),
         })
 
-    return json.dumps(
-        {
-            "sample_size": sample_size,
-            "top_k": top_k,
-            "total_returned": len(records),
-            "results": records,
-        },
-        ensure_ascii=False,
-    )
+    payload = {
+        "sample_size": sample_size,
+        "top_k": top_k,
+        "total_returned": len(records),
+        "score_type": "uncalibrated XGBoost score in [0, 1]; not a probability of fraud",
+        "results": records,
+    }
+    if requested_sample > _RANK_SAMPLE_MAX:
+        payload["notice"] = (
+            f"sample_size {requested_sample} exceeds the maximum {_RANK_SAMPLE_MAX}; "
+            f"scored {sample_size} transactions."
+        )
+    return json.dumps(payload, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
@@ -1874,10 +2330,10 @@ def _tool_rank_risky_transactions(arguments: dict) -> str:
 
 def _tool_detect_ctr_candidates(arguments: dict) -> str:
     mode = arguments.get("mode", "")
-    date_from = arguments.get("date_from")
-    date_to = arguments.get("date_to")
-    threshold = int(arguments.get("threshold", 10_000_000))
-    limit = min(int(arguments.get("limit", 20)), 100)
+    date_from = _opt_date(arguments, "date_from")
+    date_to = _opt_date(arguments, "date_to")
+    threshold = _opt_int(arguments, "threshold", 10_000_000)
+    limit = _limit(arguments)
 
     if mode not in ("high_value", "structuring"):
         return json.dumps(
@@ -1888,43 +2344,27 @@ def _tool_detect_ctr_candidates(arguments: dict) -> str:
     try:
         if mode == "high_value":
             df = get_ctr_candidates(
-                date_from=date_from, date_to=date_to, limit=limit,
+                date_from=date_from, date_to=date_to,
+                threshold=threshold, limit=limit,
             )
-            if df.empty:
-                return json.dumps(
-                    {"mode": "high_value", "notice": "No high-value transactions matching criteria.", "result": []},
-                    ensure_ascii=False,
-                )
-            records = json.loads(df.to_json(orient="records", force_ascii=False))
-            return json.dumps(
-                {"mode": "high_value", "count": len(records), "result": records},
-                ensure_ascii=False,
-            )
-        else:  # structuring
+            notice = "No transactions at or above the threshold."
+        else:
             df = detect_structuring(
                 date_from=date_from, date_to=date_to,
                 threshold=threshold, limit=limit,
             )
-            if df.empty:
-                return json.dumps(
-                    {"mode": "structuring", "notice": "No suspected structured transactions found.", "result": []},
-                    ensure_ascii=False,
-                )
-            records = json.loads(df.to_json(orient="records", force_ascii=False))
-            return json.dumps(
-                {
-                    "mode": "structuring",
-                    "threshold": threshold,
-                    "count": len(records),
-                    "result": records,
-                },
-                ensure_ascii=False,
-            )
+            notice = "No suspected structured transactions found."
     except Exception as exc:
         return json.dumps(
             {"error": f"CTR detection error: {str(exc)}"},
             ensure_ascii=False,
         )
+
+    records = _records(df)
+    payload = {"mode": mode, "threshold": threshold, "count": len(records), "result": records}
+    if not records:
+        payload["notice"] = notice
+    return json.dumps(payload, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
@@ -1933,14 +2373,7 @@ def _tool_detect_ctr_candidates(arguments: dict) -> str:
 
 
 def _tool_score_account_risk(arguments: dict) -> str:
-    account_id = arguments.get("account_id")
-    if account_id is None:
-        return json.dumps({"error": "account_id is required."}, ensure_ascii=False)
-
-    try:
-        aid = int(account_id)
-    except (TypeError, ValueError):
-        return json.dumps({"error": "account_id must be an integer."}, ensure_ascii=False)
+    aid = _req_int(arguments, "account_id")
 
     try:
         result = _score_account_risk(aid)
@@ -1960,71 +2393,61 @@ def _tool_score_account_risk(arguments: dict) -> str:
 
 def _tool_detect_monitoring_alerts(arguments: dict) -> str:
     rule_id = arguments.get("rule_id", "")
-    date_from = arguments.get("date_from")
-    date_to = arguments.get("date_to")
-    limit = min(int(arguments.get("limit", 20)), 100)
+    date_from = _opt_date(arguments, "date_from")
+    date_to = _opt_date(arguments, "date_to")
+    account_id = _opt_int(arguments, "account_id")
+    limit = _limit(arguments)
 
-    valid_rules = {"all", "R001", "R002", "R003", "R004", "R005"}
+    valid_rules = ["all", *sorted(RULE_NAMES)]
     if rule_id not in valid_rules:
         return json.dumps(
-            {"error": f"rule_id must be one of {sorted(valid_rules)}."},
+            {"error": f"rule_id must be one of {valid_rules}."},
             ensure_ascii=False,
+        )
+    if date_from is not None and date_to is not None and date_from > date_to:
+        return json.dumps(
+            {"error": "date_from must not be later than date_to."},
+            ensure_ascii=False,
+        )
+
+    filters = {"date_from": date_from, "date_to": date_to, "account_id": account_id}
+    notice = None
+    if rule_id in ("all", "R005") and (date_from is None or date_to is None):
+        window = default_pattern_change_period()
+        notice = (
+            f"R005 compares the last quarter of the data ({window[0]}-{window[1]}) with the "
+            "preceding quarter, because no date range was given."
         )
 
     try:
         if rule_id == "all":
-            result = run_all_rules(date_from=date_from, date_to=date_to)
-            return json.dumps({"rule_id": "all", "result": result}, ensure_ascii=False)
+            result = run_all_rules(date_from, date_to, account_id, limit=limit)
+            payload = {"rule_id": "all", "filters": filters, "result": result}
+            if notice:
+                payload["notice"] = notice
+            return json.dumps(payload, ensure_ascii=False)
 
-        if rule_id == "R001":
-            df = detect_nighttime_bulk(date_from=date_from, date_to=date_to, limit=limit)
-            label = "Nighttime Bulk Transactions"
-        elif rule_id == "R002":
-            df = detect_rapid_fire(date_from=date_from, date_to=date_to, limit=limit)
-            label = "Multiple Daily Transactions"
-        elif rule_id == "R003":
-            df = detect_round_amounts(date_from=date_from, date_to=date_to, limit=limit)
-            label = "Round Amount Pattern"
-        elif rule_id == "R004":
-            df = detect_institution_concentration(limit=limit)
-            label = "Institution Concentration"
-        elif rule_id == "R005":
-            if not date_from or not date_to:
-                return json.dumps(
-                    {"error": "R005 (Pattern Change) requires date_from and date_to."},
-                    ensure_ascii=False,
-                )
-            try:
-                base_start, base_end = _calculate_previous_period(int(date_from), int(date_to))
-            except ValueError:
-                return json.dumps(
-                    {"error": "Invalid date range. Please enter YYYYMMDD integers where date_from <= date_to."},
-                    ensure_ascii=False,
-                )
-            df = detect_pattern_change(
-                base_start=base_start, base_end=base_end,
-                compare_start=int(date_from), compare_end=int(date_to),
-                limit=limit,
-            )
-            label = "Transaction Pattern Change"
-
-        if df.empty:
-            return json.dumps(
-                {"rule_id": rule_id, "rule_name": label, "notice": "No alerts detected.", "result": []},
-                ensure_ascii=False,
-            )
-
-        records = json.loads(df.to_json(orient="records", force_ascii=False))
-        return json.dumps(
-            {"rule_id": rule_id, "rule_name": label, "count": len(records), "result": records},
-            ensure_ascii=False,
-        )
-
+        df = run_rule(rule_id, date_from, date_to, account_id, limit=limit)
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
     except Exception as exc:
         return json.dumps(
             {"error": f"Monitoring rule execution error: {str(exc)}"},
             ensure_ascii=False,
         )
+
+    payload = {
+        "rule_id": rule_id,
+        "rule_name": RULE_NAMES[rule_id],
+        "filters": filters,
+        "count": len(df),
+        "result": _records(df),
+    }
+    if df.empty:
+        payload["notice"] = "No alerts detected."
+    elif notice:
+        payload["notice"] = notice
+    return json.dumps(payload, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
@@ -2033,9 +2456,9 @@ def _tool_detect_monitoring_alerts(arguments: dict) -> str:
 
 
 def _tool_detect_dormant_reactivation(arguments: dict) -> str:
-    dormant_days = int(arguments.get("dormant_days", 180))
-    min_amount = int(arguments.get("min_reactivation_amount", 5_000_000))
-    limit = min(int(arguments.get("limit", 20)), 100)
+    dormant_days = _opt_int(arguments, "dormant_days", 180)
+    min_amount = _opt_int(arguments, "min_reactivation_amount", 5_000_000)
+    limit = _limit(arguments)
 
     try:
         df = detect_dormant_reactivation(
@@ -2049,21 +2472,15 @@ def _tool_detect_dormant_reactivation(arguments: dict) -> str:
             ensure_ascii=False,
         )
 
-    if df.empty:
-        return json.dumps(
-            {"notice": "No dormant reactivation accounts matching criteria.", "result": []},
-            ensure_ascii=False,
-        )
-
-    records = json.loads(df.to_json(orient="records", force_ascii=False))
-    return json.dumps(
-        {
-            "criteria": {"dormant_days": dormant_days, "min_reactivation_amount": min_amount},
-            "count": len(records),
-            "result": records,
-        },
-        ensure_ascii=False,
-    )
+    records = _records(df)
+    payload = {
+        "criteria": {"dormant_days": dormant_days, "min_reactivation_amount": min_amount},
+        "count": len(records),
+        "result": records,
+    }
+    if not records:
+        payload["notice"] = "No dormant reactivation accounts matching criteria."
+    return json.dumps(payload, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
@@ -2079,15 +2496,15 @@ def _tool_detect_smurfing_network(arguments: dict) -> str:
             ensure_ascii=False,
         )
 
-    account_id = arguments.get("account_id")
-    min_counterparts = int(arguments.get("min_counterparts", 5))
-    date_from = arguments.get("date_from")
-    date_to = arguments.get("date_to")
-    limit = min(int(arguments.get("limit", 20)), 100)
+    account_id = _opt_int(arguments, "account_id")
+    min_counterparts = _opt_int(arguments, "min_counterparts", 5)
+    date_from = _opt_date(arguments, "date_from")
+    date_to = _opt_date(arguments, "date_to")
+    limit = _limit(arguments)
 
     try:
         df = _detect_smurfing_network(
-            account_id=int(account_id) if account_id is not None else None,
+            account_id=account_id,
             direction=direction,
             min_counterparts=min_counterparts,
             date_from=date_from,
@@ -2100,23 +2517,17 @@ def _tool_detect_smurfing_network(arguments: dict) -> str:
             ensure_ascii=False,
         )
 
-    if df.empty:
-        label = "Fund Collection" if direction == "inbound" else "Fund Distribution"
-        return json.dumps(
-            {"direction": direction, "notice": f"{label} pattern not detected.", "result": []},
-            ensure_ascii=False,
-        )
-
-    records = json.loads(df.to_json(orient="records", force_ascii=False))
-    return json.dumps(
-        {
-            "direction": direction,
-            "min_counterparts": min_counterparts,
-            "count": len(records),
-            "result": records,
-        },
-        ensure_ascii=False,
-    )
+    records = _records(df)
+    payload = {
+        "direction": direction,
+        "min_counterparts": min_counterparts,
+        "count": len(records),
+        "result": records,
+    }
+    if not records:
+        label = "Fund collection" if direction == "inbound" else "Fund distribution"
+        payload["notice"] = f"{label} pattern not detected with these criteria."
+    return json.dumps(payload, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
@@ -2127,10 +2538,13 @@ def _tool_detect_smurfing_network(arguments: dict) -> str:
 def _tool_get_trend_analysis(arguments: dict) -> str:
     unit = arguments.get("unit", "monthly")
     if unit not in ("monthly", "quarterly"):
-        unit = "monthly"
+        return json.dumps(
+            {"error": f"unit('{unit}') must be 'monthly' or 'quarterly'."},
+            ensure_ascii=False,
+        )
 
-    date_from = arguments.get("date_from")
-    date_to = arguments.get("date_to")
+    date_from = _opt_date(arguments, "date_from")
+    date_to = _opt_date(arguments, "date_to")
 
     try:
         df = _get_trend_analysis(
@@ -2142,17 +2556,11 @@ def _tool_get_trend_analysis(arguments: dict) -> str:
             ensure_ascii=False,
         )
 
-    if df.empty:
-        return json.dumps(
-            {"unit": unit, "notice": "No data found for this period.", "result": []},
-            ensure_ascii=False,
-        )
-
-    records = json.loads(df.to_json(orient="records", force_ascii=False))
-    return json.dumps(
-        {"unit": unit, "period_count": len(records), "result": records},
-        ensure_ascii=False,
-    )
+    records = _records(df)
+    payload = {"unit": unit, "period_count": len(records), "result": records}
+    if not records:
+        payload["notice"] = "No data found for this period."
+    return json.dumps(payload, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
@@ -2161,8 +2569,8 @@ def _tool_get_trend_analysis(arguments: dict) -> str:
 
 
 def _tool_analyze_channel_risk(arguments: dict) -> str:
-    date_from = arguments.get("date_from")
-    date_to = arguments.get("date_to")
+    date_from = _opt_date(arguments, "date_from")
+    date_to = _opt_date(arguments, "date_to")
 
     try:
         result = _analyze_channel_risk(date_from=date_from, date_to=date_to)
@@ -2171,11 +2579,6 @@ def _tool_analyze_channel_risk(arguments: dict) -> str:
             {"error": f"Channel risk analysis error: {str(exc)}"},
             ensure_ascii=False,
         )
-
-    # Convert media type codes to English labels
-    for item in result.get("channel_stats", []):
-        code = item.get("media_type")
-        item["channel_name"] = _MEDIA_TYPE_MAP.get(int(code) if code is not None else 0, f"Code {code}")
 
     return json.dumps(result, ensure_ascii=False)
 
@@ -2186,14 +2589,7 @@ def _tool_analyze_channel_risk(arguments: dict) -> str:
 
 
 def _tool_get_receiving_account_profile(arguments: dict) -> str:
-    account_id = arguments.get("account_id")
-    if account_id is None:
-        return json.dumps({"error": "account_id is required."}, ensure_ascii=False)
-
-    try:
-        aid = int(account_id)
-    except (TypeError, ValueError):
-        return json.dumps({"error": "account_id must be an integer."}, ensure_ascii=False)
+    aid = _req_int(arguments, "account_id")
 
     try:
         result = _get_receiving_account_profile(aid)
@@ -2212,10 +2608,10 @@ def _tool_get_receiving_account_profile(arguments: dict) -> str:
 
 
 def _tool_analyze_cross_institution_flow(arguments: dict) -> str:
-    date_from = arguments.get("date_from")
-    date_to = arguments.get("date_to")
-    min_transactions = int(arguments.get("min_transactions", 10))
-    limit = min(int(arguments.get("limit", 20)), 100)
+    date_from = _opt_date(arguments, "date_from")
+    date_to = _opt_date(arguments, "date_to")
+    min_transactions = _opt_int(arguments, "min_transactions", 10)
+    limit = _limit(arguments)
 
     try:
         df = _analyze_cross_institution_flow(
@@ -2228,17 +2624,11 @@ def _tool_analyze_cross_institution_flow(arguments: dict) -> str:
             ensure_ascii=False,
         )
 
-    if df.empty:
-        return json.dumps(
-            {"notice": "No significant inter-institution flows found matching criteria.", "result": []},
-            ensure_ascii=False,
-        )
-
-    records = json.loads(df.to_json(orient="records", force_ascii=False))
-    return json.dumps(
-        {"min_transactions": min_transactions, "count": len(records), "result": records},
-        ensure_ascii=False,
-    )
+    records = _records(df)
+    payload = {"min_transactions": min_transactions, "count": len(records), "result": records}
+    if not records:
+        payload["notice"] = "No significant inter-institution flows found matching criteria."
+    return json.dumps(payload, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
@@ -2249,12 +2639,21 @@ def _tool_analyze_cross_institution_flow(arguments: dict) -> str:
 def _tool_lookup_fiu_reference_types(arguments: dict) -> str:
     keyword = arguments.get("keyword") or ""
     industry = arguments.get("industry")
+    if industry is not None and industry not in ("banking", "securities"):
+        return json.dumps(
+            {"error": "industry must be 'banking' or 'securities', or be omitted."},
+            ensure_ascii=False,
+        )
 
     results = lookup_fiu_reference_types(keyword, industry)
-    return json.dumps(
-        {"keyword": keyword, "count": len(results), "result": results},
-        ensure_ascii=False,
-    )
+    payload = {"keyword": keyword, "industry": industry, "count": len(results), "result": results}
+    if not results:
+        payload["notice"] = (
+            "No catalog entry contains this keyword. The catalog is in English; "
+            "try a term such as structuring, cash, non-face-to-face, virtual asset or dormancy, "
+            "or call the tool without a keyword to list every entry."
+        )
+    return json.dumps(payload, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------
@@ -2281,7 +2680,10 @@ def _tool_get_aml_glossary(arguments: dict) -> str:
     result = get_aml_glossary(term)
     if result is None:
         return json.dumps(
-            {"error": f"Term '{term}' not found.", "notice": "Try searching for CDD, EDD, STR, CTR, RBA, PEP, MLRO, FATF, FIU, structuring, layering, etc."},
+            {
+                "error": f"Term '{term}' not found.",
+                "available_terms": glossary_terms(),
+            },
             ensure_ascii=False,
         )
     return json.dumps(result, ensure_ascii=False)

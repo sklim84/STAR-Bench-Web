@@ -1,4 +1,10 @@
-"""Feature 2: Network (Graph) Analysis Query and Graph Construction Module."""
+"""Feature 2: Network (Graph) Analysis Query and Graph Construction Module.
+
+Everything here runs on the released DuckDB file, with NetworkX for the path
+and cycle searches. Nothing requires a graph server: the Memgraph-backed
+versions of the AML patterns reported themselves unavailable in every recorded
+benchmark run, because no evaluation host ran Memgraph.
+"""
 
 import logging
 
@@ -7,7 +13,6 @@ import pandas as pd
 import streamlit as st
 
 from src.data.db import query
-from src.data import graph_db
 from src.features.aml_reference import FRAUD_TYPE_MAP, FUND_TYPE_MAP
 
 logger = logging.getLogger(__name__)
@@ -51,48 +56,47 @@ def get_fraud_account_network(limit: int = 500) -> pd.DataFrame:
     return df
 
 
-def get_account_ego_network(account_id: int, hops: int = 1) -> pd.DataFrame:
-    """Returns the ego network (n-hop neighbors) of a specific account."""
-    account_id = int(account_id)
-    if hops == 1:
-        return query(
-            """
-            SELECT
-                sender_acc as source,
-                receiver_acc as target,
-                count(*) as tx_count,
-                sum(amount) as total_amount,
-                max(is_fraud) as is_fraud
-            FROM hofinet
-            WHERE sender_acc = ?
-               OR receiver_acc = ?
-            GROUP BY source, target
-            """,
-            [account_id, account_id],
-        )
-    # 2-hop: Includes transactions of 1-hop neighbors
-    return query(f"""
-        WITH hop1 AS (
-            SELECT DISTINCT
-                CASE WHEN sender_acc = {account_id}
-                     THEN receiver_acc ELSE sender_acc END as neighbor
-            FROM hofinet
-            WHERE sender_acc = {account_id}
-               OR receiver_acc = {account_id}
-        )
-        SELECT
-            sender_acc as source,
-            receiver_acc as target,
-            count(*) as tx_count,
-            sum(amount) as total_amount,
-            max(is_fraud) as is_fraud
+def _ego_nodes(account_id: int, hops: int) -> list[int]:
+    """Accounts within hops-1 steps of the centre; their transfers form the ego network."""
+    nodes = {int(account_id)}
+    frontier = [int(account_id)]
+    for _ in range(max(1, int(hops)) - 1):
+        new = [n for n in _account_neighbors(frontier) if n not in nodes]
+        if not new:
+            break
+        nodes.update(new)
+        frontier = new
+    return sorted(nodes)
+
+
+def get_account_ego_network(account_id: int, hops: int = 1,
+                            edge_limit: int | None = None) -> pd.DataFrame:
+    """Returns the ego network (n-hop neighbours) of a specific account.
+
+    hops=1 is every transfer that touches the account; each further hop adds the
+    transfers of the accounts reached so far. Every depth up to 5 runs on
+    DuckDB, where the Memgraph path this replaces silently fell back to 2 hops.
+    fraud_tx_count counts fraud transactions per edge, not edges with any fraud.
+    """
+    nodes = _ego_nodes(account_id, hops)
+    limit_sql = f"LIMIT {int(edge_limit)}" if edge_limit else ""
+    return query(
+        f"""
+        SELECT sender_acc AS source,
+               receiver_acc AS target,
+               COUNT(*)::BIGINT AS tx_count,
+               COALESCE(SUM(amount), 0)::BIGINT AS total_amount,
+               COALESCE(SUM(is_fraud), 0)::BIGINT AS fraud_tx_count,
+               MAX(is_fraud)::BIGINT AS is_fraud
         FROM hofinet
-        WHERE sender_acc = {account_id}
-           OR receiver_acc = {account_id}
-           OR sender_acc IN (SELECT neighbor FROM hop1)
-           OR receiver_acc IN (SELECT neighbor FROM hop1)
+        WHERE sender_acc IN (SELECT unnest($ids))
+           OR receiver_acc IN (SELECT unnest($ids))
         GROUP BY source, target
-    """)
+        ORDER BY tx_count DESC, source, target
+        {limit_sql}
+        """,
+        {"ids": nodes},
+    )
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -297,336 +301,493 @@ def get_extended_network_stats(G: nx.DiGraph) -> dict:
 
 
 # ==================================================================
-# Memgraph Cypher-based AML Pattern Detection Functions
+# AML Pattern Detection (DuckDB + NetworkX)
 # ==================================================================
-# Graceful degradation if Memgraph is not running: returns empty DF/dict + warning log.
-# TRANSFER edge attributes: date, time_slot, fund_type, medium_type, amount,
-#                           is_fraud, fraud_type
-# Account node attributes: id, company_id
-# ------------------------------------------------------------------
+# These patterns used to be Cypher queries against Memgraph, which no
+# evaluation host ran, so every call reported itself unavailable. They now run
+# on the released DuckDB file: the fraud-labelled transfer graph is small
+# (about 10k distinct sender->receiver pairs), so NetworkX handles the path
+# searches, and the wider searches are DuckDB queries.
+#
+# What HOFINET contains, measured on the released Parquet:
+# * the transfer graph is acyclic -- longest directed path 4 edges over all
+#   transactions, 2 edges over fraud-labelled ones -- so ring (a cycle) and
+#   layering (a chain of at least 3 fraud transfers) have no matches in this
+#   dataset, whatever the parameters;
+# * only 414 of 452,810 accounts appear both as sender and as receiver, so
+#   funnel -- which requires an account to receive from many accounts and send
+#   on to a few -- matches only those accounts, and none at the default
+#   min_inflow 10 / max_outflow 3.
+# The tools return that as a notice rather than as "Memgraph is not running".
+
+_PATH_SEARCH_MAX_FRONTIER = 200_000
+_LAYERING_EXPANSION_BUDGET = 200_000
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def detect_ring_transactions(min_len: int = 3, max_len: int = 6, min_amount: int = 0, limit: int = 100) -> pd.DataFrame:
-    """Detects circular fund transfer patterns (rings).
+def get_fraud_edges() -> pd.DataFrame:
+    """Returns one row per sender->receiver pair with fraud-labelled transfers."""
+    return query("""
+        SELECT sender_acc AS source,
+               receiver_acc AS target,
+               COUNT(*)::BIGINT AS tx_count,
+               COALESCE(SUM(amount), 0)::BIGINT AS total_amount,
+               MIN(date) AS first_date,
+               MAX(date) AS last_date
+        FROM hofinet
+        WHERE is_fraud = 1
+        GROUP BY source, target
+        ORDER BY source, target
+    """)
 
-    Searches for A->B->C->...->A circular transaction patterns, a core money laundering pattern,
-    using graph traversal. Only relations marked as fraud are explored.
 
-    Parameters
-    ----------
-    min_len : int
-        Minimum length of the circular path (default 3).
-    max_len : int
-        Maximum length of the circular path (default 6).
-    min_amount : int
-        Minimum total transaction amount filter within the ring (default 0).
-    limit : int
-        Maximum number of results to return (default 100).
+def build_fraud_graph() -> nx.DiGraph:
+    """Builds the directed graph of fraud-labelled transfers."""
+    df = get_fraud_edges()
+    G = nx.DiGraph()
+    for row in df.itertuples(index=False):
+        G.add_edge(
+            int(row.source), int(row.target),
+            tx_count=int(row.tx_count),
+            total_amount=int(row.total_amount),
+            first_date=int(row.first_date),
+            last_date=int(row.last_date),
+        )
+    return G
+
+
+def detect_ring_transactions(min_len: int = 3, max_len: int = 6, min_amount: int = 0,
+                             limit: int = 100, account_id: int | None = None) -> pd.DataFrame:
+    """Detects circular fund transfer patterns (rings) among fraud transfers.
+
+    Searches for A->B->C->...->A cycles of min_len to max_len transfers where
+    every transfer is fraud-labelled.
 
     Returns
     -------
     pd.DataFrame
         Columns: ring_accounts, ring_size, total_amount, dates
-        Returns empty DataFrame if Memgraph is not running.
     """
-    empty = pd.DataFrame(columns=["ring_accounts", "ring_size", "total_amount", "dates"])
-
-    if not graph_db.is_available():
-        logger.warning("Unable to detect ring transactions as Memgraph is not running.")
-        return empty
-
-    min_len = int(min_len)
-    max_len = int(max_len)
+    min_len = max(2, int(min_len))
+    max_len = max(min_len, int(max_len))
     min_amount = int(min_amount)
     limit = int(limit)
 
-    cypher = f"""
-        MATCH p=(a:Account)-[:TRANSFER*{min_len}..{max_len}]->(a)
-        WHERE ALL(r IN relationships(p) WHERE r.is_fraud = 1)
-        WITH [n IN nodes(p) | n.id] AS ring_accounts,
-             [r IN relationships(p) | r.amount] AS amounts,
-             [r IN relationships(p) | r.date] AS dates,
-             size(relationships(p)) AS ring_size,
-             reduce(s = 0, r IN relationships(p) | s + r.amount) AS total_amount
-        WHERE total_amount >= {min_amount}
-        RETURN ring_accounts, ring_size, total_amount, dates
-        ORDER BY total_amount DESC
-        LIMIT {limit}
-    """
-
-    records = graph_db.execute(cypher)
-    if not records:
-        return empty
-
+    G = build_fraud_graph()
     rows = []
-    for rec in records:
+    for cycle in nx.simple_cycles(G, length_bound=max_len):
+        if len(cycle) < min_len:
+            continue
+        if account_id is not None and int(account_id) not in cycle:
+            continue
+        edges = [(cycle[i], cycle[(i + 1) % len(cycle)]) for i in range(len(cycle))]
+        total_amount = sum(G[u][v]["total_amount"] for u, v in edges)
+        if total_amount < min_amount:
+            continue
         rows.append({
-            "ring_accounts": rec.get("ring_accounts", []),
-            "ring_size": rec.get("ring_size", 0),
-            "total_amount": rec.get("total_amount", 0),
-            "dates": rec.get("dates", []),
+            "ring_accounts": [int(n) for n in cycle],
+            "ring_size": len(cycle),
+            "total_amount": int(total_amount),
+            "dates": [int(G[u][v]["first_date"]) for u, v in edges],
         })
-    return pd.DataFrame(rows)
+
+    if not rows:
+        return pd.DataFrame(columns=["ring_accounts", "ring_size", "total_amount", "dates"])
+    rows.sort(key=lambda r: (-r["total_amount"], r["ring_accounts"]))
+    return pd.DataFrame(rows[:limit])
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def detect_layering_patterns(min_layers: int = 3, limit: int = 100) -> pd.DataFrame:
-    """Detects multi-stage layering patterns.
+def detect_layering_patterns(min_layers: int = 3, limit: int = 100,
+                             account_id: int | None = None) -> pd.DataFrame:
+    """Detects multi-stage layering patterns among fraud transfers.
 
-    Searches for multi-stage fund movement patterns from a source account through 
-    intermediaries to a destination account (A->B->C->...->Z).
-    Only relations marked as fraud are explored.
-
-    Parameters
-    ----------
-    min_layers : int
-        Minimum number of layers (intermediate steps) (default 3).
-    limit : int
-        Maximum number of results to return (default 100).
+    A layering chain is a path source -> ... -> destination of at least
+    min_layers fraud-labelled transfers with no repeated account.
 
     Returns
     -------
     pd.DataFrame
         Columns: source_account, destination_account, path_accounts, layers, total_amount
-        Returns empty DataFrame if Memgraph is not running.
     """
-    empty = pd.DataFrame(columns=[
-        "source_account", "destination_account", "path_accounts",
-        "layers", "total_amount",
-    ])
-
-    if not graph_db.is_available():
-        logger.warning("Unable to detect layering patterns as Memgraph is not running.")
-        return empty
-
-    min_layers = int(min_layers)
+    min_layers = max(1, int(min_layers))
+    max_layers = min_layers + 3
     limit = int(limit)
 
-    cypher = f"""
-        MATCH p=(src:Account)-[:TRANSFER*{min_layers}..]->(dst:Account)
-        WHERE src <> dst
-          AND ALL(r IN relationships(p) WHERE r.is_fraud = 1)
-        WITH src, dst,
-             [n IN nodes(p) | n.id] AS path_accounts,
-             size(relationships(p)) AS layers,
-             reduce(s = 0, r IN relationships(p) | s + r.amount) AS total_amount
-        WHERE layers >= {min_layers}
-        RETURN src.id AS source_account,
-               dst.id AS destination_account,
-               path_accounts,
-               layers,
-               total_amount
-        ORDER BY layers DESC, total_amount DESC
-        LIMIT {limit}
-    """
-
-    records = graph_db.execute(cypher)
-    if not records:
-        return empty
-
+    G = build_fraud_graph()
     rows = []
-    for rec in records:
-        rows.append({
-            "source_account": rec.get("source_account"),
-            "destination_account": rec.get("destination_account"),
-            "path_accounts": rec.get("path_accounts", []),
-            "layers": rec.get("layers", 0),
-            "total_amount": rec.get("total_amount", 0),
-        })
-    return pd.DataFrame(rows)
+    budget = _LAYERING_EXPANSION_BUDGET
+
+    for start in sorted(G.nodes):
+        stack = [([start], 0)]
+        while stack:
+            path, amount = stack.pop()
+            budget -= 1
+            if budget <= 0:
+                break
+            layers = len(path) - 1
+            if layers >= min_layers and (account_id is None or int(account_id) in path):
+                rows.append({
+                    "source_account": int(path[0]),
+                    "destination_account": int(path[-1]),
+                    "path_accounts": [int(n) for n in path],
+                    "layers": layers,
+                    "total_amount": int(amount),
+                })
+            if layers >= max_layers:
+                continue
+            for nxt in sorted(G.successors(path[-1]), reverse=True):
+                if nxt in path:
+                    continue
+                stack.append((path + [nxt], amount + G[path[-1]][nxt]["total_amount"]))
+        if budget <= 0:
+            break
+
+    columns = ["source_account", "destination_account", "path_accounts", "layers", "total_amount"]
+    if not rows:
+        return pd.DataFrame(columns=columns)
+    rows.sort(key=lambda r: (-r["layers"], -r["total_amount"], r["path_accounts"]))
+    return pd.DataFrame(rows[:limit], columns=columns)
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def detect_funnel_accounts(min_inflow: int = 10, max_outflow: int = 3, limit: int = 100) -> pd.DataFrame:
-    """Detects primary account (funnel) patterns.
+def detect_funnel_accounts(min_inflow: int = 10, max_outflow: int = 3, limit: int = 100,
+                           account_id: int | None = None) -> pd.DataFrame:
+    """Detects funnel (collect-and-forward) accounts.
 
-    Searches for suspicious accounts that receive deposits from many accounts (inflow) 
-    and withdraw to a few accounts (outflow). A higher funnel_ratio indicates higher suspicion.
-
-    Parameters
-    ----------
-    min_inflow : int
-        Minimum number of inflow accounts (default 10).
-    max_outflow : int
-        Maximum number of outflow accounts (default 3).
-    limit : int
-        Maximum number of results to return (default 100).
+    An account qualifies when it receives from at least min_inflow distinct
+    accounts and sends on to between 1 and max_outflow distinct accounts. An
+    account with no outgoing transfer is not a funnel: it is a plain receiver,
+    which most HOFINET accounts are.
 
     Returns
     -------
     pd.DataFrame
         Columns: account_id, inflow_count, inflow_amount, outflow_count,
-              outflow_amount, funnel_ratio
-        Returns empty DataFrame if Memgraph is not running.
+        outflow_amount, funnel_ratio
     """
-    empty = pd.DataFrame(columns=[
-        "account_id", "inflow_count", "inflow_amount",
-        "outflow_count", "outflow_amount", "funnel_ratio",
-    ])
-
-    if not graph_db.is_available():
-        logger.warning("Unable to detect funnel patterns as Memgraph is not running.")
-        return empty
-
     min_inflow = int(min_inflow)
-    max_outflow = int(max_outflow)
+    max_outflow = max(1, int(max_outflow))
     limit = int(limit)
+    account_filter = f"AND account_id = {int(account_id)}" if account_id is not None else ""
 
-    cypher = f"""
-        MATCH (s:Account)-[r1:TRANSFER]->(funnel:Account)
-        WITH funnel,
-             count(DISTINCT s) AS inflow_count,
-             sum(r1.amount) AS inflow_amount
-        WHERE inflow_count >= {min_inflow}
-        OPTIONAL MATCH (funnel)-[r2:TRANSFER]->(d:Account)
-        WITH funnel, inflow_count, inflow_amount,
-             count(DISTINCT d) AS outflow_count,
-             coalesce(sum(r2.amount), 0) AS outflow_amount
-        WHERE outflow_count <= {max_outflow}
-        RETURN funnel.id AS account_id,
-               inflow_count,
-               inflow_amount,
-               outflow_count,
-               outflow_amount,
-               inflow_count * 1.0 / CASE WHEN outflow_count = 0
-                   THEN 1 ELSE outflow_count END AS funnel_ratio
-        ORDER BY funnel_ratio DESC
-        LIMIT {limit}
-    """
-
-    records = graph_db.execute(cypher)
-    if not records:
-        return empty
-
-    rows = []
-    for rec in records:
-        rows.append({
-            "account_id": rec.get("account_id"),
-            "inflow_count": rec.get("inflow_count", 0),
-            "inflow_amount": rec.get("inflow_amount", 0),
-            "outflow_count": rec.get("outflow_count", 0),
-            "outflow_amount": rec.get("outflow_amount", 0),
-            "funnel_ratio": round(float(rec.get("funnel_ratio", 0)), 2),
-        })
-    return pd.DataFrame(rows)
-
-
-def get_account_ego_network_deep(account_id: int, hops: int = 3) -> pd.DataFrame:
-    """Extracts a deep ego network from Memgraph.
-
-    Extracts a subgraph consisting of neighbor accounts up to N hops centered on a 
-    specified account, along with their transaction relationships. 
-    Allows deeper exploration than get_account_ego_network (up to 5 hops).
-
-    Falls back to get_account_ego_network (DuckDB-based, up to 2 hops) if Memgraph is not running.
-
-    Parameters
-    ----------
-    account_id : int
-        Center account ID.
-    hops : int
-        Exploration depth (default 3, max 5).
-
-    Returns
-    -------
-    pd.DataFrame
-        Columns: source, target, tx_count, total_amount, is_fraud
-        Same schema as get_account_ego_network.
-    """
-    account_id = int(account_id)
-    hops = min(int(hops), 5)
-
-    if not graph_db.is_available():
-        logger.warning(
-            "Deep ego network exploration unavailable as Memgraph is not running (falling back to DuckDB, max 2 hops)."
+    return query(f"""
+        WITH inflow AS (
+            SELECT receiver_acc AS account_id,
+                   COUNT(DISTINCT sender_acc)::BIGINT AS inflow_count,
+                   COALESCE(SUM(amount), 0)::BIGINT AS inflow_amount
+            FROM hofinet
+            GROUP BY receiver_acc
+            HAVING COUNT(DISTINCT sender_acc) >= {min_inflow}
+        ),
+        outflow AS (
+            SELECT sender_acc AS account_id,
+                   COUNT(DISTINCT receiver_acc)::BIGINT AS outflow_count,
+                   COALESCE(SUM(amount), 0)::BIGINT AS outflow_amount
+            FROM hofinet
+            GROUP BY sender_acc
         )
-        fallback_hops = min(hops, 2)
-        return get_account_ego_network(account_id, hops=fallback_hops)
-
-    cypher = f"""
-        MATCH p=(center:Account {{id: $account_id}})-[:TRANSFER*1..{hops}]-(neighbor)
-        WITH collect(DISTINCT neighbor) + [center] AS all_nodes
-        MATCH (center:Account {{id: $account_id}})
-        WITH all_nodes, center
-        UNWIND all_nodes AS n
-        WITH collect(DISTINCT n) AS all_nodes
-        UNWIND all_nodes AS n
-        MATCH (n)-[r:TRANSFER]->(m)
-        WHERE m IN all_nodes
-        RETURN startNode(r).id AS source,
-               endNode(r).id AS target,
-               count(r) AS tx_count,
-               sum(r.amount) AS total_amount,
-               max(r.is_fraud) AS is_fraud
-    """
-
-    df = graph_db.execute_df(cypher, {"account_id": account_id})
-    if df.empty:
-        logger.info("Memgraph results empty, falling back to DuckDB.")
-        fallback_hops = min(hops, 2)
-        return get_account_ego_network(account_id, hops=fallback_hops)
-
-    return df
+        SELECT i.account_id,
+               i.inflow_count,
+               i.inflow_amount,
+               o.outflow_count,
+               o.outflow_amount,
+               ROUND(i.inflow_count * 1.0 / o.outflow_count, 2) AS funnel_ratio
+        FROM inflow i
+        JOIN outflow o USING (account_id)
+        WHERE o.outflow_count BETWEEN 1 AND {max_outflow}
+        {account_filter}
+        ORDER BY funnel_ratio DESC, inflow_amount DESC, account_id
+        LIMIT {limit}
+    """)
 
 
-def find_shortest_path(account_a: int, account_b: int) -> dict:
-    """Finds the shortest transaction path between two accounts.
+def _neighbor_pairs(nodes: list[int]) -> pd.DataFrame:
+    """Returns (node, neighbour) pairs for a frontier, ignoring transfer direction."""
+    return query(
+        """
+        SELECT DISTINCT sender_acc AS node, receiver_acc AS neighbor
+        FROM hofinet WHERE sender_acc IN (SELECT unnest($ids))
+        UNION
+        SELECT DISTINCT receiver_acc AS node, sender_acc AS neighbor
+        FROM hofinet WHERE receiver_acc IN (SELECT unnest($ids))
+        """,
+        {"ids": [int(n) for n in nodes]},
+    ).sort_values(["neighbor", "node"])
 
-    Uses Memgraph's shortestPath algorithm to find the path with the minimum number of hops.
 
-    Parameters
-    ----------
-    account_a : int
-        Source account ID.
-    account_b : int
-        Destination account ID.
+def _account_neighbors(nodes: list[int]) -> list[int]:
+    df = _neighbor_pairs(nodes)
+    return [int(v) for v in df["neighbor"].unique()]
+
+
+def find_shortest_path(account_a: int, account_b: int, max_hops: int = 6) -> dict:
+    """Finds the shortest transfer path between two accounts.
+
+    Transfers are followed in either direction, as the Memgraph version did.
+    The search runs from both ends and stops at max_hops.
 
     Returns
     -------
     dict
-        {"path": [AccountID, ...], "hops": int, "amounts": [...], "dates": [...]}
-        If Memgraph is not running: {"error": "..."}
-        If no path exists: {"path": [], "hops": 0, "amounts": [], "dates": []}
+        {"path": [account ids], "hops": int, "edges": [...]} -- an empty path
+        with a notice when the accounts are not connected within max_hops.
     """
-    account_a = int(account_a)
-    account_b = int(account_b)
+    a, b = int(account_a), int(account_b)
+    max_hops = max(1, int(max_hops))
 
-    if not graph_db.is_available():
-        logger.warning("Unable to find shortest path as Memgraph is not running.")
-        return {"error": "Unable to find shortest path as Memgraph is not running."}
+    if a == b:
+        return {"path": [a], "hops": 0, "edges": []}
 
-    cypher = """
-        MATCH p=shortestPath(
-            (a:Account {id: $account_a})-[:TRANSFER*]-(b:Account {id: $account_b})
-        )
-        RETURN [n IN nodes(p) | n.id] AS path,
-               size(relationships(p)) AS hops,
-               [r IN relationships(p) | r.amount] AS amounts,
-               [r IN relationships(p) | r.date] AS dates
-    """
+    parents = [{a: None}, {b: None}]
+    frontiers = [[a], [b]]
+    hops = 0
 
-    records = graph_db.execute(cypher, {
-        "account_a": account_a,
-        "account_b": account_b,
-    })
+    while hops < max_hops and frontiers[0] and frontiers[1]:
+        side = 0 if len(frontiers[0]) <= len(frontiers[1]) else 1
+        if len(frontiers[side]) > _PATH_SEARCH_MAX_FRONTIER:
+            return {
+                "path": [], "hops": 0, "edges": [],
+                "notice": "Search stopped: the neighbourhood of these accounts is too large.",
+            }
+        pairs = _neighbor_pairs(frontiers[side])
+        next_frontier = []
+        for row in pairs.itertuples(index=False):
+            node, neighbor = int(row.node), int(row.neighbor)
+            if neighbor in parents[side]:
+                continue
+            parents[side][neighbor] = node
+            next_frontier.append(neighbor)
+        frontiers[side] = next_frontier
+        hops += 1
 
-    if not records:
-        return {"path": [], "hops": 0, "amounts": [], "dates": []}
+        meeting = sorted(set(parents[0]) & set(parents[1]))
+        if meeting:
+            node = meeting[0]
+            left = []
+            cur = node
+            while cur is not None:
+                left.append(cur)
+                cur = parents[0][cur]
+            right = []
+            cur = parents[1][node]
+            while cur is not None:
+                right.append(cur)
+                cur = parents[1][cur]
+            path = list(reversed(left)) + right
+            return {
+                "path": path,
+                "hops": len(path) - 1,
+                "edges": _path_edges(path),
+            }
 
-    rec = records[0]
     return {
-        "path": rec.get("path", []),
-        "hops": rec.get("hops", 0),
-        "amounts": rec.get("amounts", []),
-        "dates": rec.get("dates", []),
+        "path": [], "hops": 0, "edges": [],
+        "notice": f"No transfer path between the accounts within {max_hops} hops.",
     }
+
+
+def _path_edges(path: list[int]) -> list[dict]:
+    """Summarises the transfers behind each step of a path."""
+    edges = []
+    for left, right in zip(path, path[1:]):
+        df = query(
+            """
+            SELECT CASE WHEN sender_acc = $left THEN 'forward' ELSE 'reverse' END AS direction,
+                   COUNT(*)::BIGINT AS tx_count,
+                   COALESCE(SUM(amount), 0)::BIGINT AS total_amount,
+                   COALESCE(SUM(is_fraud), 0)::BIGINT AS fraud_count,
+                   MIN(date) AS first_date,
+                   MAX(date) AS last_date
+            FROM hofinet
+            WHERE (sender_acc = $left AND receiver_acc = $right)
+               OR (sender_acc = $right AND receiver_acc = $left)
+            GROUP BY direction
+            ORDER BY direction
+            """,
+            {"left": int(left), "right": int(right)},
+        )
+        for row in df.itertuples(index=False):
+            edges.append({
+                "from": int(left) if row.direction == "forward" else int(right),
+                "to": int(right) if row.direction == "forward" else int(left),
+                "tx_count": int(row.tx_count),
+                "total_amount": int(row.total_amount),
+                "fraud_count": int(row.fraud_count),
+                "first_date": int(row.first_date),
+                "last_date": int(row.last_date),
+            })
+    return edges
+
+
+def get_account_ego_network_deep(account_id: int, hops: int = 3,
+                                 edge_limit: int = 500) -> pd.DataFrame:
+    """Returns the ego network of an account up to 5 hops.
+
+    Same schema as get_account_ego_network; the busiest edge_limit edges are
+    returned so the result stays displayable.
+    """
+    return get_account_ego_network(account_id, hops=min(int(hops), 5), edge_limit=edge_limit)
+
+
+def summarize_account_network(account_id: int, hops: int = 1) -> dict:
+    """Aggregates the ego network of an account without materialising its edges.
+
+    Counts are over transactions, not over edges: fraud_tx_count used to be the
+    number of sender/receiver pairs with at least one fraud transfer, which
+    understated the top account by a factor of five.
+    """
+    aid = int(account_id)
+    hops = max(1, min(int(hops), 5))
+
+    nodes = _ego_nodes(aid, hops)
+    row = query(
+        """
+        SELECT COUNT(*)::BIGINT AS total_tx_count,
+               COALESCE(SUM(is_fraud), 0)::BIGINT AS fraud_tx_count,
+               COALESCE(SUM(amount), 0)::BIGINT AS total_amount
+        FROM hofinet
+        WHERE sender_acc IN (SELECT unnest($ids)) OR receiver_acc IN (SELECT unnest($ids))
+        """,
+        {"ids": nodes},
+    ).iloc[0]
+
+    counterparts = query(
+        """
+        SELECT account_id, SUM(tx_count)::BIGINT AS tx_count FROM (
+            SELECT receiver_acc AS account_id, COUNT(*) AS tx_count
+            FROM hofinet WHERE sender_acc IN (SELECT unnest($ids)) GROUP BY receiver_acc
+            UNION ALL
+            SELECT sender_acc, COUNT(*)
+            FROM hofinet WHERE receiver_acc IN (SELECT unnest($ids)) GROUP BY sender_acc
+        )
+        WHERE account_id NOT IN (SELECT unnest($center))
+        GROUP BY account_id
+        ORDER BY tx_count DESC, account_id
+        """,
+        {"ids": nodes, "center": [aid]},
+    )
+    connected = set(counterparts["account_id"].tolist()) | set(nodes)
+    connected.discard(aid)
+
+    return {
+        "connected_account_count": len(connected),
+        "total_tx_count": int(row["total_tx_count"]),
+        "fraud_tx_count": int(row["fraud_tx_count"]),
+        "total_amount": int(row["total_amount"]),
+        "connected_account_samples": [int(v) for v in counterparts["account_id"].head(10)],
+    }
+
+
+def compute_risk_score(account_id: int) -> dict:
+    """Calculates a composite graph-based risk score (0.0 to 1.0).
+
+    Weights: 0.4 the account's own fraud share, 0.3 the fraud share of its
+    counterparties' transactions, 0.2 participation in 3- or 4-step cycles,
+    0.1 the imbalance between incoming and outgoing transfers. The two fraud
+    components read HOFINET's fraud label.
+    """
+    aid = int(account_id)
+
+    own = query(
+        """
+        SELECT COUNT(*)::BIGINT AS total,
+               COALESCE(SUM(is_fraud), 0)::BIGINT AS fraud,
+               COUNT(*) FILTER (WHERE receiver_acc = $aid)::BIGINT AS in_count,
+               COUNT(*) FILTER (WHERE sender_acc = $aid)::BIGINT AS out_count
+        FROM hofinet WHERE sender_acc = $aid OR receiver_acc = $aid
+        """,
+        {"aid": aid},
+    ).iloc[0]
+    total = int(own["total"])
+    if total == 0:
+        return {
+            "account_id": aid,
+            "risk_score": 0.0,
+            "notice": "No transaction history for this account.",
+        }
+
+    fraud_ratio = int(own["fraud"]) / total
+    in_count, out_count = int(own["in_count"]), int(own["out_count"])
+    concentration = abs(in_count - out_count) / (in_count + out_count)
+
+    neighbors = _account_neighbors([aid])
+    neighbor_fraud_ratio = 0.0
+    if neighbors:
+        nrow = query(
+            """
+            SELECT COUNT(*)::BIGINT AS total, COALESCE(SUM(is_fraud), 0)::BIGINT AS fraud
+            FROM hofinet
+            WHERE sender_acc IN (SELECT unnest($ids)) OR receiver_acc IN (SELECT unnest($ids))
+            """,
+            {"ids": neighbors},
+        ).iloc[0]
+        if int(nrow["total"]):
+            neighbor_fraud_ratio = int(nrow["fraud"]) / int(nrow["total"])
+
+    cycle_count = _count_short_cycles(aid)
+    cycle_score = min(cycle_count / 5.0, 1.0)
+
+    risk_score = (
+        0.4 * fraud_ratio
+        + 0.3 * neighbor_fraud_ratio
+        + 0.2 * cycle_score
+        + 0.1 * concentration
+    )
+
+    return {
+        "account_id": aid,
+        "risk_score": round(risk_score, 4),
+        "components": {
+            "fraud_ratio_percent": round(fraud_ratio * 100, 4),
+            "neighbor_fraud_ratio_percent": round(neighbor_fraud_ratio * 100, 4),
+            "cycle_count": cycle_count,
+            "in_out_imbalance_percent": round(concentration * 100, 4),
+        },
+        "weights": {
+            "fraud_ratio": 0.4, "neighbor_fraud_ratio": 0.3,
+            "cycle": 0.2, "in_out_imbalance": 0.1,
+        },
+        "component_note": (
+            "fraud_ratio and neighbor_fraud_ratio are shares of transactions "
+            "labelled as fraud in HOFINET."
+        ),
+    }
+
+
+def _count_short_cycles(account_id: int) -> int:
+    """Counts 3- and 4-step cycles through an account."""
+    aid = int(account_id)
+    row = query(
+        """
+        WITH out1 AS (SELECT DISTINCT receiver_acc AS n FROM hofinet WHERE sender_acc = $aid AND receiver_acc <> $aid),
+             in1 AS (SELECT DISTINCT sender_acc AS n FROM hofinet WHERE receiver_acc = $aid AND sender_acc <> $aid),
+             step AS (
+                SELECT DISTINCT sender_acc AS s, receiver_acc AS r
+                FROM hofinet
+                WHERE sender_acc IN (SELECT n FROM out1) AND receiver_acc <> $aid
+             ),
+             len3 AS (
+                SELECT COUNT(*)::BIGINT AS c FROM step
+                WHERE r IN (SELECT n FROM in1)
+             ),
+             len4 AS (
+                SELECT COUNT(*)::BIGINT AS c
+                FROM step e1
+                JOIN (
+                    SELECT DISTINCT sender_acc AS s, receiver_acc AS r
+                    FROM hofinet
+                    WHERE receiver_acc IN (SELECT n FROM in1) AND sender_acc <> $aid
+                ) e2 ON e1.r = e2.s
+                WHERE e1.r NOT IN (SELECT n FROM in1)
+             )
+        SELECT (SELECT c FROM len3) + (SELECT c FROM len4) AS cycle_count
+        """,
+        {"aid": aid},
+    ).iloc[0]
+    return int(row["cycle_count"] or 0)
 
 
 def get_temporal_network(start_date: int, end_date: int, fraud_only: bool = True) -> pd.DataFrame:
     """Extracts the transaction network within a time window.
-
-    Extracts a network composed only of transactions within a specified period from Memgraph.
 
     Parameters
     ----------
@@ -641,163 +802,21 @@ def get_temporal_network(start_date: int, end_date: int, fraud_only: bool = True
     -------
     pd.DataFrame
         Columns: source, target, tx_count, total_amount, is_fraud
-        Returns empty DataFrame if Memgraph is not running.
     """
-    empty = pd.DataFrame(columns=["source", "target", "tx_count", "total_amount", "is_fraud"])
-
-    if not graph_db.is_available():
-        logger.warning("Unable to extract temporal network as Memgraph is not running.")
-        return empty
-
     start_date = int(start_date)
     end_date = int(end_date)
+    fraud_filter = "AND is_fraud = 1" if fraud_only else ""
 
-    fraud_filter = "AND r.is_fraud = 1" if fraud_only else ""
-
-    cypher = f"""
-        MATCH (a:Account)-[r:TRANSFER]->(b:Account)
-        WHERE r.date >= $start_date AND r.date <= $end_date
-              {fraud_filter}
-        RETURN a.id AS source, b.id AS target,
-               count(r) AS tx_count,
-               sum(r.amount) AS total_amount,
-               max(r.is_fraud) AS is_fraud
-        ORDER BY tx_count DESC
+    return query(f"""
+        SELECT sender_acc AS source,
+               receiver_acc AS target,
+               COUNT(*)::BIGINT AS tx_count,
+               COALESCE(SUM(amount), 0)::BIGINT AS total_amount,
+               MAX(is_fraud)::BIGINT AS is_fraud
+        FROM hofinet
+        WHERE date >= {start_date} AND date <= {end_date}
+          {fraud_filter}
+        GROUP BY source, target
+        ORDER BY tx_count DESC, source, target
         LIMIT 1000
-    """
-
-    df = graph_db.execute_df(cypher, {
-        "start_date": start_date,
-        "end_date": end_date,
-    })
-
-    if df.empty:
-        return empty
-
-    return df
-
-
-def compute_risk_score(account_id: int) -> dict:
-    """Calculates a composite graph-based risk score.
-
-    Computes an AML risk score (0.0 to 1.0) for a specific account by synthesizing 
-    various graph metrics. Weight composition:
-    - 0.4: Direct fraud ratio
-    - 0.3: Neighbor fraud ratio
-    - 0.2: Cycle participation score
-    - 0.1: Inflow/outflow concentration
-
-    Parameters
-    ----------
-    account_id : int
-        Account ID to analyze.
-
-    Returns
-    -------
-    dict
-        {
-            "account_id": int,
-            "risk_score": float (0.0 to 1.0),
-            "components": {
-                "fraud_ratio": float,
-                "neighbor_fraud_ratio": float,
-                "cycle_score": float,
-                "concentration_score": float,
-            }
-        }
-        If Memgraph is not running: {"risk_score": 0.0, "error": "..."}
-    """
-    account_id = int(account_id)
-
-    if not graph_db.is_available():
-        logger.warning("Unable to calculate risk score as Memgraph is not running.")
-        return {"account_id": account_id, "risk_score": 0.0, "error": "Memgraph not running"}
-
-    # 1) Direct fraud ratio
-    cypher_fraud = """
-        MATCH (a:Account {id: $account_id})-[r:TRANSFER]-()
-        WITH count(r) AS total_txn,
-             sum(CASE WHEN r.is_fraud = 1 THEN 1 ELSE 0 END) AS fraud_txn
-        RETURN total_txn, fraud_txn,
-               CASE WHEN total_txn = 0 THEN 0.0
-                    ELSE fraud_txn * 1.0 / total_txn END AS fraud_ratio
-    """
-    fraud_records = graph_db.execute(cypher_fraud, {"account_id": account_id})
-
-    if not fraud_records:
-        return {
-            "account_id": account_id,
-            "risk_score": 0.0,
-            "components": {
-                "fraud_ratio": 0.0,
-                "neighbor_fraud_ratio": 0.0,
-                "cycle_score": 0.0,
-                "concentration_score": 0.0,
-            },
-        }
-
-    fraud_ratio = float(fraud_records[0].get("fraud_ratio", 0.0))
-
-    # 2) Neighbor fraud ratio
-    cypher_neighbor = """
-        MATCH (a:Account {id: $account_id})-[:TRANSFER]-(neighbor:Account)
-        WITH collect(DISTINCT neighbor) AS neighbors
-        UNWIND neighbors AS nb
-        MATCH (nb)-[r:TRANSFER]-()
-        WITH count(r) AS neighbor_total,
-             sum(CASE WHEN r.is_fraud = 1 THEN 1 ELSE 0 END) AS neighbor_fraud
-        RETURN CASE WHEN neighbor_total = 0 THEN 0.0
-                    ELSE neighbor_fraud * 1.0 / neighbor_total END AS neighbor_fraud_ratio
-    """
-    neighbor_records = graph_db.execute(cypher_neighbor, {"account_id": account_id})
-    neighbor_fraud_ratio = 0.0
-    if neighbor_records:
-        neighbor_fraud_ratio = float(
-            neighbor_records[0].get("neighbor_fraud_ratio", 0.0)
-        )
-
-    # 3) Cycle participation score
-    cypher_cycle = """
-        MATCH p=(a:Account {id: $account_id})-[:TRANSFER*3..4]->(a)
-        RETURN count(p) AS cycle_count
-    """
-    cycle_records = graph_db.execute(cypher_cycle, {"account_id": account_id})
-    cycle_count = 0
-    if cycle_records:
-        cycle_count = int(cycle_records[0].get("cycle_count", 0))
-    cycle_score = min(cycle_count / 5.0, 1.0) if cycle_count > 0 else 0.0
-
-    # 4) Concentration score
-    cypher_concentration = """
-        MATCH (a:Account {id: $account_id})
-        OPTIONAL MATCH (a)<-[r_in:TRANSFER]-()
-        WITH a, count(r_in) AS in_count
-        OPTIONAL MATCH (a)-[r_out:TRANSFER]->()
-        WITH in_count, count(r_out) AS out_count
-        RETURN in_count, out_count,
-               CASE WHEN (in_count + out_count) = 0 THEN 0.0
-                    ELSE abs(in_count - out_count) * 1.0 / (in_count + out_count)
-               END AS concentration
-    """
-    conc_records = graph_db.execute(cypher_concentration, {"account_id": account_id})
-    concentration_score = 0.0
-    if conc_records:
-        concentration_score = float(conc_records[0].get("concentration", 0.0))
-
-    risk_score = (
-        0.4 * fraud_ratio
-        + 0.3 * neighbor_fraud_ratio
-        + 0.2 * cycle_score
-        + 0.1 * concentration_score
-    )
-
-    return {
-        "account_id": account_id,
-        "risk_score": round(risk_score, 4),
-        "components": {
-            "fraud_ratio": round(fraud_ratio, 4),
-            "neighbor_fraud_ratio": round(neighbor_fraud_ratio, 4),
-            "cycle_score": round(cycle_score, 4),
-            "concentration_score": round(concentration_score, 4),
-        },
-    }
+    """)

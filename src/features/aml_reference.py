@@ -111,15 +111,45 @@ _AML_GLOSSARY = {
 }
 
 # ---------------------------------------------------------------------------
-# STR 필수 필드 (08_STR_보고서양식.md 기반, 핵심만)
+# STR draft fields (08_STR_보고서양식.md).
+#
+# Section and field names are the ones `generate_str` writes and the ones the
+# tool description documents, so a draft built from either validates. Fields the
+# form asks for but HOFINET cannot supply -- names, identity documents, phone
+# numbers -- are optional: they are reported separately as items a person has to
+# fill in, instead of making every draft invalid.
 # ---------------------------------------------------------------------------
 
-_STR_REQUIRED_FIELDS = {
-    "Header": ["doc_no", "report_date"],
-    "I_Reporting_Institution": ["inst_name", "mlro_name", "officer_name", "officer_phone"],
-    "II_Trader_Common": ["name", "id_type", "id_no", "nationality"],
-    "III_Transaction_Details": ["tx_datetime", "channel", "medium", "type", "product", "currency", "acc_exists", "transfer_acc_exists", "agent_exists"],
+STR_REQUIRED_FIELDS = {
+    "Header": ["ReportingDate"],
+    "I_ReportingInstitution": ["WithdrawalInstitutionCode"],
+    "II_Transactor": ["WithdrawalAccountNumber", "ReceivingAccountNumber"],
+    "III_TransactionDetails": [
+        "TransactionPeriod", "TransactionCount", "TransactionChannel", "TotalAmount_KRW",
+    ],
+    "VI_TransactionType": ["PrimarySuspicionType"],
+    "VII_Narrative": ["SuspicionJudgmentReason"],
 }
+
+STR_OPTIONAL_FIELDS = {
+    "I_ReportingInstitution": ["InstitutionName", "MLROName", "OfficerName", "OfficerPhone"],
+    "II_Transactor": ["Name", "IdType", "IdNumber", "Nationality"],
+    "III_TransactionDetails": ["TransactionType", "MaxSingleAmount_KRW"],
+    "VII_Narrative": ["OverallOpinion", "SuspicionIntensity_1to5"],
+}
+
+# Section names earlier drafts used.
+_STR_SECTION_ALIASES = {
+    "I_Reporting_Institution": "I_ReportingInstitution",
+    "II_Trader_Common": "II_Transactor",
+    "II_Trader": "II_Transactor",
+    "III_Transaction_Details": "III_TransactionDetails",
+    "VI_Transaction_Type": "VI_TransactionType",
+    "VII_Narrative_Description": "VII_Narrative",
+}
+
+# Placeholders generate_str writes when a field could not be filled in.
+_STR_PLACEHOLDERS = {"unknown", "n/a", "none", "-"}
 
 
 # ---------------------------------------------------------------------------
@@ -186,18 +216,20 @@ def translate_fund_type(code: int) -> str:
 
 
 def lookup_fiu_reference_types(keyword: str, industry: str | None = None) -> list[dict]:
-    """Searches FIU suspicious transaction reference types by industry.
+    """Searches the FIU suspicious-transaction reference catalog.
+
+    The catalog is an English excerpt; matching is a case-insensitive substring
+    of the industry, category and description of each entry. An empty keyword
+    returns every entry of the selected industry.
 
     Args:
-        keyword: Search keyword (e.g., structuring, nighttime, non-face-to-face, virtual asset)
+        keyword: Search keyword (e.g., structuring, cash, dormant, virtual asset)
         industry: "banking" | "securities" | None (overall)
 
     Returns:
         List of matching reference types [{"industry", "category", "no", "description"}, ...]
     """
     keyword = (keyword or "").strip().lower()
-    if not keyword:
-        return []
 
     industry_map = {"banking": "Banking", "securities": "Securities", "bank": "Banking", "sec": "Securities"}
     filter_industry = industry_map.get(industry, industry) if industry else None
@@ -207,47 +239,104 @@ def lookup_fiu_reference_types(keyword: str, industry: str | None = None) -> lis
         if filter_industry and item["industry"] != filter_industry:
             continue
         text = f"{item['industry']} {item['category']} {item['description']}".lower()
-        if keyword in text:
+        if not keyword or keyword in text:
             results.append(dict(item))
     return results
 
 
-def validate_str_fields(str_draft: dict) -> dict:
-    """Performs required field validation for an STR draft.
+def _normalize_field(name: str) -> str:
+    return str(name).replace("_", "").replace(" ", "").lower()
 
-    Args:
-        str_draft: STR draft dict. Can be nested by section (e.g., {"I_Reporting_Institution": {"inst_name": "..."}})
+
+def _is_filled(value) -> bool:
+    """True when a draft field carries content rather than a placeholder."""
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip()) and value.strip().lower() not in _STR_PLACEHOLDERS
+    if isinstance(value, (list, tuple, set, dict)):
+        return any(_is_filled(v) for v in value) if not isinstance(value, dict) else bool(value)
+    return True
+
+
+def validate_str_fields(str_draft) -> dict:
+    """Checks an STR draft for the fields the report form requires.
+
+    Accepts the section layout `generate_str` produces (and the earlier
+    `I_Reporting_Institution` style names), a draft serialised as a JSON string,
+    and a flat draft with no sections. Field names are matched ignoring case and
+    underscores.
 
     Returns:
-        {"valid": bool, "missing_required": list[str], "sections_checked": list[str]}
+        {"valid", "missing_required", "missing_optional", "sections_checked"}
     """
-    missing = []
-    sections_checked = []
+    if isinstance(str_draft, str):
+        try:
+            str_draft = json.loads(str_draft)
+        except ValueError:
+            return {
+                "valid": False,
+                "error": "str_draft must be a JSON object, not free text.",
+                "missing_required": [],
+                "missing_optional": [],
+                "sections_checked": [],
+            }
+    if not isinstance(str_draft, dict):
+        return {
+            "valid": False,
+            "error": "str_draft must be a JSON object.",
+            "missing_required": [],
+            "missing_optional": [],
+            "sections_checked": [],
+        }
 
-    for section, fields in _STR_REQUIRED_FIELDS.items():
-        sections_checked.append(section)
-        data = str_draft
-        # Support nested keys (e.g., "I_Reporting_Institution" -> str_draft.get("I_Reporting_Institution") or str_draft)
-        if isinstance(data, dict) and section in data:
-            data = data[section]
-        if not isinstance(data, dict):
-            for f in fields:
-                missing.append(f"{section}.{f}")
-            continue
-        for f in fields:
-            val = data.get(f)
-            if val is None or (isinstance(val, str) and not val.strip()):
-                missing.append(f"{section}.{f}")
+    sections = {}
+    flat = {}
+    for key, value in str_draft.items():
+        canonical = _STR_SECTION_ALIASES.get(key, key)
+        if isinstance(value, dict):
+            sections[canonical] = {_normalize_field(k): v for k, v in value.items()}
+        else:
+            flat[_normalize_field(key)] = value
+
+    def _lookup(section: str, field: str):
+        data = sections.get(section, {})
+        key = _normalize_field(field)
+        if key in data:
+            return data[key]
+        return flat.get(key)
+
+    missing_required = [
+        f"{section}.{field}"
+        for section, fields in STR_REQUIRED_FIELDS.items()
+        for field in fields
+        if not _is_filled(_lookup(section, field))
+    ]
+    missing_optional = [
+        f"{section}.{field}"
+        for section, fields in STR_OPTIONAL_FIELDS.items()
+        for field in fields
+        if not _is_filled(_lookup(section, field))
+    ]
 
     return {
-        "valid": len(missing) == 0,
-        "missing_required": missing,
-        "sections_checked": sections_checked,
+        "valid": len(missing_required) == 0,
+        "missing_required": missing_required,
+        "missing_optional": missing_optional,
+        "sections_checked": list(STR_REQUIRED_FIELDS),
     }
+
+
+def glossary_terms() -> list[str]:
+    """Returns every term the glossary defines, in catalog order."""
+    return list(_AML_GLOSSARY)
 
 
 def get_aml_glossary(term: str) -> dict | None:
     """Returns the definition of an AML term.
+
+    The glossary holds 13 English entries and matches the term exactly, ignoring
+    case. There are no Korean aliases.
 
     Args:
         term: Term to lookup (CDD, EDD, STR, CTR, RBA, PEP, MLRO, etc.)

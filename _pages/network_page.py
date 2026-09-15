@@ -26,7 +26,6 @@ from src.features.network import (
     get_temporal_network,
     compute_risk_score,
 )
-from src.data import graph_db
 
 from src.ui.chart_utils import (
     BAR_COLOR, LINE_COLOR, ACCENT_COLOR, MINT_COLOR,
@@ -339,9 +338,6 @@ def _render_tab_account_explorer():
     selected = st.selectbox("Select fraud-related account", options=account_list[:100], key="account_select")
     hops = st.slider("Exploration range (hops)", 1, 5, 2, key="hop_select")
 
-    if hops > 2 and not graph_db.is_available():
-        st.info("3+ hop exploration requires Memgraph. Falling back to DuckDB (up to 2 hops).")
-
     if selected:
         with st.spinner(f"Exploring {hops}-hop network for account {selected}..."):
             ego_df = get_account_ego_network_deep(selected, hops=hops) if hops > 2 else get_account_ego_network(selected, hops=hops)
@@ -408,25 +404,11 @@ def _format_amount(amount):
 
 
 # ------------------------------------------------------------------
-# Tab 5: AML Pattern Detection (Memgraph)
+# Tab 5: AML Pattern Detection
 # ------------------------------------------------------------------
-
-def _render_memgraph_status():
-    available = graph_db.is_available()
-    if available:
-        st.markdown(f'<div class="memgraph-badge connected"><span style="color:#4ECDC4; font-weight:700;">Memgraph Connected</span><span style="color:#9EA3B8; margin-left:12px; font-size:12px;">bolt://{config.MEMGRAPH_HOST}:{config.MEMGRAPH_PORT}</span></div>', unsafe_allow_html=True)
-    else:
-        st.markdown('<div class="memgraph-badge disconnected"><span style="color:#E15759; font-weight:700;">Memgraph Not Running</span><span style="color:#9EA3B8; margin-left:12px; font-size:12px;">AML pattern detection requires Memgraph via Docker.</span></div>', unsafe_allow_html=True)
-    return available
-
 
 def _render_tab_aml_patterns():
     """Renders the AML pattern detection tab."""
-    available = _render_memgraph_status()
-    if not available:
-        st.warning("Features in this tab are disabled because Memgraph is disconnected.")
-        # return # Showing limited data or empty UI is fine too
-
     subtabs = st.tabs(["Ring Detection", "Layering Pattern", "Funnel Account", "Shortest Path"])
 
     with subtabs[0]:
@@ -473,7 +455,7 @@ def _render_tab_aml_patterns():
             if start_acc and end_acc:
                 res = find_shortest_path(start_acc, end_acc)
                 if "error" in res: st.error(res["error"])
-                elif not res["path"]: st.info("No path exists between these accounts.")
+                elif not res["path"]: st.info(res.get("notice", "No path exists between these accounts."))
                 else:
                     st.success(f"Path found: {len(res['path'])-1} hops")
                     st.write(res["path"])

@@ -1,7 +1,26 @@
 """Feature 7: Transaction Monitoring Rule Detection Module.
 
-Execution of 5 defined rules and alert generation.
-Basis: AML Practice Vol 5 — Rule-based Monitoring, Suspicious Transaction Indicators.
+Five rules and the alerts they raise. Basis: AML Practice Vol 5 -- Rule-based
+Monitoring, Suspicious Transaction Indicators.
+
+Every rule takes the same filters: a date range and one account, so a question
+about a single account is answered by the rule rather than by scanning the whole
+dataset. Thresholds are set from HOFINET's own value structure, because the
+generic textbook thresholds cannot fire on it:
+
+* night hours are time slots 21, 0 and 3 (21:00-06:00). All 35 transactions
+  labelled "late-night/early-morning bulk" sit in slot 21, and the smallest of
+  them is 5,000,000 KRW, which is the default amount for R001. The previous
+  definition (slots 0 and 3 with at least 10,000,000 KRW) matched 0 of the
+  4.7M transactions, since those slots top out at 5,000,000 KRW.
+* R003 flags the same amount sent repeatedly by one account. HOFINET amounts
+  take 48 values, all multiples of 1,000 -- "amount is a round million" was true
+  for every transaction of 1M KRW or more and said nothing. The default floor,
+  2,000,000 KRW, is the smallest amount that appears on any fraud-labelled row.
+* R004 flags accounts whose transactions concentrate on one receiving
+  institution. Among accounts with at least 10 transactions the 99th percentile
+  of that share is 0.44, so the default of 0.5 (not 0.8, which matched a single
+  account) marks the tail.
 """
 
 import json
@@ -10,11 +29,20 @@ from datetime import datetime, timedelta
 import pandas as pd
 import streamlit as st
 
+import config
 from src.data.db import query
 
 _CACHE_HASH_FUNCS = {
     dict: lambda d: json.dumps(d, sort_keys=True, default=str) if d else "none",
 }
+
+# 21:00-06:00. Slot n covers n:00 to n+3:00.
+NIGHT_TIME_SLOTS = (21, 0, 3)
+NIGHT_MIN_AMOUNT = 5_000_000
+REPEATED_AMOUNT_MIN = 2_000_000
+CONCENTRATION_MIN_RATIO = 0.5
+
+_NIGHT_SQL = ", ".join(str(slot) for slot in NIGHT_TIME_SLOTS)
 
 
 def _safe_int(val, default: int = 0) -> int:
@@ -48,6 +76,31 @@ def _calculate_previous_period(date_from: int, date_to: int) -> tuple[int, int]:
     return _to_yyyymmdd(prev_start), _to_yyyymmdd(prev_end)
 
 
+def default_pattern_change_period() -> tuple[int, int]:
+    """Returns the comparison window R005 uses when no dates are given.
+
+    The last full quarter of the dataset, derived from the reference date rather
+    than from today, so the rule returns the same alerts on every run.
+    """
+    end = _parse_yyyymmdd(config.REFERENCE_DATE)
+    quarter_first_month = (end.month - 1) // 3 * 3 + 1
+    start = end.replace(month=quarter_first_month, day=1)
+    return _to_yyyymmdd(start), _to_yyyymmdd(end)
+
+
+def _filters(date_from, date_to, account_id, account_columns=("sender_acc",)) -> list[str]:
+    """Builds the WHERE conditions every rule shares."""
+    conditions = []
+    if date_from is not None:
+        conditions.append(f"date >= {int(date_from)}")
+    if date_to is not None:
+        conditions.append(f"date <= {int(date_to)}")
+    if account_id is not None:
+        match = " OR ".join(f"{col} = {int(account_id)}" for col in account_columns)
+        conditions.append(f"({match})")
+    return conditions
+
+
 # ------------------------------------------------------------------
 # R001: Late-night bulk transactions
 # ------------------------------------------------------------------
@@ -55,16 +108,14 @@ def _calculate_previous_period(date_from: int, date_to: int) -> tuple[int, int]:
 @st.cache_data(ttl=300, show_spinner=False)
 def detect_nighttime_bulk(date_from: int | None = None,
                           date_to: int | None = None,
-                          min_amount: int = 10_000_000,
+                          min_amount: int = NIGHT_MIN_AMOUNT,
+                          account_id: int | None = None,
                           limit: int = 100) -> pd.DataFrame:
-    """R001: Detects bulk transactions during late-night hours (0, 3)."""
+    """R001: Large transactions in the night slots (21, 0, 3)."""
     min_amount = int(min_amount)
     limit = int(limit)
-    conditions = ["time_slot IN (0, 3)", f"amount >= {min_amount}"]
-    if date_from is not None:
-        conditions.append(f"date >= {int(date_from)}")
-    if date_to is not None:
-        conditions.append(f"date <= {int(date_to)}")
+    conditions = [f"time_slot IN ({_NIGHT_SQL})", f"amount >= {min_amount}"]
+    conditions += _filters(date_from, date_to, account_id, ("sender_acc", "receiver_acc"))
     where = "WHERE " + " AND ".join(conditions)
     return query(f"""
         SELECT date, time_slot, sender_acc, receiver_acc,
@@ -72,7 +123,8 @@ def detect_nighttime_bulk(date_from: int | None = None,
                is_fraud, fraud_type
         FROM hofinet
         {where}
-        ORDER BY amount DESC
+        ORDER BY amount DESC, date, time_slot, sender_acc, receiver_acc,
+                 sender_bank, receiver_bank, is_fraud
         LIMIT {limit}
     """)
 
@@ -85,59 +137,57 @@ def detect_nighttime_bulk(date_from: int | None = None,
 def detect_rapid_fire(date_from: int | None = None,
                       date_to: int | None = None,
                       min_count: int = 10,
+                      account_id: int | None = None,
                       limit: int = 100) -> pd.DataFrame:
     """R002: Detects accounts with min_count+ transactions on the same day."""
     min_count = int(min_count)
     limit = int(limit)
-    conditions = []
-    if date_from is not None:
-        conditions.append(f"date >= {int(date_from)}")
-    if date_to is not None:
-        conditions.append(f"date <= {int(date_to)}")
+    conditions = _filters(date_from, date_to, account_id)
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     return query(f"""
         SELECT sender_acc, date,
-               COUNT(*) AS tx_count,
-               SUM(amount) AS total_amount,
-               SUM(is_fraud) AS fraud_count
+               COUNT(*)::BIGINT AS tx_count,
+               COALESCE(SUM(amount), 0)::BIGINT AS total_amount,
+               COALESCE(SUM(is_fraud), 0)::BIGINT AS fraud_count
         FROM hofinet
         {where}
         GROUP BY sender_acc, date
         HAVING COUNT(*) >= {min_count}
-        ORDER BY tx_count DESC
+        ORDER BY tx_count DESC, total_amount DESC, sender_acc, date
         LIMIT {limit}
     """)
 
 
 # ------------------------------------------------------------------
-# R003: Round amount patterns
+# R003: Repeated identical amounts
 # ------------------------------------------------------------------
 
 @st.cache_data(ttl=300, show_spinner=False)
-def detect_round_amounts(date_from: int | None = None,
-                         date_to: int | None = None,
-                         round_unit: int = 1_000_000,
-                         min_count: int = 3,
-                         limit: int = 100) -> pd.DataFrame:
-    """R003: Detects accounts with min_count+ round-unit transactions."""
-    round_unit = int(round_unit)
+def detect_repeated_amounts(date_from: int | None = None,
+                            date_to: int | None = None,
+                            min_amount: int = REPEATED_AMOUNT_MIN,
+                            min_count: int = 3,
+                            account_id: int | None = None,
+                            limit: int = 100) -> pd.DataFrame:
+    """R003: Accounts that send the same amount min_count+ times."""
+    min_amount = int(min_amount)
     min_count = int(min_count)
     limit = int(limit)
-    conditions = [f"amount % {round_unit} = 0", f"amount >= {round_unit}"]
-    if date_from is not None:
-        conditions.append(f"date >= {int(date_from)}")
-    if date_to is not None:
-        conditions.append(f"date <= {int(date_to)}")
+    conditions = [f"amount >= {min_amount}"]
+    conditions += _filters(date_from, date_to, account_id)
     where = "WHERE " + " AND ".join(conditions)
     return query(f"""
-        SELECT sender_acc, COUNT(*) AS round_tx_count,
-               SUM(amount) AS total_amount,
-               COUNT(DISTINCT amount) AS distinct_amount_count
+        SELECT sender_acc, amount,
+               COUNT(*)::BIGINT AS repeat_count,
+               COALESCE(SUM(amount), 0)::BIGINT AS total_amount,
+               MIN(date) AS first_date,
+               MAX(date) AS last_date,
+               COUNT(DISTINCT receiver_acc)::BIGINT AS receiver_count
         FROM hofinet
         {where}
-        GROUP BY sender_acc
+        GROUP BY sender_acc, amount
         HAVING COUNT(*) >= {min_count}
-        ORDER BY round_tx_count DESC
+        ORDER BY repeat_count DESC, amount DESC, sender_acc
         LIMIT {limit}
     """)
 
@@ -146,40 +196,47 @@ def detect_round_amounts(date_from: int | None = None,
 # R004: Institutional concentration
 # ------------------------------------------------------------------
 
-def detect_institution_concentration(min_ratio: float = 0.8,
+@st.cache_data(ttl=300, show_spinner=False)
+def detect_institution_concentration(min_ratio: float = CONCENTRATION_MIN_RATIO,
                                      min_transactions: int = 10,
+                                     date_from: int | None = None,
+                                     date_to: int | None = None,
+                                     account_id: int | None = None,
                                      limit: int = 100) -> pd.DataFrame:
-    """R004: Detects accounts concentrated in transactions with a specific receiver institution."""
+    """R004: Accounts whose transactions concentrate on one receiving institution."""
     min_transactions = int(min_transactions)
     limit = int(limit)
+    conditions = _filters(date_from, date_to, account_id)
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     return query(f"""
         WITH account_bank AS (
             SELECT sender_acc,
                    receiver_bank,
                    COUNT(*) AS bank_tx_count
             FROM hofinet
+            {where}
             GROUP BY sender_acc, receiver_bank
         ),
-        account_total AS (
-            SELECT sender_acc,
-                   SUM(bank_tx_count) AS total_tx_count,
-                   MAX(bank_tx_count) AS max_bank_tx_count
+        ranked AS (
+            SELECT sender_acc, receiver_bank, bank_tx_count,
+                   SUM(bank_tx_count) OVER (PARTITION BY sender_acc) AS total_tx_count,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY sender_acc
+                       ORDER BY bank_tx_count DESC, receiver_bank
+                   ) AS rn
             FROM account_bank
-            GROUP BY sender_acc
-            HAVING SUM(bank_tx_count) >= {min_transactions}
         )
         SELECT
-            t.sender_acc,
-            t.total_tx_count,
-            t.max_bank_tx_count,
-            ROUND(t.max_bank_tx_count * 1.0 / t.total_tx_count, 4) AS concentration_ratio,
-            b.receiver_bank AS concentration_bank
-        FROM account_total t
-        JOIN account_bank b
-          ON t.sender_acc = b.sender_acc
-         AND t.max_bank_tx_count = b.bank_tx_count
-        WHERE t.max_bank_tx_count * 1.0 / t.total_tx_count >= {float(min_ratio)}
-        ORDER BY concentration_ratio DESC
+            sender_acc,
+            total_tx_count::BIGINT AS total_tx_count,
+            bank_tx_count::BIGINT AS max_bank_tx_count,
+            ROUND(bank_tx_count * 100.0 / total_tx_count, 2) AS concentration_percent,
+            receiver_bank AS concentration_bank
+        FROM ranked
+        WHERE rn = 1
+          AND total_tx_count >= {min_transactions}
+          AND bank_tx_count * 1.0 / total_tx_count >= {float(min_ratio)}
+        ORDER BY concentration_percent DESC, total_tx_count DESC, sender_acc
         LIMIT {limit}
     """)
 
@@ -192,6 +249,7 @@ def detect_institution_concentration(min_ratio: float = 0.8,
 def detect_pattern_change(base_start: int, base_end: int,
                           compare_start: int, compare_end: int,
                           change_threshold: float = 3.0,
+                          account_id: int | None = None,
                           limit: int = 100) -> pd.DataFrame:
     """R005: Detects accounts with a sudden surge in transaction volume compared to a base period."""
     base_start = int(base_start)
@@ -199,11 +257,13 @@ def detect_pattern_change(base_start: int, base_end: int,
     compare_start = int(compare_start)
     compare_end = int(compare_end)
     limit = int(limit)
+    account_filter = f"AND sender_acc = {int(account_id)}" if account_id is not None else ""
     return query(f"""
         WITH base AS (
             SELECT sender_acc, COUNT(*) AS base_count, SUM(amount) AS base_amount
             FROM hofinet
             WHERE date BETWEEN {base_start} AND {base_end}
+            {account_filter}
             GROUP BY sender_acc
             HAVING COUNT(*) >= 5
         ),
@@ -211,21 +271,22 @@ def detect_pattern_change(base_start: int, base_end: int,
             SELECT sender_acc, COUNT(*) AS comp_count, SUM(amount) AS comp_amount
             FROM hofinet
             WHERE date BETWEEN {compare_start} AND {compare_end}
+            {account_filter}
             GROUP BY sender_acc
         )
         SELECT
             b.sender_acc,
-            b.base_count AS base_period_count,
-            c.comp_count AS comp_period_count,
-            ROUND(c.comp_count * 1.0 / b.base_count, 2) AS count_change_ratio,
-            b.base_amount AS base_period_amount,
-            c.comp_amount AS comp_period_amount,
-            ROUND(c.comp_amount * 1.0 / b.base_amount, 2) AS amount_change_ratio
+            b.base_count::BIGINT AS base_period_count,
+            c.comp_count::BIGINT AS comp_period_count,
+            ROUND(c.comp_count * 1.0 / b.base_count, 2) AS count_change_multiple,
+            b.base_amount::BIGINT AS base_period_amount,
+            c.comp_amount::BIGINT AS comp_period_amount,
+            ROUND(c.comp_amount * 1.0 / NULLIF(b.base_amount, 0), 2) AS amount_change_multiple
         FROM base b
         JOIN compare c ON b.sender_acc = c.sender_acc
         WHERE c.comp_count * 1.0 / b.base_count >= {float(change_threshold)}
            OR c.comp_amount * 1.0 / NULLIF(b.base_amount, 0) >= {float(change_threshold)}
-        ORDER BY count_change_ratio DESC
+        ORDER BY count_change_multiple DESC, comp_period_count DESC, b.sender_acc
         LIMIT {limit}
     """)
 
@@ -234,32 +295,63 @@ def detect_pattern_change(base_start: int, base_end: int,
 # Full rule execution
 # ------------------------------------------------------------------
 
+RULE_NAMES = {
+    "R001": "Nighttime Bulk Transactions",
+    "R002": "Same-Day Rapid-Fire Transactions",
+    "R003": "Repeated Identical Amounts",
+    "R004": "Institution Concentration",
+    "R005": "Transaction Pattern Change",
+}
+
+
+def run_rule(rule_id: str,
+             date_from: int | None = None,
+             date_to: int | None = None,
+             account_id: int | None = None,
+             limit: int = 100) -> pd.DataFrame:
+    """Runs one rule with the shared filters and returns its alerts."""
+    if rule_id == "R001":
+        return detect_nighttime_bulk(date_from, date_to, account_id=account_id, limit=limit)
+    if rule_id == "R002":
+        return detect_rapid_fire(date_from, date_to, account_id=account_id, limit=limit)
+    if rule_id == "R003":
+        return detect_repeated_amounts(date_from, date_to, account_id=account_id, limit=limit)
+    if rule_id == "R004":
+        return detect_institution_concentration(
+            date_from=date_from, date_to=date_to, account_id=account_id, limit=limit
+        )
+    if rule_id == "R005":
+        if date_from is None or date_to is None:
+            date_from, date_to = default_pattern_change_period()
+        base_start, base_end = _calculate_previous_period(int(date_from), int(date_to))
+        return detect_pattern_change(
+            base_start=base_start, base_end=base_end,
+            compare_start=int(date_from), compare_end=int(date_to),
+            account_id=account_id, limit=limit,
+        )
+    raise ValueError(f"Unknown rule_id: {rule_id}")
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def run_all_rules(date_from: int | None = None,
-                  date_to: int | None = None) -> dict:
+                  date_to: int | None = None,
+                  account_id: int | None = None,
+                  limit: int = 10) -> dict:
     """Runs all rules and returns results summary."""
-    r001 = detect_nighttime_bulk(date_from, date_to, limit=50)
-    r002 = detect_rapid_fire(date_from, date_to, limit=50)
-    r003 = detect_round_amounts(date_from, date_to, limit=50)
-    r004 = detect_institution_concentration(limit=50)
-    r005_result = pd.DataFrame()
-    if date_from and date_to:
+    limit = int(limit)
+    results = {}
+    for rule_id, rule_name in RULE_NAMES.items():
         try:
-            base_start, base_end = _calculate_previous_period(int(date_from), int(date_to))
-            r005_result = detect_pattern_change(
-                base_start, base_end, int(date_from), int(date_to), limit=50
-            )
+            df = run_rule(rule_id, date_from, date_to, account_id, limit=limit)
         except ValueError:
-            # For invalid date inputs, R005 returns an empty DF while others continue.
-            r005_result = pd.DataFrame()
-
-    return {
-        "R001_Nighttime_Bulk": {"count": len(r001), "top": r001.head(10).to_dict(orient="records")},
-        "R002_Rapid_Fire": {"count": len(r002), "top": r002.head(10).to_dict(orient="records")},
-        "R003_Round_Amount": {"count": len(r003), "top": r003.head(10).to_dict(orient="records")},
-        "R004_Concentrated_Bank": {"count": len(r004), "top": r004.head(10).to_dict(orient="records")},
-        "R005_Pattern_Change": {"count": len(r005_result), "top": r005_result.head(10).to_dict(orient="records")},
-    }
+            # Invalid date input: that rule reports nothing, the others continue.
+            df = pd.DataFrame()
+        results[rule_id] = {
+            "rule_name": rule_name,
+            "count": len(df),
+            "result": df.to_dict(orient="records"),
+        }
+    return results
 
 
 # ------------------------------------------------------------------
@@ -269,41 +361,51 @@ def run_all_rules(date_from: int | None = None,
 @st.cache_data(ttl=300, show_spinner=False)
 def detect_dormant_reactivation(dormant_days: int = 180,
                                  min_reactivation_amount: int = 5_000_000,
+                                 account_id: int | None = None,
                                  limit: int = 100) -> pd.DataFrame:
-    """R006: Detects accounts reactivated after a long dormant period."""
+    """R006: Detects accounts reactivated after a long dormant period.
+
+    Activity is aggregated per day before the gap is measured: with one row per
+    transaction, several transactions on the reactivation day made the reported
+    gap and amount depend on the order rows came back in.
+    """
     dormant_days = int(dormant_days)
     min_reactivation_amount = int(min_reactivation_amount)
     limit = int(limit)
+    account_filter = f"WHERE sender_acc = {int(account_id)}" if account_id is not None else ""
     return query(f"""
-        WITH account_dates AS (
-            SELECT sender_acc,
-                   date,
-                   amount,
-                   LAG(date) OVER (
-                       PARTITION BY sender_acc
-                       ORDER BY date
-                   ) AS prev_date
+        WITH daily AS (
+            SELECT sender_acc, date,
+                   COUNT(*) AS day_tx_count,
+                   SUM(amount) AS day_amount,
+                   MAX(amount) AS day_max_amount
             FROM hofinet
+            {account_filter}
+            GROUP BY sender_acc, date
         ),
         gaps AS (
             SELECT sender_acc,
-                   prev_date AS last_activity_date,
+                   LAG(date) OVER (PARTITION BY sender_acc ORDER BY date) AS last_activity_date,
                    date AS reactivation_date,
-                   amount AS reactivation_amount,
-                   date_diff(
-                       'day',
-                       strptime(CAST(prev_date AS VARCHAR), '%Y%m%d'),
-                       strptime(CAST(date AS VARCHAR), '%Y%m%d')
-                   ) AS dormant_days
-            FROM account_dates
-            WHERE prev_date IS NOT NULL
+                   day_max_amount AS reactivation_amount,
+                   day_tx_count AS reactivation_day_tx_count,
+                   day_amount AS reactivation_day_amount
+            FROM daily
         )
         SELECT sender_acc, last_activity_date, reactivation_date,
-               dormant_days, reactivation_amount
+               date_diff('day',
+                         strptime(CAST(last_activity_date AS VARCHAR), '%Y%m%d'),
+                         strptime(CAST(reactivation_date AS VARCHAR), '%Y%m%d')) AS dormant_days,
+               reactivation_amount::BIGINT AS reactivation_amount,
+               reactivation_day_tx_count::BIGINT AS reactivation_day_tx_count,
+               reactivation_day_amount::BIGINT AS reactivation_day_amount
         FROM gaps
-        WHERE dormant_days >= {dormant_days}
+        WHERE last_activity_date IS NOT NULL
+          AND date_diff('day',
+                        strptime(CAST(last_activity_date AS VARCHAR), '%Y%m%d'),
+                        strptime(CAST(reactivation_date AS VARCHAR), '%Y%m%d')) >= {dormant_days}
           AND reactivation_amount >= {min_reactivation_amount}
-        ORDER BY dormant_days DESC, reactivation_amount DESC
+        ORDER BY dormant_days DESC, reactivation_amount DESC, sender_acc, reactivation_date
         LIMIT {limit}
     """)
 
@@ -327,7 +429,7 @@ def get_monitoring_summary(filters=None) -> dict:
     night_df = query(f"""
         SELECT
             COUNT(*) AS total,
-            SUM(CASE WHEN time_slot IN (0, 3) THEN 1 ELSE 0 END) AS night_cnt
+            SUM(CASE WHEN time_slot IN ({_NIGHT_SQL}) THEN 1 ELSE 0 END) AS night_cnt
         FROM hofinet
         {where}
     """)

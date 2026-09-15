@@ -61,16 +61,16 @@ def detect_smurfing_network(account_id: int | None = None,
     return query(f"""
         SELECT
             {target_col} AS {label},
-            COUNT(DISTINCT {counter_col}) AS counterparty_count,
-            COUNT(*) AS total_tx_count,
-            SUM(amount) AS total_amount,
-            SUM(is_fraud) AS fraud_count,
+            COUNT(DISTINCT {counter_col})::BIGINT AS counterparty_count,
+            COUNT(*)::BIGINT AS total_tx_count,
+            COALESCE(SUM(amount), 0)::BIGINT AS total_amount,
+            COALESCE(SUM(is_fraud), 0)::BIGINT AS fraud_count,
             ROUND(AVG(amount), 0) AS avg_amount
         FROM hofinet
         {where}
         GROUP BY {target_col}
         HAVING COUNT(DISTINCT {counter_col}) >= {min_counterparts}
-        ORDER BY counterparty_count DESC, total_amount DESC
+        ORDER BY counterparty_count DESC, total_amount DESC, {label}
         LIMIT {limit}
     """)
 
@@ -108,17 +108,18 @@ def analyze_cross_institution_flow(date_from: int | None = None,
         SELECT
             sender_bank AS sender_institution,
             receiver_bank AS receiver_institution,
-            COUNT(*) AS tx_count,
-            SUM(is_fraud) AS fraud_count,
-            ROUND(SUM(is_fraud) * 100.0 / COUNT(*), 4) AS fraud_ratio,
-            SUM(amount) AS total_amount,
+            COUNT(*)::BIGINT AS tx_count,
+            COALESCE(SUM(is_fraud), 0)::BIGINT AS fraud_count,
+            ROUND(SUM(is_fraud) * 100.0 / COUNT(*), 4) AS fraud_ratio_percent,
+            COALESCE(SUM(amount), 0)::BIGINT AS total_amount,
             ROUND(AVG(amount), 0) AS avg_amount,
-            COUNT(DISTINCT sender_acc) AS sender_count,
-            COUNT(DISTINCT receiver_acc) AS receiver_count
+            COUNT(DISTINCT sender_acc)::BIGINT AS sender_count,
+            COUNT(DISTINCT receiver_acc)::BIGINT AS receiver_count
         FROM hofinet
         {where}
         GROUP BY sender_bank, receiver_bank
         HAVING COUNT(*) >= {min_transactions}
-        ORDER BY fraud_ratio DESC, tx_count DESC
+        ORDER BY fraud_ratio_percent DESC, tx_count DESC,
+                 sender_institution, receiver_institution
         LIMIT {limit}
     """)

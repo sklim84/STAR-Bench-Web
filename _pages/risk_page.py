@@ -67,8 +67,8 @@ def render():
         if account_id > 0:
             if st.button("Evaluate Risk", key="risk_evaluate_btn"):
                 res = score_account(account_id)
-                if "error" in res:
-                    st.warning(res["error"])
+                if "notice" in res:
+                    st.warning(res["notice"])
                 else:
                     score = res["total_score"]
                     level = res["risk_level"]

@@ -31,10 +31,16 @@ def _safe_int(val, default: int = 0) -> int:
 @st.cache_data(ttl=300, show_spinner=False)
 def get_ctr_candidates(date_from: int | None = None,
                        date_to: int | None = None,
+                       threshold: int = 10_000_000,
                        limit: int = 100) -> pd.DataFrame:
-    """Retrieves CTR-related transactions where amount >= 10,000,000 KRW."""
+    """Retrieves CTR-related transactions where amount >= threshold (default 10M KRW).
+
+    Amounts take only 48 distinct values, so ties on amount are common: every
+    selected column is part of the sort key, which makes the result stable.
+    """
+    threshold = int(threshold)
     limit = int(limit)
-    conditions = ["amount >= 10000000"]
+    conditions = [f"amount >= {threshold}"]
     if date_from is not None:
         conditions.append(f"date >= {int(date_from)}")
     if date_to is not None:
@@ -46,7 +52,8 @@ def get_ctr_candidates(date_from: int | None = None,
                amount, is_fraud, fraud_type
         FROM hofinet
         {where}
-        ORDER BY amount DESC
+        ORDER BY amount DESC, date, sender_acc, receiver_acc, time_slot,
+                 sender_bank, receiver_bank, fund_type, media_type, is_fraud
         LIMIT {limit}
     """)
 
@@ -71,17 +78,17 @@ def detect_structuring(date_from: int | None = None,
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     return query(f"""
         SELECT sender_acc, date,
-               COUNT(*) AS tx_count,
-               SUM(amount) AS total_amount,
-               MAX(amount) AS max_single_amount,
-               MIN(amount) AS min_single_amount
+               COUNT(*)::BIGINT AS tx_count,
+               COALESCE(SUM(amount), 0)::BIGINT AS total_amount,
+               MAX(amount)::BIGINT AS max_single_amount,
+               MIN(amount)::BIGINT AS min_single_amount
         FROM hofinet
         {where}
         GROUP BY sender_acc, date
         HAVING SUM(amount) >= {threshold}
            AND MAX(amount) < {threshold}
            AND COUNT(*) >= 2
-        ORDER BY total_amount DESC
+        ORDER BY total_amount DESC, tx_count DESC, sender_acc, date
         LIMIT {limit}
     """)
 

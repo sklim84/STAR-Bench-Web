@@ -7,7 +7,7 @@ import pandas as pd
 from src.features.monitoring import (
     detect_nighttime_bulk,
     detect_rapid_fire,
-    detect_round_amounts,
+    detect_repeated_amounts,
     detect_institution_concentration,
     detect_pattern_change,
     run_all_rules,
@@ -100,40 +100,17 @@ def render():
 
             st.markdown('<p class="section-header">Detailed Violation Logs</p>', unsafe_allow_html=True)
             t1, t2, t3, t4, t5 = st.tabs([
-                "Night Bulk (R001)", "Rapid Fire (R002)", "Round Amount (R003)",
+                "Night Bulk (R001)", "Rapid Fire (R002)", "Repeated Amounts (R003)",
                 "Concentration (R004)", "Pattern Change (R005)"
             ])
-            
-            with t1:
-                df1 = pd.DataFrame(all_res["R001_Nighttime_Bulk"]["top"])
-                if not df1.empty:
-                    df1.columns = ["Date", "Time", "Sender Acc", "Receiver Acc", "Sender Bank", "Receiver Bank", "Amount", "Is Fraud", "Fraud Type"]
-                    _render_dark_table(df1)
-                else: st.info("No violations found.")
-            with t2:
-                df2 = pd.DataFrame(all_res["R002_Rapid_Fire"]["top"])
-                if not df2.empty:
-                    df2.columns = ["Account ID", "Date", "Tx Count", "Total Amount", "Fraud Count"]
-                    _render_dark_table(df2)
-                else: st.info("No violations found.")
-            with t3:
-                df3 = pd.DataFrame(all_res["R003_Round_Amount"]["top"])
-                if not df3.empty:
-                    df3.columns = ["Account ID", "Round Tx Count", "Total Amount", "Distinct Amount Count"]
-                    _render_dark_table(df3)
-                else: st.info("No violations found.")
-            with t4:
-                df4 = pd.DataFrame(all_res["R004_Concentrated_Bank"]["top"])
-                if not df4.empty:
-                    df4.columns = ["Account ID", "Total Count", "Max Bank Count", "Ratio", "Bank ID"]
-                    _render_dark_table(df4)
-                else: st.info("No violations found.")
-            with t5:
-                df5 = pd.DataFrame(all_res["R005_Pattern_Change"]["top"])
-                if not df5.empty:
-                    df5.columns = ["Account ID", "Base Count", "Comp Count", "Count Ratio", "Base Amount", "Comp Amount", "Amount Ratio"]
-                    _render_dark_table(df5)
-                else: st.info("No violations found.")
+
+            for tab, rule_id in zip((t1, t2, t3, t4, t5), ("R001", "R002", "R003", "R004", "R005")):
+                with tab:
+                    rule_df = pd.DataFrame(all_res[rule_id]["result"])
+                    if rule_df.empty:
+                        st.info("No violations found.")
+                    else:
+                        _render_dark_table(rule_df)
 
     # ------------------------------------------------------------------
     # Tab 1: R001 Nighttime Bulk Transactions
@@ -195,19 +172,19 @@ def render():
     # Tab 3: R003 Round Amount Pattern
     # ------------------------------------------------------------------
     with tabs[3]:
-        st.markdown('<p class="section-header">R003: Round Amount Pattern</p>', unsafe_allow_html=True)
+        st.markdown('<p class="section-header">R003: Repeated Identical Amounts</p>', unsafe_allow_html=True)
         col1, col2 = st.columns(2)
         with col1:
             r3_from = st.number_input("Start Date", value=20240101, key="r3_from")
             r3_to = st.number_input("End Date", value=20241231, key="r3_to")
         with col2:
-            r3_unit = st.number_input("Round Unit (KRW)", value=1_000_000, step=100_000, key="r3_unit")
-            r3_min = st.number_input("Minimum Count", value=3, min_value=2, key="r3_min")
+            r3_amount = st.number_input("Minimum Amount (KRW)", value=2_000_000, step=1_000_000, key="r3_amount")
+            r3_min = st.number_input("Minimum Repeats", value=3, min_value=2, key="r3_min")
 
         if st.button("Run Detection", key="r3_run"):
-            df = detect_round_amounts(
+            df = detect_repeated_amounts(
                 date_from=r3_from, date_to=r3_to,
-                round_unit=r3_unit, min_count=r3_min, limit=100,
+                min_amount=r3_amount, min_count=r3_min, limit=100,
             )
             if df.empty:
                 st.info("No detections found.")
@@ -222,7 +199,7 @@ def render():
         st.markdown('<p class="section-header">R004: Institution Concentration</p>', unsafe_allow_html=True)
         col1, col2 = st.columns(2)
         with col1:
-            r4_ratio = st.slider("Minimum concentration ratio", 0.5, 1.0, 0.8, 0.05, key="r4_ratio")
+            r4_ratio = st.slider("Minimum concentration ratio", 0.3, 1.0, 0.5, 0.05, key="r4_ratio")
         with col2:
             r4_min_tx = st.number_input("Minimum transactions", value=10, min_value=1, key="r4_min")
 
@@ -235,10 +212,10 @@ def render():
             else:
                 st.markdown(f"Detection results: **{len(df):,} cases**")
                 fig = px.bar(
-                    df.head(20), x="sender_acc", y="concentration_ratio",
-                    color_discrete_sequence=[MINT_COLOR], text="concentration_ratio",
+                    df.head(20), x="sender_acc", y="concentration_percent",
+                    color_discrete_sequence=[MINT_COLOR], text="concentration_percent",
                 )
-                fig.update_layout(title="Institution Concentration Ratio")
+                fig.update_layout(title="Institution Concentration (%)")
                 fig.update_xaxes(type="category")
                 _apply_dark(fig)
                 st.plotly_chart(fig, use_container_width=True)
@@ -273,7 +250,7 @@ def render():
                 st.markdown(f"Detection results: **{len(df):,} cases**")
                 fig = px.scatter(
                     df, x="base_period_count", y="comp_period_count",
-                    size="count_change_ratio", color="count_change_ratio",
+                    size="count_change_multiple", color="count_change_multiple",
                     color_continuous_scale=[[0, "#1A1F2E"], [0.5, "#2A6B65"], [1, "#E15759"]],
                     hover_data=["sender_acc"],
                 )

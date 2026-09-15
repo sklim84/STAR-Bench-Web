@@ -1,6 +1,15 @@
 """Feature 3: XGBoost-based Fraud Detection Module.
 
-Trains using Training/Test/Validation splits and predicts fraud probabilities.
+Trains using Training/Test/Validation splits and scores transactions.
+
+What the score is: the model is an XGBoost classifier over six columns
+(time_slot, sender_bank, receiver_bank, fund_type, media_type, amount) trained
+with scale_pos_weight on a stratified split of the same hofinet table the tools
+query, so scores on that table are in-sample. In HOFINET every fraud-labelled
+row has amount >= 2,000,000, and amount carries almost all of the model's gain,
+so the output behaves largely as an amount threshold. It is not calibrated:
+among rows scored above 0.99 about 43% are labelled fraud. The tool layer
+therefore reports it as a risk score, never as a probability of fraud.
 """
 
 import joblib
@@ -25,6 +34,14 @@ from src.features.aml_reference import FRAUD_TYPE_MAP
 FEATURE_COLS = ["time_slot", "sender_bank", "receiver_bank", "fund_type", "media_type", "amount"]
 TARGET_COL = "is_fraud"
 MODEL_PATH = config.MODELS_DIR / "xgb_detector.joblib"
+
+# Deterministic sampling order: a hash of the transaction's own values, with the
+# values themselves as tie-breakers. Every call that samples the table uses it.
+_SAMPLE_ORDER = (
+    "hash(date, time_slot, sender_bank, sender_acc, receiver_bank, receiver_acc, "
+    "fund_type, media_type, amount), "
+    "date, sender_acc, receiver_acc, amount, time_slot"
+)
 
 # HOFINET fraud_type code → English label (single source of truth: HOFINET.MD §4.1).
 # Kept as an alias for backward compatibility with existing imports.
@@ -219,7 +236,7 @@ def evaluate_by_fraud_type(model: object, limit: int = 5000) -> pd.DataFrame:
                fund_type, media_type, amount, is_fraud, fraud_type
         FROM hofinet
         WHERE is_fraud = 1
-        ORDER BY random()
+        ORDER BY {_SAMPLE_ORDER}
         LIMIT {limit}
     """)
 
@@ -283,17 +300,26 @@ def get_probability_distribution(y_test: pd.Series, y_prob, bins: int = 10) -> p
 
 
 def predict_from_db(model: object, limit: int = 1000) -> pd.DataFrame:
-    """Extracts samples from hofinet table and returns prediction results."""
+    """Scores a fixed sample of hofinet rows, highest score first.
+
+    The sample is chosen by hashing each transaction's own values rather than
+    with ORDER BY random(), and rows with equal scores are ordered by those
+    values, so repeating the same call returns the same transactions in the
+    same order.
+    """
     limit = int(limit)
     df = query(f"""
         SELECT date, time_slot, sender_bank, sender_acc,
                receiver_bank, receiver_acc, fund_type, media_type,
                amount, is_fraud, fraud_type, fraud_description
         FROM hofinet
-        ORDER BY random()
+        ORDER BY {_SAMPLE_ORDER}
         LIMIT {limit}
     """)
     X = df[FEATURE_COLS]
     df["prob"] = model.predict_proba(X)[:, 1]
     df["prediction"] = model.predict(X)
-    return df.sort_values("prob", ascending=False)
+    return df.sort_values(
+        ["prob", "date", "sender_acc", "receiver_acc", "amount", "time_slot"],
+        ascending=[False, True, True, True, True, True],
+    ).reset_index(drop=True)
