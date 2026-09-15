@@ -62,21 +62,37 @@ pytest -q                          # 492 passed, 15 skipped, 2 deselected (gold)
 python scripts/gold_calls.py       # gold-call smoke run, see below
 ```
 
-Gold-call smoke run on the **current** benchmark data (2026-09-16, before the
-data rebuild), `ok / empty / error / skipped`:
+Gold-call smoke run on the benchmark data as it stood at 2026-09-16 08:45,
+while WS-D was still rewriting it (the duplicate `*_ex` cases are already gone),
+`ok / empty / error / skipped`:
 
 | Directory | calls | ok | empty | error | skipped |
 |---|---|---|---|---|---|
-| `benchmarks` | 1,205 | 732 | 371 | 24 | 78 |
-| `benchmarks_en` | 1,205 | 774 | 329 | 24 | 78 |
+| `benchmarks` | 1,063 | 682 | 289 | 19 | 73 |
+| `benchmarks_en` | 1,063 | 682 | 289 | 19 | 73 |
 | `benchmarks_multiturn` | 200 | 103 | 59 | 2 | 36 |
 
-Every remaining error is a gold defect, not a tool defect: required arguments
-missing (`detect_smurfing_network` without `direction`, `validate_str_fields`
-without a draft, `get_fraud_type_summary` without a type), `compare_periods`
-gold keyed `period_a_*`, and `get_aml_glossary` asked for Korean terms. The
-empties are the account and bank identifiers that do not exist in HOFINET, plus
-ring/layering, which have no matches in this dataset. The `skipped` column is
-`query_transactions` gold that carries `sql_contains` but no executable SQL;
-those become executable once contract 1 adds
-`expected.reference_calls.query_transactions.sql`.
+Per tool, the calls that do not return data:
+
+| Tool | empty | error | why |
+|---|---|---|---|
+| `get_account_profile` | 52 | 0 | gold account ids are not HOFINET ids |
+| `get_receiving_account_profile` | 53 | 0 | same |
+| `score_account_risk` | 55 | 1 | same; 1 call has no `account_id` |
+| `analyze_network` | 59 | 2 | same; 2 calls have no `account_id` |
+| `detect_aml_patterns` | 60 | 0 | ring and layering have no matches in HOFINET; funnel defaults match nothing |
+| `detect_smurfing_network` | 10 | 5 | 5 calls omit `direction`; 10 use account ids that do not exist |
+| `get_fraud_type_summary` | 0 | 3 | 3 calls omit `fraud_type` |
+| `detect_ctr_candidates` | 0 | 2 | 2 calls omit `mode` |
+| `predict_fraud` | 0 | 2 | 2 calls omit a feature |
+| `validate_str_fields` | 0 | 3 | the single-turn gold carries no draft |
+| `get_aml_glossary` | 0 | 1 (3 in multi-turn) | Korean terms ('구조화', '레이어링') are not in the English glossary |
+| `lookup_fiu_reference_types` | 6 (multi-turn) | 0 | Korean keywords against an English catalog |
+| `get_institution_report` | 4 (multi-turn) | 0 | bank ids outside 101-161 |
+| `query_transactions` | - | - | 73 + 36 calls skipped: `sql_contains` with no executable SQL |
+
+Every error is a gold defect, not a tool defect; every empty is an identifier
+that does not exist in HOFINET or a pattern the dataset does not contain. Both
+disappear as WS-D and WS-E rebuild the cases on real entities and contract 1
+adds `expected.reference_calls.query_transactions.sql`, which the harness
+already reads.
