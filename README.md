@@ -67,9 +67,9 @@ finished STR draft (form sections I–VII) from the accumulated evidence.
 
 ## How it works
 
-- **Dual-store analytics** — DuckDB (in-memory, Parquet-backed) for aggregation and SQL;
-  Memgraph (Cypher) for graph patterns. If Memgraph is not running, the app automatically
-  falls back to DuckDB + NetworkX, so graph features degrade gracefully.
+- **DuckDB-backed analytics** — DuckDB (Parquet-backed) for aggregation and SQL, NetworkX for
+  the graph searches (rings, layering, funnel accounts, shortest paths). Every tool runs on
+  this stack alone; Memgraph is an optional extra for the graph pages of the app.
 - **Conversational agent** — routed through OpenRouter (OpenAI-compatible API, default
   `openai/gpt-4o-mini`, configurable via `OPENROUTER_MODEL`); falls back to direct OpenAI when
   `OPENROUTER_API_KEY` is unset. Native function calling over the full tool suite, up to 5 tool-call rounds.
@@ -79,7 +79,7 @@ finished STR draft (form sections I–VII) from the accumulated evidence.
 |---|---|
 | Frontend | Streamlit (dark theme) + Plotly |
 | Analytics DB | DuckDB (in-memory, Parquet) |
-| Graph DB | Memgraph (optional, Docker) — NetworkX fallback |
+| Graph analysis | DuckDB + NetworkX (Memgraph optional, for the app's graph pages) |
 | AI agent | OpenRouter / OpenAI `gpt-4o-mini` + function calling |
 | ML model | XGBoost (fraud detection) |
 
@@ -119,10 +119,10 @@ docker-compose up -d                                              # start Memgra
 python -c "from src.data.graph_etl import run_etl; print(run_etl())"   # DuckDB -> Memgraph ETL
 ```
 
-Run the tests (not while the app is running — DuckDB file lock):
+Run the tests (the query database is opened read-only, so the app may keep running):
 
 ```bash
-pytest tests/ -v
+pytest -q
 ```
 
 ### Configuration
