@@ -7,18 +7,27 @@
 # which removes memoisation only and leaves results unchanged.
 #
 # To run the app itself, use requirements.txt instead.
+#
+# Versions are pinned so every evaluation host runs the same tool layer; they
+# are the versions the released results were produced with. src/provenance.py
+# records them in each run.
 
-duckdb>=1.1.0
-pyarrow>=18.0.0
-pandas>=2.2.0
-numpy>=1.26.0
-networkx>=3.4.0
-joblib>=1.4.0
-scikit-learn>=1.5.0
-xgboost>=2.1.0
-python-dotenv>=1.0.0
-openai>=1.50.0
+duckdb==1.5.5
+pyarrow==25.0.1
+pandas==2.3.3
+numpy==2.3.5
+scipy==1.18.1
+networkx==3.6.1
+joblib==1.6.0
+scikit-learn==1.9.1
+xgboost==3.4.1
+python-dotenv==1.2.3
+openai==3.14.0
 
-# Optional: only needed for the graph-backed network tools (Memgraph/Bolt).
-# Without it those tools report themselves unavailable instead of failing.
+# Test suite (pytest tests/, including the gold-call smoke harness).
+pytest==9.1.1
+
+# Optional: only needed for the graph pages of the Streamlit app (Memgraph/Bolt).
+# No agent tool requires it: the graph patterns behind detect_aml_patterns and
+# analyze_network run on DuckDB/NetworkX.
 # neo4j>=5.20.0
