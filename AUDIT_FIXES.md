@@ -86,7 +86,7 @@ Per tool, the calls that do not return data:
 | `detect_ctr_candidates` | 0 | 2 | 2 calls omit `mode` |
 | `predict_fraud` | 0 | 2 | 2 calls omit a feature |
 | `validate_str_fields` | 0 | 3 | the single-turn gold carries no draft |
-| `get_aml_glossary` | 0 | 1 (3 in multi-turn) | Korean terms ('구조화', '레이어링') are not in the English glossary |
+| `get_aml_glossary` | 0 | 1 single-turn, 2 multi-turn | Korean terms ('구조화', '레이어링') are not in the English glossary |
 | `lookup_fiu_reference_types` | 6 (multi-turn) | 0 | Korean keywords against an English catalog |
 | `get_institution_report` | 4 (multi-turn) | 0 | bank ids outside 101-161 |
 | `query_transactions` | - | - | 73 + 36 calls skipped: `sql_contains` with no executable SQL |
