@@ -1178,10 +1178,13 @@ _RECOMMENDED_ACTION_MAP = {
 }
 
 # AML pattern name (Korean or English, as models write it) -> Section VI check item
-# Ring and cycle have no Section VI item: the official list has none for circular
-# transfers, and they are named here only so a model that writes them still reaches
-# the Section VII narrative fallback. 대포통장 and 집금 stay as recognition aliases for
-# funnel; the benchmark questions themselves use 깔때기(funnel).
+# Ring and cycle are deliberately absent: the official list has no Section VI item
+# for circular transfers, so a ring claim falls through to the Section VII
+# narrative fallback rather than being reported as "Structured transactions",
+# which belongs to fraud type 3 (분할 거래). 대포통장 and 집금 stay as recognition
+# aliases for funnel, for a model that writes them; the benchmark questions
+# themselves use the bare token `funnel` in both arms, never 깔때기 or 집금
+# (STAR-Bench `_experiments/scripts/data_fixes/TERMINOLOGY.md`).
 _AML_PATTERN_ITEMS = (
     (("layering", "레이어링", "다단계"), "Sudden change in transaction pattern"),
     (("funnel", "mule", "대포통장", "집금"), "Use of someone else's name/account"),

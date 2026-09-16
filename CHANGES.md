@@ -101,4 +101,7 @@ and a gold call that omits them now executes with (5, 5).
 `_AML_PATTERN_ITEMS` no longer maps *ring*/*cycle* to the Section VI item "Structured transactions":
 that item belongs to fraud type 3 (분할 거래), not to circular transfers, and HOFINET's transfer graph is
 acyclic, so a ring claim now falls through to the Section VII narrative fallback. 대포통장 and 집금 stay as
-recognition aliases for *funnel* only; benchmark questions use 깔때기(funnel) per data_fixes/TERMINOLOGY.md.
+recognition aliases for *funnel* only, for a model that writes them. The benchmark questions themselves
+use the bare token `funnel`, in the Korean arm as well as the English one, and never 깔때기 or 집금:
+STAR-Bench `_experiments/scripts/data_fixes/TERMINOLOGY.md` states that convention and
+`p23_terminology_residue` screens both arms for it.
