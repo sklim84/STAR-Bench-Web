@@ -105,8 +105,13 @@ class TestAmlPatterns:
         assert (df["outflow_count"] <= 5).all()
         assert (df["inflow_count"] >= 3).all()
 
-    def test_funnel_default_criteria_match_nothing(self):
-        assert network.detect_funnel_accounts(min_inflow=10, max_outflow=3).empty
+    def test_funnel_defaults_match_on_hofinet(self):
+        df = network.detect_funnel_accounts()
+        assert len(df) == 3
+        assert (df["inflow_count"] >= 5).all() and (df["outflow_count"] <= 5).all()
+
+    def test_no_account_forwards_to_three_or_fewer(self):
+        assert network.detect_funnel_accounts(min_inflow=1, max_outflow=3).empty
 
     def test_funnel_account_filter(self):
         df = network.detect_funnel_accounts(min_inflow=3, max_outflow=5, limit=20)

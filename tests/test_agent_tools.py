@@ -48,6 +48,10 @@ class TestSchema:
         assert "Recommended Analysis Flow" not in SYSTEM_PROMPT
         assert "Always query" not in SYSTEM_PROMPT
 
+    def test_system_prompt_states_the_glossary_scope_rule(self):
+        assert "get_aml_glossary" in SYSTEM_PROMPT
+        assert "without a tool" in SYSTEM_PROMPT
+
 
 class TestArgumentHandling:
     def test_null_string_is_treated_as_absent(self):
@@ -319,8 +323,13 @@ class TestNetworkTools:
         assert all(1 <= row["outflow_count"] <= 5 for row in result["result"])
         assert all(row["inflow_count"] >= 3 for row in result["result"])
 
-    def test_funnel_with_default_criteria_explains_the_empty_result(self):
+    def test_funnel_defaults_match_on_hofinet(self):
         result = call("detect_aml_patterns", pattern_type="funnel")
+        assert result["criteria"] == {"min_inflow": 5, "max_outflow": 5}
+        assert result["count"] > 0
+
+    def test_funnel_below_the_smallest_outflow_explains_the_empty_result(self):
+        result = call("detect_aml_patterns", pattern_type="funnel", max_outflow=3)
         assert result["count"] == 0 and "414" in result["notice"]
 
     def test_shortest_path_between_connected_accounts(self, accounts):

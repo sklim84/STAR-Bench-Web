@@ -316,8 +316,9 @@ def get_extended_network_stats(G: nx.DiGraph) -> dict:
 #   dataset, whatever the parameters;
 # * only 414 of 452,810 accounts appear both as sender and as receiver, so
 #   funnel -- which requires an account to receive from many accounts and send
-#   on to a few -- matches only those accounts, and none at the default
-#   min_inflow 10 / max_outflow 3.
+#   on to a few -- matches only those accounts; the fewest outgoing
+#   counterparties any of them has is 4, which is why the defaults are
+#   min_inflow 5 / max_outflow 5 (3 accounts) rather than 10 / 3 (none).
 # The tools return that as a notice rather than as "Memgraph is not running".
 
 _PATH_SEARCH_MAX_FRONTIER = 200_000
@@ -449,7 +450,7 @@ def detect_layering_patterns(min_layers: int = 3, limit: int = 100,
     return pd.DataFrame(rows[:limit], columns=columns)
 
 
-def detect_funnel_accounts(min_inflow: int = 10, max_outflow: int = 3, limit: int = 100,
+def detect_funnel_accounts(min_inflow: int = 5, max_outflow: int = 5, limit: int = 100,
                            account_id: int | None = None) -> pd.DataFrame:
     """Detects funnel (collect-and-forward) accounts.
 
@@ -457,6 +458,11 @@ def detect_funnel_accounts(min_inflow: int = 10, max_outflow: int = 3, limit: in
     accounts and sends on to between 1 and max_outflow distinct accounts. An
     account with no outgoing transfer is not a funnel: it is a plain receiver,
     which most HOFINET accounts are.
+
+    The defaults are the ones HOFINET can answer: of the 414 accounts that both
+    receive and send, the fewest outgoing counterparties any of them has is 4
+    and the largest inflow among those with 5 or fewer is 5, so (5, 5) matches
+    3 accounts while the textbook (10, 3) matches none.
 
     Returns
     -------

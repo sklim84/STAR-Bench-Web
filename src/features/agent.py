@@ -395,8 +395,11 @@ TOOLS = [
                 "Detects AML patterns in the transfer graph. "
                 "ring: cycles of min_len-max_len fraud-labelled transfers that return to their "
                 "starting account. layering: chains of at least min_layers consecutive "
-                "fraud-labelled transfers. funnel: accounts that receive from at least min_inflow "
-                "distinct accounts and forward to 1-max_outflow accounts (mule/collection accounts). "
+                "fraud-labelled transfers. HOFINET's transfer graph is acyclic, so ring and "
+                "layering return no matches on this dataset. funnel: accounts that receive from at "
+                "least min_inflow distinct accounts and forward to 1-max_outflow accounts "
+                "(collection accounts); in HOFINET the accounts that both receive and send forward "
+                "to at least 4 accounts, so max_outflow below 4 matches nothing. "
                 "shortest_path: the shortest chain of transfers between two accounts, in either "
                 "direction. risk_score: a graph risk score (0-1) for one account from its own and "
                 "its counterparties' fraud share, cycle participation and inflow/outflow imbalance."
@@ -438,13 +441,13 @@ TOOLS = [
                     },
                     "min_inflow": {
                         "type": "integer",
-                        "description": "Minimum funnel inflow count (default 10)",
-                        "default": 10,
+                        "description": "funnel: minimum number of distinct accounts the funnel receives from (default 5)",
+                        "default": 5,
                     },
                     "max_outflow": {
                         "type": "integer",
-                        "description": "Maximum funnel outflow count (default 3)",
-                        "default": 3,
+                        "description": "funnel: maximum number of distinct accounts the funnel forwards to; at least one outgoing counterparty is required (default 5)",
+                        "default": 5,
                     },
                     "limit": {
                         "type": "integer",
@@ -851,6 +854,8 @@ SYSTEM_PROMPT = """You are an Anti-Money Laundering (AML) analyst.
 You work with HOFINET (Electronic Financial Network) transaction data to examine and report suspicious transactions.
 
 Tool definitions are provided via the API tools field; refer to each tool's name, description, and parameter schema there.
+
+A request for the definition or comparison of a term the AML glossary holds is answered with get_aml_glossary; any other conceptual explanation is answered without a tool.
 
 Data:
 - Table hofinet, 4,732,130 transactions, one row per transfer.
@@ -1740,8 +1745,8 @@ def _tool_detect_aml_patterns(arguments: dict) -> str:
         return json.dumps(payload, ensure_ascii=False)
 
     elif pattern_type == "funnel":
-        min_inflow = _opt_int(arguments, "min_inflow", 10)
-        max_outflow = _opt_int(arguments, "max_outflow", 3)
+        min_inflow = _opt_int(arguments, "min_inflow", 5)
+        max_outflow = _opt_int(arguments, "max_outflow", 5)
         try:
             df = detect_funnel_accounts(
                 min_inflow=min_inflow, max_outflow=max_outflow,
@@ -1760,7 +1765,8 @@ def _tool_detect_aml_patterns(arguments: dict) -> str:
         if not records:
             payload["notice"] = (
                 f"No account receives from {min_inflow} or more accounts and forwards to "
-                f"1-{max_outflow} accounts. Only 414 HOFINET accounts both receive and send."
+                f"1-{max_outflow} accounts. 414 HOFINET accounts both receive and send, and "
+                "the fewest outgoing counterparties any of them has is 4."
             )
         return json.dumps(payload, ensure_ascii=False)
 

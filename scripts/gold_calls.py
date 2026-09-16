@@ -65,6 +65,28 @@ def _clean(arguments: dict) -> dict:
     return {k: v for k, v in (arguments or {}).items() if k not in CHECK_ONLY_KEYS}
 
 
+def _required_arguments() -> dict:
+    """Returns {tool: required parameter names} from the platform schema."""
+    from src.features.agent import TOOLS
+
+    return {t["function"]["name"]: t["function"]["parameters"].get("required", [])
+            for t in TOOLS}
+
+
+def _executability(tool: str, arguments: dict) -> tuple[bool, str]:
+    """A gold call with none of the tool's required arguments has nothing to execute.
+
+    That is a chained call whose argument comes from an earlier tool's result
+    ("rank the top 20, then analyse the first account"), not a broken gold
+    entry: a case that supplies some but not all required arguments is executed
+    and reported as an error.
+    """
+    required = _required_arguments().get(tool, [])
+    if required and not any(key in arguments for key in required):
+        return False, "no gold arguments (value comes from an earlier call)"
+    return True, ""
+
+
 def _reference_sql(container: dict, tool: str):
     """Returns the executable gold SQL for a tool, if the case carries one."""
     reference = (container or {}).get("reference_calls") or {}
@@ -85,11 +107,11 @@ def _calls_from_expected(source: str, case_id: str, expected: dict) -> list[Gold
 
     for tool in dict.fromkeys(tools):
         arguments = _clean(checks.get(tool, {}))
-        executable, reason = True, ""
+        executable, reason = _executability(tool, arguments)
         if tool == "query_transactions" and "sql" not in arguments:
             sql = _reference_sql(expected, tool)
             if sql:
-                arguments = {"sql": sql}
+                arguments, executable, reason = {"sql": sql}, True, ""
             else:
                 executable, reason = False, "no executable gold SQL"
         calls.append(GoldCall(source, case_id, tool, arguments,
@@ -111,11 +133,11 @@ def collect_calls(directory: Path) -> list[GoldCall]:
                     for tool_call in turn.get("tool_calls") or []:
                         tool = tool_call.get("name")
                         arguments = _clean(tool_call.get("arguments", {}))
-                        executable, reason = True, ""
+                        executable, reason = _executability(tool, arguments)
                         if tool == "query_transactions" and "sql" not in arguments:
                             sql = _reference_sql(turn, tool) or _reference_sql(tool_call, tool)
                             if sql:
-                                arguments = {"sql": sql}
+                                arguments, executable, reason = {"sql": sql}, True, ""
                             else:
                                 executable, reason = False, "no executable gold SQL"
                         calls.append(GoldCall(path.name, case_id, tool, arguments,

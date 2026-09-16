@@ -46,6 +46,19 @@ lists are identical to `main`.
 | C1-005, R1C-027 (tests) | `109d64f` | The suite is rewritten on the English schema and around `_execute_tool`, with new threading, determinism and gold-call gates. | `pytest -q`: 492 passed, 15 skipped |
 | R1-N5 (response language) | `df8c0cb` | The platform prompt now says "Answer in the language of the user's question" (D13). The other two prompt constants live in the STAR-Bench repository (WS-C). | prompt test |
 
+## Follow-up (WS-D request file, 2026-09-16)
+
+`STAR-Bench/_experiments/dataset_fix_20260915/impl/WS-D_tool_description_requests.md`
+lists two items for this work stream; the other four were already in `df8c0cb`.
+
+| # | Change | How verified |
+|---|---|---|
+| 8 | The system prompt states the D10 scope rule in one line: a term the AML glossary holds is answered with `get_aml_glossary`, any other conceptual explanation without a tool. | `tests/test_agent_tools.py::TestSchema::test_system_prompt_states_the_glossary_scope_rule` |
+| 9 | `detect_aml_patterns` funnel defaults are `min_inflow=5`, `max_outflow=5` (were 10 and 3, which cannot match HOFINET): of the 414 accounts that both receive and send, the fewest outgoing counterparties is 4 and the largest inflow among those with 5 or fewer outgoing counterparties is 5, so (10, 3) matches 0 accounts and (5, 5) matches 3. The parameter descriptions say which side of the funnel they count, and the tool description states that ring and layering return nothing on this dataset and that `max_outflow` below 4 matches nothing. Counts per threshold pair: `_datasets/HOFINET.MD` §7. | `tests/test_agent_tools.py::TestNetworkTools::test_funnel_defaults_match_on_hofinet`, `tests/test_network.py::TestAmlPatterns` |
+
+This is the only schema default that changed; `CHANGES.md` §4 carries it for the
+Korean mirror.
+
 ## Not fixed here
 
 | id | Reason |
@@ -58,41 +71,31 @@ lists are identical to `main`.
 ## Verification
 
 ```
-pytest -q                          # 492 passed, 15 skipped, 2 deselected (gold)
+pytest -q                          # 495 passed, 15 skipped, 2 deselected (gold)
 python scripts/gold_calls.py       # gold-call smoke run, see below
 ```
 
-Gold-call smoke run on the benchmark data as it stood at 2026-09-16 08:45,
-while WS-D was still rewriting it (the duplicate `*_ex` cases are already gone),
+Gold-call smoke run after WS-D's single-turn rebuild (2026-09-16 09:40),
 `ok / empty / error / skipped`:
 
 | Directory | calls | ok | empty | error | skipped |
 |---|---|---|---|---|---|
-| `benchmarks` | 1,063 | 682 | 289 | 19 | 73 |
-| `benchmarks_en` | 1,063 | 682 | 289 | 19 | 73 |
-| `benchmarks_multiturn` | 200 | 103 | 59 | 2 | 36 |
+| `benchmarks` | 1,094 | 1,065 | 28 | 0 | 1 |
+| `benchmarks_en` | 1,094 | 1,065 | 28 | 0 | 1 |
 
-Per tool, the calls that do not return data:
+Every tool returns data for its gold calls. What is left:
 
-| Tool | empty | error | why |
-|---|---|---|---|
-| `get_account_profile` | 52 | 0 | gold account ids are not HOFINET ids |
-| `get_receiving_account_profile` | 53 | 0 | same |
-| `score_account_risk` | 55 | 1 | same; 1 call has no `account_id` |
-| `analyze_network` | 59 | 2 | same; 2 calls have no `account_id` |
-| `detect_aml_patterns` | 60 | 0 | ring and layering have no matches in HOFINET; funnel defaults match nothing |
-| `detect_smurfing_network` | 10 | 5 | 5 calls omit `direction`; 10 use account ids that do not exist |
-| `get_fraud_type_summary` | 0 | 3 | 3 calls omit `fraud_type` |
-| `detect_ctr_candidates` | 0 | 2 | 2 calls omit `mode` |
-| `predict_fraud` | 0 | 2 | 2 calls omit a feature |
-| `validate_str_fields` | 0 | 3 | the single-turn gold carries no draft |
-| `get_aml_glossary` | 0 | 1 single-turn, 2 multi-turn | Korean terms ('구조화', '레이어링') are not in the English glossary |
-| `lookup_fiu_reference_types` | 6 (multi-turn) | 0 | Korean keywords against an English catalog |
-| `get_institution_report` | 4 (multi-turn) | 0 | bank ids outside 101-161 |
-| `query_transactions` | - | - | 73 + 36 calls skipped: `sql_contains` with no executable SQL |
+- `detect_aml_patterns` 28 empty: 17 `ring` and 11 `layering` calls, which have
+  no matches in HOFINET by construction (D06, `_datasets/HOFINET.MD` §7). The 12
+  funnel calls now return accounts, because the defaults were lowered to
+  `min_inflow=5, max_outflow=5`.
+- `analyze_network` 1 skipped: `st_mtool_084` ("rank the top 20, then analyse
+  the first account") has no gold `account_id`, because the value comes from the
+  previous call. The harness treats a gold call that carries none of a tool's
+  required arguments as not executable rather than as an error; a call that
+  carries some but not all of them is executed and reported as an error.
+- `query_transactions` is no longer skipped: all 75 gold calls execute from
+  `expected.reference_calls.query_transactions.sql`.
 
-Every error is a gold defect, not a tool defect; every empty is an identifier
-that does not exist in HOFINET or a pattern the dataset does not contain. Both
-disappear as WS-D and WS-E rebuild the cases on real entities and contract 1
-adds `expected.reference_calls.query_transactions.sql`, which the harness
-already reads.
+The earlier run of this harness, before the data rebuild, is in the commit
+history (`7b539d0`).

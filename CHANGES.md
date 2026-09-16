@@ -1,11 +1,12 @@
 # Interface changes for the parallel work streams
 
-Nothing in `agent.TOOLS` changed structurally: the 23 tool names, every
-parameter name, type, enum, default and `required` list are identical to `main`
-(checked by comparing the parsed schema). 20 tool descriptions and several
-parameter descriptions were rewritten, and the tool *results* changed where the
+The 23 tool names and every parameter name, type, enum and `required` list are
+identical to `main` (checked by comparing the parsed schema). One pair of
+defaults changed -- `detect_aml_patterns.min_inflow` 10 -> 5 and
+`max_outflow` 3 -> 5, see section 4 -- and 20 tool descriptions and several
+parameter descriptions were rewritten. The tool *results* changed where the
 audit required it. The Korean schema mirror (`tools_kr.py`), the evaluator and
-the data rebuild need the two lists below.
+the data rebuild need the lists below.
 
 ## 1. Descriptions to mirror in the Korean schema
 
@@ -21,7 +22,7 @@ Same structure, new wording. The substantive points:
 | `get_statistics` | account counts, bank counts and total amount are advertised |
 | `get_account_profile` | counts both directions (sender_acc or receiver_acc) |
 | `get_institution_report` | outbound and inbound side, top banks both ways, quarterly trend |
-| `detect_aml_patterns` | ring/layering/funnel/shortest_path/risk_score defined in terms of transfers, no Memgraph |
+| `detect_aml_patterns` | ring/layering/funnel/shortest_path/risk_score defined in terms of transfers, no Memgraph; it states that HOFINET's graph is acyclic (ring and layering return nothing) and that no account there forwards to fewer than 4 counterparties; `min_inflow` and `max_outflow` say which side of the funnel they count |
 | `detect_ctr_candidates` | `threshold` applies to both modes |
 | `score_account_risk` | 5 components incl. label-derived `fraud_history`; both directions |
 | `detect_monitoring_alerts` | R001 night slots 21/0/3 and 5,000,000 KRW; R002 10 same-day; R003 repeated identical amounts (>= 2,000,000, 3 times) — the KR label must be "동일 금액 반복", not "정액" or "라운드 금액"; R004 half the transactions to one receiving institution; R005 default window; `date_from`/`date_to`/`account_id` apply to every rule |
@@ -33,6 +34,7 @@ Same structure, new wording. The substantive points:
 | `lookup_fiu_reference_types` | English catalog, English keywords that match (structuring, cash, non-face-to-face, virtual asset, dormancy, gambling, balance certificate), empty keyword lists everything |
 | `validate_str_fields` | the required sections and fields, by name |
 | `get_aml_glossary` | the 13 English terms, no Korean entries |
+| system prompt | adds one line of scope: a term the glossary holds is answered with `get_aml_glossary`, any other conceptual explanation without a tool (D10, WS-D request 8) |
 
 ## 2. Result keys that changed
 
@@ -81,3 +83,15 @@ returned as integers.
   `network.summarize_account_network(account_id, hops)`;
   `network.get_account_ego_network(account_id, hops, edge_limit)`;
   `detector.predict_from_db` writes `prob` and samples deterministically.
+
+## 4. The one schema default that changed
+
+`detect_aml_patterns` funnel defaults: `min_inflow` 10 -> 5, `max_outflow` 3 -> 5.
+
+Requested by WS-D (request 9): 12 single-turn funnel gold calls returned nothing
+because the old defaults cannot match HOFINET. Of the 414 accounts that both
+receive and send, the fewest outgoing counterparties any of them has is 4, and
+the largest inflow among those with 5 or fewer outgoing counterparties is 5, so
+(10, 3) matches 0 accounts and (5, 5) matches 3. Measured counts are in
+`_datasets/HOFINET.MD` §7. The Korean schema must carry the same two defaults,
+and a gold call that omits them now executes with (5, 5).
