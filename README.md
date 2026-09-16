@@ -140,13 +140,20 @@ Copy `.env.example` to `.env` and set what you need:
 ## Data & governance
 
 The platform runs on **HOFINET**, a de-identified synthetic dataset of Korean interbank
-transfers (~4.73M transactions, 2021 Q3 – 2024 Q4) with labeled anomaly types. All account
-and institution identifiers are replaced with serial numbers and timestamps are quantized.
+transfers (4,732,130 transactions, 2021-09-01 – 2024-12-31) with labeled anomaly types. All
+account and institution identifiers are serial numbers; dates are daily, times are 3-hour
+slots and amounts take 48 distinct values.
 
-The **raw dataset is not included in this repository** for data-governance reasons (only the
-schema in `_datasets/HOFINET.MD` is shipped). Place `_datasets/HOFINET.parquet` (or `.duckdb`)
-locally, or generate it from the source CSV with `python -m src.data.loader`. When the dataset
-or trained model is absent, data-dependent features are skipped rather than failing.
+**What is in this repository.** `_datasets/HOFINET.parquet` (45 MB, ZSTD, English column
+names) and the trained detector `_models/xgb_detector.joblib` are tracked here, so the tools
+run without any prior setup. `_datasets/HOFINET.MD` documents the released schema, the code
+tables and the data properties the tools depend on.
+
+**What is not.** The pre-release CSV (`HOFINET.csv`, 313 MB, Korean column names) is not
+distributed; `python -m src.data.loader` regenerates the parquet from it if you have it.
+`_datasets/HOFINET.duckdb` is a read-only query copy built from the parquet on first use, and
+`src/data/db.py` refuses a DuckDB file built from a different parquet. When the dataset or the
+model is absent, data-dependent features are skipped rather than failing.
 
 ---
 
