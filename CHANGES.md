@@ -95,3 +95,10 @@ the largest inflow among those with 5 or fewer outgoing counterparties is 5, so
 (10, 3) matches 0 accounts and (5, 5) matches 3. Measured counts are in
 `_datasets/HOFINET.MD` §7. The Korean schema must carry the same two defaults,
 and a gold call that omits them now executes with (5, 5).
+
+## 5. Section VI pattern mapping (2026-09-16)
+
+`_AML_PATTERN_ITEMS` no longer maps *ring*/*cycle* to the Section VI item "Structured transactions":
+that item belongs to fraud type 3 (분할 거래), not to circular transfers, and HOFINET's transfer graph is
+acyclic, so a ring claim now falls through to the Section VII narrative fallback. 대포통장 and 집금 stay as
+recognition aliases for *funnel* only; benchmark questions use 깔때기(funnel) per data_fixes/TERMINOLOGY.md.
