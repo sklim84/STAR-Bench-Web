@@ -7,7 +7,7 @@ graphs to ML-based fraud detection and a conversational agent that drafts Suspic
 Transaction Reports (STRs).
 
 This platform is also the **reference application from which the function-calling tool suite
-of the [STAR-Bench](https://github.com/sklim84/STAR-Bench) benchmark was derived**.
+of the STAR-Bench benchmark was derived**.
 
 ---
 
@@ -159,5 +159,5 @@ model is absent, data-dependent features are skipped rather than failing.
 
 ## Related
 
-- **[STAR-Bench](https://github.com/sklim84/STAR-Bench)** — the AML agent function-calling
+- **STAR-Bench** — the AML agent function-calling
   benchmark whose tool suite is derived from this platform.

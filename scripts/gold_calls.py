@@ -3,7 +3,7 @@
 The benchmark's gold answers name a tool and the arguments a correct call
 carries. This runs each of them against the platform and reports, per tool, how
 many calls return data, how many return an empty result, and how many fail.
-The round-2 audit ran exactly this check and found that 42.8% of the well-formed
+This check finds that 42.8% of the well-formed
 gold calls returned nothing usable, so it belongs in the pre-flight suite.
 
 The benchmark files are read at run time -- they are being rewritten by another

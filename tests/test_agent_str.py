@@ -1,6 +1,6 @@
 """generate_str and validate_str_fields.
 
-The audit found that a third of the recorded generate_str executions crashed on
+Recorded runs showed that a third of the recorded generate_str executions crashed on
 transactions serialised as a JSON string, that Korean enum values fell through
 to the "Other" branch, and that no draft a model could build ever validated.
 """

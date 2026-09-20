@@ -2,7 +2,7 @@
 
 Every test goes through `_execute_tool`, the entry point the benchmark runners
 use, and reads the JSON string it returns. The cases cover the defects the
-round-2 audit recorded: crashes on empty aggregates, arguments serialised as
+recorded runs showed: crashes on empty aggregates, arguments serialised as
 strings, ignored parameters, and outputs that contradicted their description.
 """
 

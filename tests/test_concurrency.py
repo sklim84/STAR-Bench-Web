@@ -2,7 +2,7 @@
 
 The benchmark runners execute tools inside a ThreadPoolExecutor (BENCH_CONCURRENCY),
 and with one shared DuckDB connection a call could receive another call's rows
-or fail outright (L3-003).
+or fail outright.
 """
 
 from concurrent.futures import ThreadPoolExecutor

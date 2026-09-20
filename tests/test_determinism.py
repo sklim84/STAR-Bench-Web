@@ -2,7 +2,7 @@
 
 Identical calls used to differ between runs: ORDER BY ties over 48 distinct
 amounts, ORDER BY random() sampling and today's date in the STR report made
-repeated calls, and therefore whole benchmark runs, irreproducible (L3-016).
+repeated calls, and therefore whole benchmark runs, irreproducible.
 """
 
 import pytest

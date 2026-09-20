@@ -4,7 +4,7 @@ Calculates a 0-100 risk score from 5 behavioural indicators.
 Basis: AML Practice Vol 2 -- Risk Assessment Framework (Inherent Risk -
 Internal Controls = Residual Risk).
 
-Definitions, after the round-2 audit:
+Definitions:
 
 * the account's transactions are those it sends *or* receives, so accounts that
   only appear as receiver_acc are scored instead of rejected;

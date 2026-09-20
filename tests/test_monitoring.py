@@ -1,4 +1,4 @@
-"""src/features/monitoring.py: the five rules, recalibrated to HOFINET (D18)."""
+"""src/features/monitoring.py: the five rules, recalibrated to HOFINET ()."""
 
 import pytest
 

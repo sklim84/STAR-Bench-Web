@@ -1,7 +1,7 @@
 """src/data/db.py: connection guards, per-call cursors, rebuild.
 
 The guards matter because the May benchmark runs queried a DuckDB file built
-from the pre-translation Korean-column data without noticing (L5-001, C1-001).
+from the pre-translation Korean-column data without noticing.
 """
 
 import threading
@@ -81,7 +81,7 @@ class TestQuery:
 
 
 class TestCursorIsolation:
-    """Concurrent queries must not read each other's results (L3-003)."""
+    """Concurrent queries must not read each other's results."""
 
     def test_threads_get_their_own_results(self):
         queries = [
