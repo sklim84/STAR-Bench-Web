@@ -1094,7 +1094,7 @@ def _validate_predict_fraud_args(arguments: dict) -> tuple[dict, list[str]]:
 # ---------------------------------------------------------------------------
 
 # Unified mappings sourced from src/features/aml_reference.py
-# (HOFINET.MD §4.1, §6.2, §6.3 ground truth). Aliased to preserve the
+# (DATASET.md §4.1, §6.2, §6.3 ground truth). Aliased to preserve the
 # private-style names used throughout this module.
 from src.features.aml_reference import (
     FRAUD_TYPE_MAP as _FRAUD_TYPE_MAP,
@@ -1102,7 +1102,7 @@ from src.features.aml_reference import (
     FUND_TYPE_MAP as _FUND_TYPE_MAP,
 )
 
-# STR Section VI suspicion classification (FIU form; HOFINET.MD §4.2).
+# STR Section VI suspicion classification (FIU form; DATASET.md §4.2).
 # The generate_str fraud_type enum is §VI-4 (codes 15-30) plus §VI-5 code 31.
 _VI_CATEGORY_CODES = {
     "갑작스러운 거래패턴의 변화": 15,
@@ -1124,7 +1124,7 @@ _VI_CATEGORY_CODES = {
     "기타(자유기술)": 31,
 }
 
-# HOFINET fraud_type -> §VI category (HOFINET.MD §4.2). Codes 2 and 7 have no
+# HOFINET fraud_type -> §VI category (DATASET.md §4.2). Codes 2 and 7 have no
 # §VI-4 counterpart and map to the form's catch-all item.
 _HOFINET_TO_VI_CATEGORY = {
     1: "갑작스러운 거래패턴의 변화",

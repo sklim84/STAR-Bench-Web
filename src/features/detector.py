@@ -43,7 +43,7 @@ _SAMPLE_ORDER = (
     "date, sender_acc, receiver_acc, amount, time_slot"
 )
 
-# HOFINET fraud_type code → English label (single source of truth: HOFINET.MD §4.1).
+# HOFINET fraud_type code → English label (single source of truth: DATASET.md §4.1).
 # Kept as an alias for backward compatibility with existing imports.
 FRAUD_TYPE_LABELS = FRAUD_TYPE_MAP
 

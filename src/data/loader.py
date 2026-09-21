@@ -68,7 +68,7 @@ def csv_to_parquet(csv_path=None, parquet_path=None, force=False):
         str(csv_path),
         convert_options=CONVERT_OPTIONS,
     )
-    # Rename original Korean columns to English schema (HOFINET.csv order)
+    # Rename original Korean columns to English schema (transactions.csv order)
     table = table.rename_columns([
         "date", "time_slot", "sender_bank", "sender_acc", "receiver_bank",
         "receiver_acc", "fund_type", "media_type", "amount", "is_fraud",

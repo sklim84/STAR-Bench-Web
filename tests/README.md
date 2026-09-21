@@ -26,7 +26,7 @@ pytest -q tests/test_db.py      # one file
 HOFINET_DUCKDB_PATH=/tmp/t.duckdb pytest -q   # build the test database elsewhere
 ```
 
-Every database-backed test skips when `_datasets/HOFINET.parquet` is absent, so
+Every database-backed test skips when `_datasets/transactions.parquet` is absent, so
 a fresh clone of the public repository still runs.
 
 ## Gold-call smoke harness

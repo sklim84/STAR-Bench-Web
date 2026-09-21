@@ -25,7 +25,7 @@ def database():
 
     if not config.PARQUET_PATH.exists():
         pytest.skip(
-            f"HOFINET.parquet not found at {config.PARQUET_PATH} — "
+            f"transactions.parquet not found at {config.PARQUET_PATH} — "
             "place the parquet locally to enable the DB-backed tests.",
             allow_module_level=True,
         )

@@ -109,7 +109,7 @@ pip install -r requirements-tools.txt
 It omits Streamlit, Plotly and the menu widget. `src/__init__.py` registers a
 stand-in for Streamlit's caching decorators when Streamlit is absent, which
 removes memoisation only: the decorated helpers are pure functions of their
-arguments, so results are unchanged. The released `_datasets/HOFINET.parquet`
+arguments, so results are unchanged. The released `_datasets/transactions.parquet`
 and `_models/xgb_detector.joblib` mean the tools run without any prior setup.
 
 Optional — graph features via Memgraph:
@@ -144,14 +144,14 @@ transfers (4,732,130 transactions, 2021-09-01 – 2024-12-31) with labeled anoma
 account and institution identifiers are serial numbers; dates are daily, times are 3-hour
 slots and amounts take 48 distinct values.
 
-**What is in this repository.** `_datasets/HOFINET.parquet` (45 MB, ZSTD, English column
+**What is in this repository.** `_datasets/transactions.parquet` (45 MB, ZSTD, English column
 names) and the trained detector `_models/xgb_detector.joblib` are tracked here, so the tools
-run without any prior setup. `_datasets/HOFINET.MD` documents the released schema, the code
+run without any prior setup. `_datasets/DATASET.md` documents the released schema, the code
 tables and the data properties the tools depend on.
 
-**What is not.** The pre-release CSV (`HOFINET.csv`, 313 MB, Korean column names) is not
+**What is not.** The pre-release CSV (`transactions.csv`, 313 MB, Korean column names) is not
 distributed; `python -m src.data.loader` regenerates the parquet from it if you have it.
-`_datasets/HOFINET.duckdb` is a read-only query copy built from the parquet on first use, and
+`_datasets/transactions.duckdb` is a read-only query copy built from the parquet on first use, and
 `src/data/db.py` refuses a DuckDB file built from a different parquet. When the dataset or the
 model is absent, data-dependent features are skipped rather than failing.
 

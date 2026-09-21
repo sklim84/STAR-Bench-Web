@@ -155,7 +155,7 @@ _STR_PLACEHOLDERS = {"unknown", "n/a", "none", "-"}
 # ---------------------------------------------------------------------------
 # HOFINET Transaction Data Mappings (Codes -> English Labels)
 #
-# Source of truth: _datasets/HOFINET.MD §4.1, §6.2, §6.3.
+# Source of truth: _datasets/DATASET.md §4.1, §6.2, §6.3.
 # Labels are direct English translations of the HOFINET original Korean
 # definitions. Prior to 2026-05-28 these dictionaries held unrelated AML
 # categories ("Money Laundering"/"ATM/CD"/...) which did not correspond to

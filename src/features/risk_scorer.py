@@ -204,7 +204,7 @@ def score_account(account_id: int) -> dict:
         "weights": dict(_WEIGHTS),
         "component_note": (
             "Components are 0-1 sub-scores. fraud_history is the share of this "
-            "account's transactions labelled as fraud in HOFINET."
+            "account's transactions labelled as fraud in the transaction table."
         ),
     }
 

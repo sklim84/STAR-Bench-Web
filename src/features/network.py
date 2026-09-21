@@ -754,7 +754,7 @@ def compute_risk_score(account_id: int) -> dict:
         },
         "component_note": (
             "fraud_ratio and neighbor_fraud_ratio are shares of transactions "
-            "labelled as fraud in HOFINET."
+            "labelled as fraud in the transaction table."
         ),
     }
 

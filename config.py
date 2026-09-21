@@ -12,11 +12,11 @@ DOCS_DIR = BASE_DIR / "_docs"
 
 # Data files. The DuckDB path is overridable so a test or a batch job can build
 # its own copy without touching the one the app and the benchmark runs share.
-CSV_PATH = DATASETS_DIR / "HOFINET.csv"
-PARQUET_PATH = Path(os.getenv("HOFINET_PARQUET_PATH", DATASETS_DIR / "HOFINET.parquet"))
-DUCKDB_PATH = Path(os.getenv("HOFINET_DUCKDB_PATH", DATASETS_DIR / "HOFINET.duckdb"))
+CSV_PATH = DATASETS_DIR / "transactions.csv"
+PARQUET_PATH = Path(os.getenv("HOFINET_PARQUET_PATH", DATASETS_DIR / "transactions.parquet"))
+DUCKDB_PATH = Path(os.getenv("HOFINET_DUCKDB_PATH", DATASETS_DIR / "transactions.duckdb"))
 
-# Last transaction date in HOFINET. Tools that need "now" (report dates, default
+# Last transaction date in the transaction table. Tools that need "now" (report dates, default
 # monitoring windows) use this instead of today's date, so their output does not
 # depend on when they run.
 REFERENCE_DATE = 20241231

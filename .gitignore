@@ -27,11 +27,11 @@ Thumbs.db
 # HOFINET data governance — 두 층을 구분한다.
 #
 # 공개: HOFINET은 합성(synthetic) 거래 환경이고 논문이 실행 가능한 평가 환경으로
-#       릴리스하는 대상이다 → _datasets/HOFINET.parquet 을 추적한다.
+#       릴리스하는 대상이다 → _datasets/transactions.parquet 을 추적한다.
 # 비공개: 그 합성의 원천이 된 실거래 레코드와 원천 분할본, 그리고 로컬 빌드 산출물.
 _datasets/*.csv
 _datasets/*.parquet
-!_datasets/HOFINET.parquet
+!_datasets/transactions.parquet
 _datasets/*.duckdb
 _datasets/*.duckdb.wal
 _datasets/original/

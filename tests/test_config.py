@@ -46,20 +46,20 @@ class TestPathConstants:
         assert config.DOCS_DIR.is_dir()
 
     def test_csv_path_points_to_correct_file(self):
-        """CSV_PATH가 HOFINET.csv를 가리키는지 확인."""
-        assert config.CSV_PATH.name == "HOFINET.csv"
+        """CSV_PATH가 transactions.csv를 가리키는지 확인."""
+        assert config.CSV_PATH.name == "transactions.csv"
         assert config.CSV_PATH.parent == config.DATASETS_DIR
 
     def test_parquet_path_points_to_correct_file(self):
-        """PARQUET_PATH가 HOFINET.parquet를 가리키는지 확인."""
-        assert config.PARQUET_PATH.name == "HOFINET.parquet"
+        """PARQUET_PATH가 transactions.parquet를 가리키는지 확인."""
+        assert config.PARQUET_PATH.name == "transactions.parquet"
         assert config.PARQUET_PATH.parent == config.DATASETS_DIR
 
     def test_duckdb_path_points_to_a_duckdb_file(self):
         """DUCKDB_PATH가 DuckDB 파일을 가리키는지 확인 (환경변수로 재지정 가능)."""
         assert config.DUCKDB_PATH.suffix == ".duckdb"
         if "HOFINET_DUCKDB_PATH" not in os.environ:
-            assert config.DUCKDB_PATH.name == "HOFINET.duckdb"
+            assert config.DUCKDB_PATH.name == "transactions.duckdb"
             assert config.DUCKDB_PATH.parent == config.DATASETS_DIR
 
     def test_reference_date_is_the_last_transaction_date(self):
@@ -77,22 +77,22 @@ class TestPathConstants:
 class TestDataFiles:
     """데이터 파일 존재 확인."""
 
-    @pytest.mark.skipif(not _HAS_CSV, reason="HOFINET.csv 비공개 (로컬 재생성)")
+    @pytest.mark.skipif(not _HAS_CSV, reason="transactions.csv 비공개 (로컬 재생성)")
     def test_csv_file_exists(self):
-        """HOFINET.csv 파일이 존재하는지 확인."""
-        assert config.CSV_PATH.exists(), "HOFINET.csv 파일이 없습니다"
+        """transactions.csv 파일이 존재하는지 확인."""
+        assert config.CSV_PATH.exists(), "transactions.csv 파일이 없습니다"
 
-    @pytest.mark.skipif(not _HAS_PARQUET, reason="HOFINET.parquet 비공개 (로컬 재생성)")
+    @pytest.mark.skipif(not _HAS_PARQUET, reason="transactions.parquet 비공개 (로컬 재생성)")
     def test_parquet_file_exists(self):
-        """HOFINET.parquet 파일이 존재하는지 확인."""
-        assert config.PARQUET_PATH.exists(), "HOFINET.parquet 파일이 없습니다"
+        """transactions.parquet 파일이 존재하는지 확인."""
+        assert config.PARQUET_PATH.exists(), "transactions.parquet 파일이 없습니다"
 
-    @pytest.mark.skipif(not _HAS_CSV, reason="HOFINET.csv 비공개 (로컬 재생성)")
+    @pytest.mark.skipif(not _HAS_CSV, reason="transactions.csv 비공개 (로컬 재생성)")
     def test_csv_file_not_empty(self):
         """CSV 파일이 비어있지 않은지 확인."""
         assert config.CSV_PATH.stat().st_size > 0
 
-    @pytest.mark.skipif(not _HAS_PARQUET, reason="HOFINET.parquet 비공개 (로컬 재생성)")
+    @pytest.mark.skipif(not _HAS_PARQUET, reason="transactions.parquet 비공개 (로컬 재생성)")
     def test_parquet_file_not_empty(self):
         """Parquet 파일이 비어있지 않은지 확인."""
         assert config.PARQUET_PATH.stat().st_size > 0
